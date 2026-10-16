@@ -20,6 +20,7 @@ SHADOW="${AGS_SHADOW:-/run/shadow}"
 DROPBEAR="${AGS_DROPBEAR:-dropbear}"
 MKPASSWD="${AGS_MKPASSWD:-mkpasswd}"
 KILLALL="${AGS_KILLALL:-killall}"
+PIDOF="${AGS_PIDOF:-pidof}"
 IP="${AGS_IP:-ip}"
 TUN="${AGS_TUN:-/dev/net/tun}"
 WG_RUN="${AGS_WG_RUN:-/var/run/wireguard}"
@@ -52,6 +53,8 @@ wait_for() {
 
 ssh_on() {
 	alive "$DROPBEAR_PID" && return 0
+	# BaseOS's own, which may not have written its pidfile yet.
+	$PIDOF dropbear > /dev/null 2>&1 && return 0
 	# As BaseOS starts it at boot. Its output goes to a log, so slot is not left waiting on a
 	# pipe the daemon holds open.
 	$DROPBEAR -r "$DATA/dropbear/dropbear_rsa_host_key" \

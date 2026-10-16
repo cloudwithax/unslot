@@ -182,7 +182,9 @@ fn work(
                 }
             }
         }
-        if changed(|w| w.ssh) {
+        // BaseOS starts its own SSH server at boot, so the first wish only ever turns it off;
+        // starting another then would race BaseOS's for the port.
+        if changed(|w| w.ssh) && (was.is_some() || !want.ssh) {
             if let Err(e) = services.ssh(want.ssh) {
                 errors.push(format!("SSH: {e}"));
             }
@@ -622,6 +624,51 @@ mod tests {
                 return view;
             }
             std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Says which services were started or stopped.
+    struct Recorder(Arc<Mutex<Vec<String>>>);
+
+    impl ServicesBackend for Recorder {
+        fn ssh(&mut self, on: bool) -> Result<(), String> {
+            self.0.lock().unwrap().push(format!("ssh {on}"));
+            Ok(())
+        }
+        fn ssh_started(&mut self) -> bool {
+            false
+        }
+        fn password(&mut self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn samba(&mut self, _: Option<&str>) -> Result<(), String> {
+            Ok(())
+        }
+        fn tailscale(&mut self, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn tailscale_cli(&mut self, _: &[&str]) -> Result<String, String> {
+            Err("off".into())
+        }
+        fn vpn_up(&mut self, _: &Tunnel) -> Result<(), String> {
+            Ok(())
+        }
+        fn vpn_down(&mut self) {}
+        fn vpn_keep(&mut self, _: &Tunnel) {}
+    }
+
+    #[test]
+    fn at_boot_ssh_is_left_to_baseos_unless_it_is_wanted_off() {
+        for (on, want) in [(true, vec![]), (false, vec!["ssh false"])] {
+            let d = tempfile::tempdir().unwrap();
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let s = Services::spawn_polling(Box::new(Recorder(calls.clone())), d.path(), FAST);
+            s.want(Wanted {
+                ssh: on,
+                ..Wanted::default()
+            });
+            std::thread::sleep(Duration::from_millis(200));
+            assert_eq!(*calls.lock().unwrap(), want, "ssh {on} at boot");
         }
     }
 

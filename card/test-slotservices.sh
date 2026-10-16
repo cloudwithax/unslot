@@ -33,6 +33,8 @@ reset() {
 	make_fake "$TMP/bin/dropbear" "$TMP/dropbear.log" "sleep 30 & echo \$! > \"$TMP/run/dropbear.pid\""
 	make_fake "$TMP/bin/mkpasswd" "$TMP/mkpasswd.log" 'printf "\$6\$salt\$%s" "$(cat)"'
 	make_fake "$TMP/bin/killall" "$TMP/killall.log"
+	# BaseOS's dropbear, when FAKE_BASEOS_SSH says it is up.
+	make_fake "$TMP/bin/pidof" "$TMP/pidof.log" '[ "${FAKE_BASEOS_SSH:-}" = yes ] && echo 4242 && exit 0' 'exit 1'
 	make_fake "$TMP/bin/ip" "$TMP/ip.log"
 	make_fake "$TMP/svc/samba/bin/smbpasswd" "$TMP/smbpasswd.log" "cat > \"$TMP/smbpasswd.in\""
 	make_fake "$TMP/svc/samba/bin/smbd" "$TMP/smbd.log"
@@ -48,7 +50,7 @@ run() {
 	PATH="$TMP/bin:$PATH" \
 		AGS_SERVICES="$TMP/svc" AGS_RUN="$TMP/run" AGS_DATA="$TMP/data" \
 		AGS_SHADOW="$TMP/run/shadow" AGS_DROPBEAR="$TMP/bin/dropbear" \
-		AGS_MKPASSWD="$TMP/bin/mkpasswd" AGS_KILLALL="$TMP/bin/killall" AGS_IP="$TMP/bin/ip" \
+		AGS_MKPASSWD="$TMP/bin/mkpasswd" AGS_KILLALL="$TMP/bin/killall" AGS_PIDOF="$TMP/bin/pidof" AGS_IP="$TMP/bin/ip" \
 		AGS_TUN="$TMP/tun" AGS_WG_RUN="$TMP/wg" AGS_SERVICES_WAIT_S=2 \
 		sh "$SCRIPT" "$@"
 }
@@ -64,6 +66,9 @@ run ssh off
 [ -f "$TMP/run/dropbear.pid" ] && fail "ssh off left dropbear running"
 run ssh off
 grep -q dropbear "$TMP/killall.log" || fail "ssh off with no pidfile did not look for dropbear"
+reset
+FAKE_BASEOS_SSH=yes run ssh on || fail "ssh on with BaseOS's dropbear up failed"
+[ -f "$TMP/dropbear.log" ] && fail "a second dropbear was started beside BaseOS's"
 
 # The password.
 reset
