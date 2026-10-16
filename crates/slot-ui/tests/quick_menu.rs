@@ -112,7 +112,21 @@ fn the_rows_run_in_the_order_the_user_chose() {
             .into_iter()
             .map(QuickRow::label)
             .collect::<Vec<_>>(),
-        ["Game Boy Advance", "Game Boy Color", "Game Boy"]
+        [
+            "Game Boy Advance",
+            "Game Boy Color",
+            "Game Boy",
+            "Nintendo Entertainment System",
+            "Super Nintendo",
+            "Sega Genesis",
+            "Sega Master System",
+            "Sega Game Gear",
+            "PC Engine",
+            "Neo Geo Pocket",
+            "WonderSwan",
+            "Atari Lynx",
+            "PlayStation"
+        ]
     );
     assert_eq!(
         QuickRow::screen_of(Platform::Gba)
@@ -162,10 +176,10 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::ExitGame,
             QuickRow::PlayScreen,
             QuickRow::PlayGameplay,
-            QuickRow::ScreenOf(Platform::Gba),
-            QuickRow::ScreenOf(Platform::Gb),
-            QuickRow::ScreenOf(Platform::Gbc)
         ]
+        .into_iter()
+        .chain(Platform::ALL.map(QuickRow::ScreenOf))
+        .collect::<Vec<_>>()
     );
     for page in [
         &QuickRow::MAIN[..],
@@ -460,4 +474,37 @@ fn show_titles_sits_under_recents_on_the_general_page() {
         at(QuickRow::Recents).map(|i| i + 1)
     );
     assert_eq!(QuickRow::ShowTitles.parent(), Some(QuickRow::General));
+}
+
+#[test]
+fn a_page_too_long_for_the_screen_scrolls_with_the_chosen_row() {
+    let page = QuickRow::screen_page();
+    assert!(page.len() > slot_ui::QUICK_ROWS_MAX);
+    let top_of = |row, chosen| slot_ui::quick_row_top_at(row, chosen, &[]);
+    let first = page[0];
+    let last = *page.last().unwrap();
+    assert!(
+        top_of(last, first) > top_of(page[slot_ui::QUICK_ROWS_MAX - 1], first),
+        "the last row is not below the window while the first is chosen"
+    );
+    assert_eq!(
+        top_of(first, first),
+        top_of(page[page.len() - slot_ui::QUICK_ROWS_MAX], last),
+        "choosing the last row did not scroll the page's tail into the first row's place"
+    );
+    let bottom = top_of(last, last) + slot_ui::QUICK_PITCH;
+    assert!(
+        bottom <= 427.0,
+        "the chosen last row runs into the legends at {bottom}"
+    );
+}
+
+#[test]
+fn a_system_without_colour_correction_has_no_row_for_it() {
+    assert!(
+        !QuickRow::screen_of(Platform::Nes).contains(&QuickRow::ColourCorrectionOf(Platform::Nes))
+    );
+    assert!(
+        QuickRow::screen_of(Platform::Gba).contains(&QuickRow::ColourCorrectionOf(Platform::Gba))
+    );
 }

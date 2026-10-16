@@ -4,7 +4,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use slot_gfx::{Canvas, Compositor, HeadlessSurface};
 use slot_store::{Cart, Platform};
-use slot_ui::{cart_face, cart_shadow, Draw, Shelf, SlotChrome, TexId, CART_W, OUT_H, OUT_W};
+use slot_ui::{
+    cart_face, mould_shadow, Draw, Mould, Shelf, SlotChrome, TexId, CART_W, OUT_H, OUT_W,
+};
 
 static GL: Mutex<()> = Mutex::new(());
 
@@ -42,9 +44,9 @@ fn uploaded(n: usize, c: &mut Compositor) -> (Shelf, Vec<TexId>) {
         })
         .collect();
     s.set_faces(faces.clone());
-    let shadow = cart_shadow();
+    let shadow = mould_shadow(Mould::Gba);
     let tex = c.create_texture(shadow.w, shadow.h, &shadow.rgba);
-    s.set_shadow(tex);
+    s.set_shadow(Mould::Gba, tex);
     (s, faces)
 }
 

@@ -30,6 +30,7 @@ impl Cart {
                     self.title = title;
                 }
             }
+            Header::None => {}
         }
     }
 }
@@ -74,6 +75,7 @@ pub fn scan(root: &Path) -> Result<Vec<Cart>, StoreError> {
         };
         let labels_dir = root.join("Labels").join(platform.dir_name());
         let labels = listing(&labels_dir);
+        let first = carts.len();
         for entry in entries {
             let Ok(entry) = entry else {
                 continue;
@@ -98,11 +100,40 @@ pub fn scan(root: &Path) -> Result<Vec<Cart>, StoreError> {
                 rom,
             });
         }
+        let listed = in_playlists(&carts[first..]);
+        let mut at = first;
+        carts.retain(|c| {
+            at += 1;
+            at <= first || !listed.contains(&c.rom)
+        });
     }
     carts.sort_by(|a, b| {
         (a.platform as u8, sort_key(&a.stem)).cmp(&(b.platform as u8, sort_key(&b.stem)))
     });
     Ok(carts)
+}
+
+/// The discs the shelf's `.m3u` playlists name. A multi-disc game is shown once, as its playlist,
+/// not once a disc.
+fn in_playlists(carts: &[Cart]) -> Vec<PathBuf> {
+    carts
+        .iter()
+        .filter(|c| {
+            c.rom
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("m3u"))
+        })
+        .flat_map(|c| {
+            let dir = c.rom.parent().map(Path::to_path_buf).unwrap_or_default();
+            std::fs::read_to_string(&c.rom)
+                .unwrap_or_default()
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(|l| dir.join(l))
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 pub fn listing(dir: &Path) -> HashMap<String, String> {

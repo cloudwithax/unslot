@@ -7,13 +7,13 @@ use slot_input::{InputSource, Millis};
 use slot_power::{Platform, Power};
 use slot_store::{format_stamp, BezelPick, Platform as Console};
 use slot_ui::{
-    badge_face, bezel_face, cart_shadow, chip_face, chip_shadow_face, core_button_legends,
-    date_time_text, default_game_bezel_face, footer_ink, game_bezel_face, gb_cart_shadow, hhmm,
-    hint_face, icon_face, link_button_legends, menu_face, photo_face, quick_caret_face,
-    quick_label_face, quick_legend_faces, quick_pointer_face, quick_value_face, rebuild_count_face,
+    badge_face, bezel_face, chip_face, chip_shadow_face, core_button_legends, date_time_text,
+    default_game_bezel_face, footer_ink, game_bezel_face, hhmm, hint_face, icon_face,
+    link_button_legends, menu_face, mould_shadow, photo_face, quick_caret_face, quick_label_face,
+    quick_legend_faces, quick_pointer_face, quick_value_face, rebuild_count_face,
     rebuild_title_face, set_clock_hint_face, slot_back, slot_back_light, slot_front,
     slot_front_light, socket_face, sticker_face, title_face, toast_face, wallpaper_face, word_ink,
-    CartFace, GbShell, Icon, LinkBadge, PowerChoice, QuickMenuFaces, QuickRow, QuickValue,
+    CartFace, GbShell, Icon, LinkBadge, Mould, PowerChoice, QuickMenuFaces, QuickRow, QuickValue,
     RebuildScreen, StickerFields, Toast, UndoFace, ALERT_PX, BOLT_PX, HUD_ICON_PX, HUD_INK, LEGEND,
 };
 
@@ -251,24 +251,20 @@ impl Frontend {
         let star = slot_ui::star_face(slot_ui::STAR_SCALE, slot_ui::STAR_INK);
         let id = compositor.create_texture_nearest(star.w, star.h, &star.rgba);
         self.session.app_mut().set_star_face(id, star.w, star.h);
-        let shadow = cart_shadow();
-        let id = compositor.create_texture(shadow.w, shadow.h, &shadow.rgba);
-        self.session.app_mut().set_cart_shadow(id);
-        let notched = gb_cart_shadow(GbShell::Notched);
-        let notched = compositor.create_texture(notched.w, notched.h, &notched.rgba);
-        let rounded = gb_cart_shadow(GbShell::Rounded);
-        let rounded = compositor.create_texture(rounded.w, rounded.h, &rounded.rgba);
-        self.session.app_mut().set_gb_cart_shadows(notched, rounded);
-        let board = slot_ui::cart_backing(None);
-        let board = compositor.create_texture(board.w, board.h, &board.rgba);
-        self.session.app_mut().set_cart_backing(board);
-        let notched = slot_ui::cart_backing(Some(GbShell::Notched));
-        let notched = compositor.create_texture(notched.w, notched.h, &notched.rgba);
-        let rounded = slot_ui::cart_backing(Some(GbShell::Rounded));
-        let rounded = compositor.create_texture(rounded.w, rounded.h, &rounded.rgba);
-        self.session
-            .app_mut()
-            .set_gb_cart_backings(notched, rounded);
+        for mould in Mould::ALL {
+            let shadow = mould_shadow(mould);
+            let id = compositor.create_texture(shadow.w, shadow.h, &shadow.rgba);
+            self.session.app_mut().set_cart_shadow(mould, id);
+        }
+        for (mould, shell) in [
+            (Mould::Gba, None),
+            (Mould::Notched, Some(GbShell::Notched)),
+            (Mould::Rounded, Some(GbShell::Rounded)),
+        ] {
+            let board = slot_ui::cart_backing(shell);
+            let board = compositor.create_texture(board.w, board.h, &board.rgba);
+            self.session.app_mut().set_cart_backing(mould, board);
+        }
         let slot = {
             let mut upload =
                 |bytes: &[u8]| compositor.create_texture(slot_ui::SLOT_W, slot_ui::SLOT_H, bytes);
@@ -805,11 +801,17 @@ impl UiFaces {
             quick_carets: [false, true].map(quick_caret_face),
             quick_legend: quick_legend_faces(footer_ink(false)),
             quick_legend_light: quick_legend_faces(footer_ink(true)),
-            sockets: slot_store::Core::ALL
+            // The picker's board has a socket for each of the GBA's cores, the only system
+            // with a choice of them.
+            sockets: slot_store::Platform::Gba
+                .spec()
+                .cores
                 .iter()
                 .map(|c| socket_face(*c))
                 .collect(),
-            chips: slot_store::Core::ALL
+            chips: slot_store::Platform::Gba
+                .spec()
+                .cores
                 .iter()
                 .map(|c| chip_face(Some(*c)))
                 .collect(),

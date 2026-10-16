@@ -9,8 +9,8 @@ use slot_gfx::{Compositor, HeadlessSurface, TexId, OUT_H, OUT_W};
 use slot_input::{Action, Btn};
 use slot_store::{write_slot_state, Core, Platform, SlotState};
 use slot_ui::{
-    arrows_hint_face, board_face, cart_face, cart_shadow, chip_face, chip_shadow_face, edge,
-    gb_cart_shadow, hint_face, housing, opening, padded, recess, socket_face, GbShell, TURN_PAD,
+    arrows_hint_face, board_face, cart_face, chip_face, chip_shadow_face, edge, hint_face, housing,
+    mould_shadow, opening, padded, recess, socket_face, Mould, TURN_PAD,
 };
 use tempfile::TempDir;
 
@@ -36,23 +36,24 @@ fn upload_faces(app: &mut App, c: &mut Compositor) {
         })
         .collect();
     app.set_faces(row);
-    let shadow = cart_shadow();
-    let shadow = tex(c, shadow.w, shadow.h, &shadow.rgba);
-    app.set_cart_shadow(shadow);
-    let notched = gb_cart_shadow(GbShell::Notched);
-    let notched = tex(c, notched.w, notched.h, &notched.rgba);
-    let rounded = gb_cart_shadow(GbShell::Rounded);
-    let rounded = tex(c, rounded.w, rounded.h, &rounded.rgba);
-    app.set_gb_cart_shadows(notched, rounded);
+    for mould in Mould::ALL {
+        let shadow = mould_shadow(mould);
+        let shadow = tex(c, shadow.w, shadow.h, &shadow.rgba);
+        app.set_cart_shadow(mould, shadow);
+    }
 
-    let sockets = Core::ALL
+    let sockets = slot_store::Platform::Gba
+        .spec()
+        .cores
         .iter()
         .map(|k| {
             let f = socket_face(*k);
             tex(c, f.w, f.h, &f.rgba)
         })
         .collect();
-    let chips = Core::ALL
+    let chips = slot_store::Platform::Gba
+        .spec()
+        .cores
         .iter()
         .map(|k| {
             let f = chip_face(Some(*k));

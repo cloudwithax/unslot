@@ -17,6 +17,7 @@ enum Step {
     Up(Btn),
     Rec(Option<String>),
     Cut,
+    Snap(String),
 }
 
 struct Clip {
@@ -106,10 +107,22 @@ fn parse(script: &str) -> Vec<Step> {
             ["rec"] => steps.push(Step::Rec(None)),
             ["rec", name] => steps.push(Step::Rec(Some(name.to_string()))),
             ["cut"] => steps.push(Step::Cut),
+            ["snap", name] => steps.push(Step::Snap(name.to_string())),
             _ => panic!("cannot read {line:?}"),
         }
     }
     steps
+}
+
+/// The last composed frame as a PNG, for a still where a clip would be too much.
+fn snap(path: &str, rgba: &[u8]) {
+    let file = std::fs::File::create(path).expect("create the still");
+    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), OUT_W, OUT_H);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    let mut writer = enc.write_header().expect("png header");
+    writer.write_image_data(rgba).expect("png data");
+    eprintln!("record: still {path}");
 }
 
 fn panel(pixels: &mut [u8], app: &slot::app::App, lit: u8) {
@@ -154,33 +167,36 @@ fn main() {
     let mut clip: Option<Clip> = None;
     let present = Duration::from_secs_f64(1.0 / FPS);
     let mut due = std::time::Instant::now();
-    let mut run = |input: &mut Scripted, frame: &mut u64, clip: &mut Option<Clip>| {
-        let loading = std::time::Instant::now();
-        while frontend.core_settling() && loading.elapsed() < Duration::from_secs(5) {
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        due += present;
-        match due.checked_duration_since(std::time::Instant::now()) {
-            Some(wait) if clip.is_some() => std::thread::sleep(wait),
-            _ => due = std::time::Instant::now(),
-        }
-        *frame += 1;
-        let now = (*frame as f64 * 1000.0 / FPS) as Millis;
-        frontend.advance_at(input, now, (1.0 / FPS) as f32);
-        frontend.step_emulator(present, Duration::from_secs(1));
-        frontend.compose(&mut compositor);
-        let mut pixels = compositor.read_frame();
-        panel(&mut pixels, frontend.app(), lit);
-        if let Some(clip) = clip {
-            clip.frames.send(pixels).unwrap();
-            clip.written += 1;
-        }
-    };
+    let mut last = Vec::new();
+    let mut run =
+        |input: &mut Scripted, frame: &mut u64, clip: &mut Option<Clip>, last: &mut Vec<u8>| {
+            let loading = std::time::Instant::now();
+            while frontend.core_settling() && loading.elapsed() < Duration::from_secs(5) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            due += present;
+            match due.checked_duration_since(std::time::Instant::now()) {
+                Some(wait) if clip.is_some() => std::thread::sleep(wait),
+                _ => due = std::time::Instant::now(),
+            }
+            *frame += 1;
+            let now = (*frame as f64 * 1000.0 / FPS) as Millis;
+            frontend.advance_at(input, now, (1.0 / FPS) as f32);
+            frontend.step_emulator(present, Duration::from_secs(1));
+            frontend.compose(&mut compositor);
+            let mut pixels = compositor.read_frame();
+            panel(&mut pixels, frontend.app(), lit);
+            *last = pixels.clone();
+            if let Some(clip) = clip {
+                clip.frames.send(pixels).unwrap();
+                clip.written += 1;
+            }
+        };
     for step in steps {
         match step {
             Step::Wait(n) => {
                 for _ in 0..n {
-                    run(&mut input, &mut frame, &mut clip);
+                    run(&mut input, &mut frame, &mut clip, &mut last);
                 }
             }
             Step::Down(b) => input.0.push(RawEvent::Down(b)),
@@ -200,6 +216,7 @@ fn main() {
                     done.finish();
                 }
             }
+            Step::Snap(name) => snap(&format!("{out}/{name}.png"), &last),
         }
     }
     if let Some(done) = clip.take() {

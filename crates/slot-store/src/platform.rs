@@ -9,6 +9,16 @@ pub enum Platform {
     Gba,
     Gb,
     Gbc,
+    Nes,
+    Snes,
+    Genesis,
+    MasterSystem,
+    GameGear,
+    PcEngine,
+    NeoGeoPocket,
+    WonderSwan,
+    Lynx,
+    PlayStation,
 }
 
 /// How the scanner finds a game's title, and for the GBA its four-letter code, in the ROM.
@@ -16,6 +26,8 @@ pub enum Platform {
 pub enum Header {
     Gba,
     Gb,
+    /// No title worth reading in the file; the shelf shows the file's name.
+    None,
 }
 
 /// Everything slot needs to know about a system. Adding one is a variant on `Platform` and a
@@ -26,6 +38,9 @@ pub struct Spec {
     /// The folder under Games, Labels, Saves, States and Bezels, and the key in config files.
     pub dir: &'static str,
     pub extensions: &'static [&'static str],
+    /// Whether the core's picture is drawn at its own size and aspect. When it is not, the game
+    /// is centred in the Game Boy family's 240x160 canvas and `picture` says where it sits.
+    pub native: bool,
     /// The game's picture inside the 240x160 canvas the Game Boy family is drawn into.
     pub picture: (u32, u32),
     pub header: Header,
@@ -33,66 +48,204 @@ pub struct Spec {
     pub cores: &'static [Core],
     pub shaders: &'static [Shader],
     pub shader: Shader,
+    /// Whether its core can correct the colour of a handheld's LCD.
+    pub colour_correction: bool,
     /// Whether the system has a Game Boy palette to pick for monochrome games.
     pub palettes: bool,
     /// Whether it has a default bezel and a Bezels folder of its own.
     pub bezels: bool,
     /// Whether its games read L and R; when they do not, slot keeps the shoulders.
     pub shoulders: bool,
+    /// Whether its games read L2 and R2; when they do, rewind and fast forward give them up.
+    pub triggers: bool,
+    /// Whether X and Y can fire A and B as turbo buttons. Not on a pad that has its own X and Y.
+    pub turbo: bool,
+    /// Whether its save states are small enough to keep a rewind buffer of.
+    pub rewind: bool,
     /// Whether two of it can play over the wireless link.
     pub link: bool,
+    /// The files its core will not start without, in the BIOS folder.
+    pub bios: &'static [&'static str],
 }
 
 const GB_SHADERS: &[Shader] = &[Shader::Off, Shader::Lcd3x, Shader::Grid, Shader::Simpletex];
+const HANDHELD_SHADERS: &[Shader] = &[Shader::Off, Shader::Lcd3x, Shader::Grid, Shader::Dot];
+const TV_SHADERS: &[Shader] = &[Shader::Off, Shader::Grid, Shader::Lcd3x];
+
+/// What a system drawn at its own size shares unless its row says otherwise.
+const CONSOLE: Spec = Spec {
+    name: "",
+    dir: "",
+    extensions: &[],
+    native: true,
+    picture: (240, 160),
+    header: Header::None,
+    cores: &[],
+    shaders: TV_SHADERS,
+    shader: Shader::Off,
+    colour_correction: false,
+    palettes: false,
+    bezels: false,
+    shoulders: false,
+    triggers: false,
+    turbo: true,
+    rewind: true,
+    link: false,
+    bios: &[],
+};
+
+const HANDHELD: Spec = Spec {
+    shaders: HANDHELD_SHADERS,
+    shader: Shader::Grid,
+    ..CONSOLE
+};
 
 const SPECS: [Spec; Platform::COUNT] = [
     Spec {
         name: "Game Boy Advance",
         dir: "GBA",
         extensions: &["gba"],
+        native: false,
         picture: (240, 160),
         header: Header::Gba,
         cores: &[Core::Mgba, Core::Gpsp],
-        shaders: &[Shader::Off, Shader::Lcd3x, Shader::Grid, Shader::Dot],
+        shaders: HANDHELD_SHADERS,
         shader: Shader::Grid,
-        palettes: false,
-        bezels: false,
+        colour_correction: true,
         shoulders: true,
         link: true,
+        ..CONSOLE
     },
     Spec {
         name: "Game Boy",
         dir: "GB",
         extensions: &["gb", "gbc"],
+        native: false,
         picture: (160, 144),
         header: Header::Gb,
         cores: &[Core::Mgba],
         shaders: GB_SHADERS,
         shader: Shader::Simpletex,
+        colour_correction: true,
         palettes: true,
         bezels: true,
-        shoulders: false,
-        link: false,
+        ..CONSOLE
     },
     Spec {
         name: "Game Boy Color",
         dir: "GBC",
         extensions: &["gb", "gbc"],
+        native: false,
         picture: (160, 144),
         header: Header::Gb,
         cores: &[Core::Mgba],
         shaders: GB_SHADERS,
         shader: Shader::Simpletex,
-        palettes: false,
+        colour_correction: true,
         bezels: true,
-        shoulders: false,
-        link: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "Nintendo Entertainment System",
+        dir: "NES",
+        extensions: &["nes", "unf", "unif"],
+        cores: &[Core::Fceumm],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Super Nintendo",
+        dir: "SNES",
+        extensions: &["sfc", "smc"],
+        cores: &[Core::Snes9x],
+        shoulders: true,
+        turbo: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "Sega Genesis",
+        dir: "MD",
+        extensions: &["md", "gen", "bin", "smd"],
+        cores: &[Core::GenesisPlusGx],
+        shoulders: true,
+        turbo: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "Sega Master System",
+        dir: "SMS",
+        extensions: &["sms"],
+        cores: &[Core::GenesisPlusGx],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Sega Game Gear",
+        dir: "GG",
+        extensions: &["gg"],
+        cores: &[Core::GenesisPlusGx],
+        ..HANDHELD
+    },
+    Spec {
+        name: "PC Engine",
+        dir: "PCE",
+        extensions: &["pce"],
+        cores: &[Core::MednafenPceFast],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Neo Geo Pocket",
+        dir: "NGP",
+        extensions: &["ngp", "ngc"],
+        cores: &[Core::Race],
+        ..HANDHELD
+    },
+    Spec {
+        name: "WonderSwan",
+        dir: "WS",
+        extensions: &["ws", "wsc"],
+        cores: &[Core::MednafenWswan],
+        shoulders: true,
+        turbo: false,
+        ..HANDHELD
+    },
+    Spec {
+        name: "Atari Lynx",
+        dir: "LYNX",
+        extensions: &["lnx"],
+        cores: &[Core::Handy],
+        shoulders: true,
+        bios: &["lynxboot.img"],
+        ..HANDHELD
+    },
+    Spec {
+        name: "PlayStation",
+        dir: "PS",
+        extensions: &["cue", "chd", "pbp", "m3u"],
+        cores: &[Core::PcsxRearmed],
+        shoulders: true,
+        triggers: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
     },
 ];
 
 impl Platform {
-    pub const COUNT: usize = 3;
-    pub const ALL: [Platform; Platform::COUNT] = [Platform::Gba, Platform::Gb, Platform::Gbc];
+    pub const COUNT: usize = 13;
+    pub const ALL: [Platform; Platform::COUNT] = [
+        Platform::Gba,
+        Platform::Gb,
+        Platform::Gbc,
+        Platform::Nes,
+        Platform::Snes,
+        Platform::Genesis,
+        Platform::MasterSystem,
+        Platform::GameGear,
+        Platform::PcEngine,
+        Platform::NeoGeoPocket,
+        Platform::WonderSwan,
+        Platform::Lynx,
+        Platform::PlayStation,
+    ];
 
     pub fn spec(self) -> &'static Spec {
         &SPECS[self.index()]
@@ -156,12 +309,17 @@ mod tests {
     fn every_spec_is_complete() {
         for p in Platform::ALL {
             let s = p.spec();
+            assert!(!s.name.is_empty() && !s.dir.is_empty(), "{p:?} has no name");
             assert!(!s.cores.is_empty(), "{p:?} has no core");
             assert!(
                 s.shaders.contains(&s.shader),
                 "{p:?} defaults to a shader it does not offer"
             );
             assert!(!s.extensions.is_empty(), "{p:?} opens no files");
+            assert!(
+                s.native || s.header != Header::None,
+                "{p:?} is drawn in the Game Boy canvas but is not a Game Boy"
+            );
         }
     }
 
@@ -171,5 +329,12 @@ mod tests {
             assert_eq!(Platform::from_key(&p.key()), Some(p));
         }
         assert_eq!(Platform::from_key("nope"), None);
+    }
+
+    #[test]
+    fn turbo_stays_off_a_pad_whose_x_and_y_are_its_own() {
+        for p in [Platform::Snes, Platform::Genesis, Platform::PlayStation] {
+            assert!(!p.spec().turbo, "{p:?} would lose X and Y to turbo");
+        }
     }
 }

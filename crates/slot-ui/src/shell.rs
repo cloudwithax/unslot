@@ -87,9 +87,12 @@ pub fn shell_for(cart: &Cart) -> Shell {
         };
         return shell(choice.colour, finish);
     }
+    if let Some(media) = crate::media::Media::of(cart.platform) {
+        return shell(media.colour(), Finish::Solid);
+    }
     match cart.platform {
         Platform::Gba => gba_shell_for(&gba_code(cart)),
-        Platform::Gb | Platform::Gbc => gb_shell_for(&cart.rom),
+        _ => gb_shell_for(&cart.rom),
     }
 }
 

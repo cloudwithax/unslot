@@ -81,7 +81,21 @@ const GENERIC: [QuickRow; 28] = [
 const PER_PLATFORM: usize = 4;
 
 /// The order the Screen page lists the platforms in, which is not the shelves' order.
-const SCREEN_ORDER: [Platform; Platform::COUNT] = [Platform::Gba, Platform::Gbc, Platform::Gb];
+const SCREEN_ORDER: [Platform; Platform::COUNT] = [
+    Platform::Gba,
+    Platform::Gbc,
+    Platform::Gb,
+    Platform::Nes,
+    Platform::Snes,
+    Platform::Genesis,
+    Platform::MasterSystem,
+    Platform::GameGear,
+    Platform::PcEngine,
+    Platform::NeoGeoPocket,
+    Platform::WonderSwan,
+    Platform::Lynx,
+    Platform::PlayStation,
+];
 
 impl QuickRow {
     pub const COUNT: usize = GENERIC.len() + PER_PLATFORM * Platform::COUNT;
@@ -156,10 +170,10 @@ impl QuickRow {
 
     /// A platform's page under Screen.
     pub fn screen_of(platform: Platform) -> Vec<QuickRow> {
-        let mut rows = vec![
-            QuickRow::ShaderOf(platform),
-            QuickRow::ColourCorrectionOf(platform),
-        ];
+        let mut rows = vec![QuickRow::ShaderOf(platform)];
+        if platform.spec().colour_correction {
+            rows.push(QuickRow::ColourCorrectionOf(platform));
+        }
         if platform.spec().palettes {
             rows.push(QuickRow::GbPalettes);
         }
@@ -707,7 +721,10 @@ impl QuickMenu<'_> {
             .max()
             .unwrap_or(0);
         for row in self.row.shown(self.hidden) {
-            let y = quick_row_top(row, self.hidden) + TYPE_DROP;
+            if !in_view(row, self.row, self.hidden) {
+                continue;
+            }
+            let y = quick_row_top_at(row, self.row, self.hidden) + TYPE_DROP;
             let lit = row == self.row;
             if let Some(&(tex, w, h)) = faces.labels.get(row.index()).map(|l| &l[lit as usize]) {
                 let x = match row.centred() {
@@ -791,13 +808,43 @@ pub fn draw_menu_ground(canvas: Canvas, ground: Option<TexId>, out: &mut Vec<Dra
     }
 }
 
+/// The most rows a page shows at once. A longer page scrolls to keep the chosen row in view.
+pub const QUICK_ROWS_MAX: usize = 7;
+
+/// Where `row` sits on its page while it is the chosen one.
 pub fn quick_row_top(row: QuickRow, hidden: &[QuickRow]) -> f32 {
-    let rows = QUICK_PITCH * row.shown(hidden).len() as f32;
+    quick_row_top_at(row, row, hidden)
+}
+
+/// Where `row` sits on its page while `chosen` is the row picked on it. On a page longer than
+/// `QUICK_ROWS_MAX`, a row scrolled out of view sits off the window, above or below it.
+pub fn quick_row_top_at(row: QuickRow, chosen: QuickRow, hidden: &[QuickRow]) -> f32 {
+    let len = row.shown(hidden).len();
+    let first = window_first(len, chosen.position(hidden));
+    let rows = QUICK_PITCH * len.min(QUICK_ROWS_MAX) as f32;
     let top = match row.page() == QuickRow::PLAY_SCREEN {
         true => OUT_H as f32 - MOUTH_H - PANEL_GAP - rows,
         false => (LEGEND_Y - rows) / 2.0,
     };
-    top + QUICK_PITCH * row.position(hidden) as f32
+    top + QUICK_PITCH * (row.position(hidden) as f32 - first as f32)
+}
+
+/// The first row in view on a page of `len` rows with the one at `chosen` picked: the window
+/// keeps the chosen row as near its middle as the page's ends allow.
+fn window_first(len: usize, chosen: usize) -> usize {
+    if len <= QUICK_ROWS_MAX {
+        return 0;
+    }
+    chosen
+        .saturating_sub(QUICK_ROWS_MAX / 2)
+        .min(len - QUICK_ROWS_MAX)
+}
+
+/// Whether `row` is in the window while `chosen` is picked.
+fn in_view(row: QuickRow, chosen: QuickRow, hidden: &[QuickRow]) -> bool {
+    let len = row.shown(hidden).len();
+    let first = window_first(len, chosen.position(hidden));
+    (first..first + QUICK_ROWS_MAX).contains(&row.position(hidden))
 }
 
 fn push(out: &mut Vec<Draw>, tex: TexId, x: f32, y: f32, w: u32, h: u32) {

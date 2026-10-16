@@ -14,7 +14,7 @@ use slot_store::{
 use slot_ui::{
     board_from, board_zoom, draw_empty_slot, draw_footer, draw_ground, draw_slot_name,
     draw_sticker, ease, footer_ink, grown, lid_at, lid_from, lift_of, on_board, repeat_gap,
-    shelf_cart_at, ClockPicker, Draw, FfState, GbShell, Hud, HudKind, Icon, LinkBadge, Millis,
+    shelf_cart_at, ClockPicker, Draw, FfState, Hud, HudKind, Icon, LinkBadge, Millis, Mould,
     Placed, Polaroids, PowerChoice, QuickMenu, QuickMenuFaces, QuickRow, QuickValue, Refusal,
     Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H, CHIP_U, CHIP_V, CHIP_W, HINT_EDGE, HOP_LIFT,
     MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W, TURN_PAD,
@@ -1109,6 +1109,14 @@ impl App {
         if !own {
             hidden.push(QuickRow::WallpaperTint);
         }
+        // The Game Boy family's pages are always there; another system's only once the card
+        // holds a game for it.
+        hidden.extend(
+            Platform::ALL
+                .into_iter()
+                .filter(|p| p.spec().native && !self.has_games(*p))
+                .map(QuickRow::ScreenOf),
+        );
         if !self.framed_panel() {
             // Without the SP's frame a platform with no bezels of its own has nothing to pick.
             hidden.extend(
@@ -1119,6 +1127,12 @@ impl App {
             );
         }
         hidden
+    }
+
+    fn has_games(&self, platform: Platform) -> bool {
+        self.shelves
+            .iter()
+            .any(|(rack, shelf)| *rack == Rack::Of(platform) && !shelf.carts.is_empty())
     }
 
     fn random_drawn(&self) -> bool {
@@ -1150,29 +1164,15 @@ impl App {
         }
     }
 
-    pub fn set_cart_shadow(&mut self, face: TexId) {
+    pub fn set_cart_shadow(&mut self, mould: Mould, face: TexId) {
         for (_, shelf) in &mut self.shelves {
-            shelf.set_shadow(face);
+            shelf.set_shadow(mould, face);
         }
     }
 
-    pub fn set_gb_cart_shadows(&mut self, notched: TexId, rounded: TexId) {
+    pub fn set_cart_backing(&mut self, mould: Mould, face: TexId) {
         for (_, shelf) in &mut self.shelves {
-            shelf.set_gb_shadow(GbShell::Notched, notched);
-            shelf.set_gb_shadow(GbShell::Rounded, rounded);
-        }
-    }
-
-    pub fn set_cart_backing(&mut self, face: TexId) {
-        for (_, shelf) in &mut self.shelves {
-            shelf.set_backing(face);
-        }
-    }
-
-    pub fn set_gb_cart_backings(&mut self, notched: TexId, rounded: TexId) {
-        for (_, shelf) in &mut self.shelves {
-            shelf.set_gb_backing(GbShell::Notched, notched);
-            shelf.set_gb_backing(GbShell::Rounded, rounded);
+            shelf.set_backing(mould, face);
         }
     }
 
@@ -1450,15 +1450,22 @@ impl App {
     }
 
     pub fn may_rewind(&self) -> bool {
-        self.state.rewind && !self.link_active()
+        self.records_rewind() && !self.link_active()
     }
 
     pub fn turbo(&self) -> bool {
-        self.state.turbo
+        self.state.turbo && self.platform.spec().turbo
     }
 
     pub fn records_rewind(&self) -> bool {
-        self.state.rewind
+        self.state.rewind && self.platform.spec().rewind
+    }
+
+    /// Whether L2 and R2 belong to the game, not to rewind and fast forward.
+    pub fn game_triggers(&self) -> bool {
+        matches!(self.phase, Phase::Playing { .. })
+            && self.in_game_menu.is_none()
+            && self.platform.spec().triggers
     }
 
     pub fn picture_rect(&self) -> [f32; 4] {

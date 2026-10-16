@@ -4,6 +4,7 @@ use slot_store::{Cart, Outline, Platform};
 use crate::art;
 use crate::bitmaps::{self, Mould};
 use crate::board::{BOARD_H, BOARD_W};
+use crate::media::Media;
 use crate::shell::{shell_for, Finish, Shell};
 use crate::silhouette::{cart_mask, gb_cart_mask, GbShell};
 use crate::text;
@@ -69,35 +70,45 @@ struct Spec {
     w: u32,
     h: u32,
     label: (u32, u32, u32, u32),
+    /// Where on the label box a label may print, when that is less than all of it.
+    label_mask: Option<&'static [u8]>,
     mask: &'static [u8],
     mould: Mould,
     paint: &'static [u8],
 }
 
-enum Shape {
-    Gba,
-    Gb(GbShell),
+pub fn gb_shell_of(cart: &Cart) -> Option<GbShell> {
+    if !matches!(cart.platform, Platform::Gb | Platform::Gbc) {
+        return None;
+    }
+    Some(match cart.shell.map(|c| c.outline) {
+        Some(Outline::Notched) => GbShell::Notched,
+        Some(Outline::Rounded) => GbShell::Rounded,
+        _ => match slot_store::gb::cached_class(&cart.rom) {
+            Class::ColourOnly => GbShell::Rounded,
+            Class::Original | Class::DualMode => GbShell::Notched,
+        },
+    })
 }
 
-pub fn gb_shell_of(cart: &Cart) -> Option<GbShell> {
-    match cart.platform {
-        Platform::Gba => None,
-        Platform::Gb | Platform::Gbc => Some(match cart.shell.map(|c| c.outline) {
-            Some(Outline::Notched) => GbShell::Notched,
-            Some(Outline::Rounded) => GbShell::Rounded,
-            _ => match slot_store::gb::cached_class(&cart.rom) {
-                Class::ColourOnly => GbShell::Rounded,
-                Class::Original | Class::DualMode => GbShell::Notched,
-            },
-        }),
+fn gb_mould(shell: GbShell) -> Mould {
+    match shell {
+        GbShell::Notched => Mould::Notched,
+        GbShell::Rounded => Mould::Rounded,
     }
 }
 
-pub fn label_rect(shell: Option<GbShell>) -> (f32, f32, f32, f32) {
-    let s = spec(match shell {
-        None => Shape::Gba,
-        Some(shell) => Shape::Gb(shell),
-    });
+/// The shape this cart is drawn in.
+pub fn mould_of(cart: &Cart) -> Mould {
+    match gb_shell_of(cart) {
+        Some(GbShell::Notched) => Mould::Notched,
+        Some(GbShell::Rounded) => Mould::Rounded,
+        None => Mould::of(cart.platform),
+    }
+}
+
+pub fn label_rect(mould: Mould) -> (f32, f32, f32, f32) {
+    let s = spec(mould);
     let (x, y, w, h) = s.label;
     (
         x as f32 / s.w as f32,
@@ -107,40 +118,47 @@ pub fn label_rect(shell: Option<GbShell>) -> (f32, f32, f32, f32) {
     )
 }
 
-fn shape_of(cart: &Cart) -> Shape {
-    match gb_shell_of(cart) {
-        None => Shape::Gba,
-        Some(shell) => Shape::Gb(shell),
-    }
-}
-
-fn spec(shape: Shape) -> Spec {
-    match shape {
-        Shape::Gba => Spec {
+fn spec(mould: Mould) -> Spec {
+    match mould {
+        Mould::Gba => Spec {
             w: CART_W,
             h: CART_H,
             label: (LABEL_X, LABEL_Y, LABEL_W, LABEL_H),
+            label_mask: None,
             mask: cart_mask(),
-            mould: Mould::Gba,
+            mould,
             paint: bitmaps::gba_cart(),
         },
-        Shape::Gb(shell) => Spec {
+        Mould::Notched => Spec {
             w: GB_CART_W,
             h: GB_CART_H,
-            label: match shell {
-                GbShell::Notched => (GB_LABEL_X, GB_LABEL_Y, GB_LABEL_W, GB_LABEL_H),
-                GbShell::Rounded => (GBC_LABEL_X, GBC_LABEL_Y, GBC_LABEL_W, GBC_LABEL_H),
-            },
-            mask: gb_cart_mask(shell),
-            mould: match shell {
-                GbShell::Notched => Mould::Notched,
-                GbShell::Rounded => Mould::Rounded,
-            },
-            paint: match shell {
-                GbShell::Notched => bitmaps::gb_cart(),
-                GbShell::Rounded => bitmaps::gbc_cart(),
-            },
+            label: (GB_LABEL_X, GB_LABEL_Y, GB_LABEL_W, GB_LABEL_H),
+            label_mask: None,
+            mask: gb_cart_mask(GbShell::Notched),
+            mould,
+            paint: bitmaps::gb_cart(),
         },
+        Mould::Rounded => Spec {
+            w: GB_CART_W,
+            h: GB_CART_H,
+            label: (GBC_LABEL_X, GBC_LABEL_Y, GBC_LABEL_W, GBC_LABEL_H),
+            label_mask: None,
+            mask: gb_cart_mask(GbShell::Rounded),
+            mould,
+            paint: bitmaps::gbc_cart(),
+        },
+        Mould::Media(m) => {
+            let (w, h) = m.size();
+            Spec {
+                w,
+                h,
+                label: m.label(),
+                label_mask: m.label_mask(),
+                mask: m.mask(),
+                mould,
+                paint: m.neutral(),
+            }
+        }
     }
 }
 
@@ -149,26 +167,22 @@ const SEATED_H: u32 = 141;
 const GB_SEATED_H: u32 = 259;
 
 pub fn seated_box(platform: Platform) -> (u32, u32) {
-    match platform {
-        Platform::Gba => (SEATED_W, SEATED_H),
-        Platform::Gb | Platform::Gbc => (SEATED_W, GB_SEATED_H),
+    match Mould::of(platform) {
+        Mould::Gba => (SEATED_W, SEATED_H),
+        Mould::Notched | Mould::Rounded => (SEATED_W, GB_SEATED_H),
+        Mould::Media(m) => m.seated(SEATED_W),
     }
 }
 
 pub fn cart_box(platform: Platform) -> (u32, u32) {
-    let s = spec(match platform {
-        Platform::Gba => Shape::Gba,
-        Platform::Gb | Platform::Gbc => Shape::Gb(GbShell::Notched),
-    });
+    let s = spec(Mould::of(platform));
     (s.w, s.h)
 }
 
-pub fn cart_shadow() -> CartFace {
-    shadow(CART_W, CART_H, cart_mask())
-}
-
-pub fn gb_cart_shadow(shell: GbShell) -> CartFace {
-    shadow(GB_CART_W, GB_CART_H, gb_cart_mask(shell))
+/// The shadow a mould casts on the shelf behind a cart that is not the one in front.
+pub fn mould_shadow(mould: Mould) -> CartFace {
+    let s = spec(mould);
+    shadow(s.w, s.h, s.mask)
 }
 
 fn shadow(w: u32, h: u32, mask: &[u8]) -> CartFace {
@@ -186,7 +200,7 @@ pub fn cart_face(cart: &Cart) -> CartFace {
 }
 
 pub fn is_clear(cart: &Cart) -> bool {
-    shell_for(cart).finish != Finish::Solid
+    mould_of(cart).has_clear() && shell_for(cart).finish != Finish::Solid
 }
 
 /// Whether the shelf draws this cart's coloured interior under its plastic: any clear cart.
@@ -202,7 +216,7 @@ pub fn cart_interior(cart: &Cart) -> CartFace {
     let (src, w, h, mask) = match gb_shell_of(cart) {
         None => (bitmaps::gba_interior(), BOARD_W, BOARD_H, None),
         Some(shell) => {
-            let s = spec(Shape::Gb(shell));
+            let s = spec(gb_mould(shell));
             let src = match shell {
                 GbShell::Notched => bitmaps::gb_interior(),
                 GbShell::Rounded => bitmaps::gbc_interior(),
@@ -236,7 +250,7 @@ pub fn cart_backing(shell: Option<GbShell>) -> CartFace {
             h: BOARD_H,
         };
     };
-    let s = spec(Shape::Gb(shell));
+    let s = spec(gb_mould(shell));
     let mut rgba = bitmaps::gb_board().to_vec();
     for (px, cover) in rgba.chunks_exact_mut(4).zip(s.mask) {
         px[3] = ((px[3] as u32 * *cover as u32 + 127) / 255) as u8;
@@ -249,12 +263,12 @@ pub fn cart_backing(shell: Option<GbShell>) -> CartFace {
 }
 
 pub fn label_size(cart: &Cart) -> (u32, u32) {
-    let (_, _, lw, lh) = spec(shape_of(cart)).label;
+    let (_, _, lw, lh) = spec(mould_of(cart)).label;
     (lw, lh)
 }
 
 pub fn cart_face_with(cart: &Cart, art: Option<Vec<u8>>) -> CartFace {
-    let s = spec(shape_of(cart));
+    let s = spec(mould_of(cart));
     let mut face = shell_face(&s, &shell_for(cart));
     let label = match art {
         Some(rgba) => rgba,
@@ -375,12 +389,7 @@ fn shade_of(paint: &[u8], w: u32, h: u32, label: (u32, u32, u32, u32)) -> Vec<u3
 /// shoulder and the grey label box. `clear` makes the see-through variant, which is its own
 /// asset with a rim and a sheen. The game's colour is blended on by `overlay`.
 pub fn neutral_shell(mould: Mould, clear: bool) -> Vec<u8> {
-    let shape = match mould {
-        Mould::Gba => Shape::Gba,
-        Mould::Notched => Shape::Gb(GbShell::Notched),
-        Mould::Rounded => Shape::Gb(GbShell::Rounded),
-    };
-    let s = spec(shape);
+    let s = spec(mould);
     assert_eq!(
         s.paint.len(),
         (s.w * s.h * 4) as usize,
@@ -442,6 +451,8 @@ fn dress(s: &Spec, rgba: &mut [u8]) {
         Mould::Gba => "GAME BOY ADVANCE",
         Mould::Notched => "GAME BOY",
         Mould::Rounded => "GAME BOY COLOR",
+        // Their renders carry their own relief and no console name.
+        Mould::Media(_) => return,
     };
     stamp_console(rgba, s.w, s.h, title, y0);
 }
@@ -603,9 +614,15 @@ fn generated_label(s: &Spec, title: &str) -> Vec<u8> {
     }
 
     if let Some(font) = text::label_font() {
+        // A disc has its hole where a label's title would sit, so its title goes in the band
+        // of print above the hub instead.
+        let (top, lh) = match s.mould {
+            Mould::Media(Media::Disc) => ((lh as f32 * 0.07) as u32, (lh as f32 * 0.27) as u32),
+            _ => (0, lh),
+        };
         let (max_px, max_h) = match s.mould {
             Mould::Gba => (lh as f32 / (MAX_LINES as f32 * 1.36), f32::INFINITY),
-            Mould::Notched | Mould::Rounded => {
+            Mould::Notched | Mould::Rounded | Mould::Media(_) => {
                 let room = (lh - 2 * PAD) as f32;
                 (room / MAX_LINES as f32, room)
             }
@@ -619,7 +636,8 @@ fn generated_label(s: &Spec, title: &str) -> Vec<u8> {
             max_px,
             MIN_PX,
         );
-        text::draw_centred(&mut rgba, lw, lh, &layout, ink(bg));
+        let band = (top * lw * 4) as usize..((top + lh) * lw * 4) as usize;
+        text::draw_centred(&mut rgba[band], lw, lh, &layout, ink(bg));
     }
     rgba
 }
@@ -638,7 +656,8 @@ fn paste_label(s: &Spec, face: &mut CartFace, label: &[u8]) {
     for y in 0..lh {
         for x in 0..lw {
             let src = ((y * lw + x) * 4) as usize;
-            let a = label[src + 3] as u32;
+            let print = s.label_mask.map_or(255, |m| m[(y * lw + x) as usize]) as u32;
+            let a = (label[src + 3] as u32 * print + 127) / 255;
             if a == 0 {
                 continue;
             }

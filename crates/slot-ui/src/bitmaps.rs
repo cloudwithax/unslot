@@ -2,13 +2,59 @@ use std::sync::OnceLock;
 
 use slot_gfx::OUT_W;
 
-use crate::art::decode_png_bytes;
+use slot_store::Platform;
 
+use crate::art::decode_png_bytes;
+use crate::media::Media;
+
+/// A cart's shape: the Game Boy family's three moulds, or another system's media.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Mould {
     Gba,
     Notched,
     Rounded,
+    Media(Media),
+}
+
+impl Mould {
+    pub const COUNT: usize = 3 + Media::COUNT;
+
+    /// Every mould, each at its own `index`.
+    pub const ALL: [Mould; Mould::COUNT] = {
+        let mut all = [Mould::Gba; Mould::COUNT];
+        all[1] = Mould::Notched;
+        all[2] = Mould::Rounded;
+        let mut i = 0;
+        while i < Media::COUNT {
+            all[3 + i] = Mould::Media(Media::ALL[i]);
+            i += 1;
+        }
+        all
+    };
+
+    pub fn index(self) -> usize {
+        match self {
+            Mould::Gba => 0,
+            Mould::Notched => 1,
+            Mould::Rounded => 2,
+            Mould::Media(m) => 3 + m.index(),
+        }
+    }
+
+    /// The mould a platform's carts usually come in. A Game Boy Color-only game is the one
+    /// exception, rounded where this says notched.
+    pub fn of(platform: Platform) -> Mould {
+        match Media::of(platform) {
+            Some(m) => Mould::Media(m),
+            None if platform == Platform::Gba => Mould::Gba,
+            None => Mould::Notched,
+        }
+    }
+
+    /// Whether it has see-through art, a board and back plastic to show through a clear shell.
+    pub fn has_clear(self) -> bool {
+        !matches!(self, Mould::Media(_))
+    }
 }
 
 pub const GBA_CART_W: u32 = 360;
@@ -53,7 +99,12 @@ const PLUG_JOIN_PNG: &[u8] = include_bytes!("../../../assets/link_plug_join.png"
 const ADAPTER_PNG: &[u8] = include_bytes!("../../../assets/link_adapter.png");
 const STICKER_PNG: &[u8] = include_bytes!("../../../assets/sticker.png");
 
-fn load(bytes: &'static [u8], w: u32, h: u32, slot: &'static OnceLock<Vec<u8>>) -> &'static [u8] {
+pub(crate) fn load(
+    bytes: &'static [u8],
+    w: u32,
+    h: u32,
+    slot: &'static OnceLock<Vec<u8>>,
+) -> &'static [u8] {
     slot.get_or_init(|| {
         let (mut rgba, sw, sh) = decode_png_bytes(bytes).expect("a template png decodes");
         if sh == h && sw > w {
@@ -242,6 +293,7 @@ pub fn shell_asset(mould: Mould, clear: bool) -> &'static [u8] {
     static GB_CLEAR: OnceLock<Vec<u8>> = OnceLock::new();
     static GBC_CLEAR: OnceLock<Vec<u8>> = OnceLock::new();
     let (bytes, w, h, slot) = match (mould, clear) {
+        (Mould::Media(m), _) => return m.neutral(),
         (Mould::Gba, false) => (GBA_SHELL_PNG, GBA_CART_W, GBA_CART_H, &GBA),
         (Mould::Notched, false) => (GB_SHELL_PNG, GB_CART_W, GB_CART_H, &GB),
         (Mould::Rounded, false) => (GBC_SHELL_PNG, GB_CART_W, GB_CART_H, &GBC),

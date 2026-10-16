@@ -161,6 +161,7 @@ impl Session {
     pub fn feed(&mut self, events: impl IntoIterator<Item = RawEvent>, now: Millis) {
         let mut actions = Vec::new();
         let latched = self.gestures.ff_latched();
+        self.gestures.set_game_triggers(self.app.game_triggers());
         for ev in events {
             actions.extend(self.gestures.feed(ev, now));
         }

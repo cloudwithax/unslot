@@ -640,7 +640,7 @@ fn a_game_boy_color_title_sits_in_its_own_well_not_the_game_boys() {
 
 #[test]
 fn the_cart_shadow_is_the_cart_in_black() {
-    let s = slot_ui::cart_shadow();
+    let s = slot_ui::mould_shadow(slot_ui::Mould::Gba);
     assert_eq!((s.w, s.h), (CART_W, CART_H));
     let mask = silhouette(CART_W, CART_H);
     for (px, cover) in s.rgba.chunks_exact(4).zip(&mask) {
@@ -656,7 +656,11 @@ fn the_cart_shadow_is_the_cart_in_black() {
 #[test]
 fn each_game_boy_shell_gets_a_black_shadow_of_its_own_exact_outline() {
     for shell in [GbShell::Notched, GbShell::Rounded] {
-        let s = slot_ui::gb_cart_shadow(shell);
+        let mould = match shell {
+            GbShell::Notched => slot_ui::Mould::Notched,
+            GbShell::Rounded => slot_ui::Mould::Rounded,
+        };
+        let s = slot_ui::mould_shadow(mould);
         assert_eq!((s.w, s.h), (GB_CART_W, GB_CART_H));
         let own = gb_silhouette(shell, GB_CART_W, GB_CART_H);
         for (i, px) in s.rgba.chunks_exact(4).enumerate() {
@@ -773,4 +777,20 @@ fn a_gba_cart_is_backed_by_the_whole_picker_board() {
     assert_eq!((pak.w, pak.h), (GB_CART_W, GB_CART_H));
     let mid = pak.rgba[(((pak.h / 2) * pak.w + pak.w / 2) * 4 + 3) as usize];
     assert!(mid > 200, "the pak board is empty in the middle");
+}
+
+#[test]
+fn every_other_systems_media_casts_a_black_shadow_of_its_own_outline() {
+    for media in slot_ui::Media::ALL {
+        let s = slot_ui::mould_shadow(slot_ui::Mould::Media(media));
+        assert_eq!((s.w, s.h), media.size(), "{media:?}");
+        assert!(
+            s.rgba.chunks_exact(4).all(|p| p[..3] == [0, 0, 0]),
+            "{media:?}: the shadow is not black"
+        );
+        assert!(
+            s.rgba.chunks_exact(4).any(|p| p[3] > 250),
+            "{media:?}: the shadow backs nothing"
+        );
+    }
 }

@@ -7,6 +7,16 @@ use slot_store::{
 };
 use tempfile::tempdir;
 
+/// The screens of a state whose Game Boy family is set as given, every other platform at its
+/// default.
+fn game_boy_first(family: [Screen; 3]) -> [Screen; Platform::COUNT] {
+    let mut screens = Platform::ALL.map(Screen::default_for);
+    for (at, screen) in family.into_iter().enumerate() {
+        screens[at] = screen;
+    }
+    screens
+}
+
 #[test]
 fn atomic_write_leaves_no_partial_file_and_no_temp_behind() {
     let d = tempdir().unwrap();
@@ -201,7 +211,7 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             rumble: true,
             ff_speed: FF_SPEED_DEFAULT,
             ff_sound: false,
-            screens: [
+            screens: game_boy_first([
                 Screen {
                     shader: Shader::Grid,
                     colour_correction: false,
@@ -217,7 +227,7 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
                     colour_correction: false,
                     bezel: BezelPick::Ags102,
                 },
-            ],
+            ]),
             eject_save: true,
             turbo: true,
             rewind: true,
@@ -245,7 +255,7 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
         rumble: false,
         ff_speed: 2,
         ff_sound: true,
-        screens: [
+        screens: game_boy_first([
             Screen {
                 shader: Shader::Dot,
                 colour_correction: true,
@@ -261,7 +271,7 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
                 colour_correction: true,
                 bezel: BezelPick::File("Pocket.png".into()),
             },
-        ],
+        ]),
         eject_save: false,
         turbo: false,
         rewind: false,
@@ -442,7 +452,7 @@ fn an_unreadable_platform_reads_as_a_card_that_never_said() {
     let known = "cart=Tetris\nbrightness=3\nblue_light=1\nvolume=40\nmuted=0\nclock_set=1\nutc_offset_min=0\n";
     for (line, want) in [
         ("cart_platform=\n", None),
-        ("cart_platform=nes\n", None),
+        ("cart_platform=nes\n", Some(Platform::Nes)),
         ("cart_platform=gameboy\n", None),
         ("cart_platform=0\n", None),
         ("cart_platform=nds\n", None),

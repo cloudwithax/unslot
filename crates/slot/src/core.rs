@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use slot_retro::{LibretroCore, MockCore, RetroCore};
+use slot_retro::{Canvas, LibretroCore, MockCore, RetroCore};
 use slot_store::{Core, GbPalette, Platform};
 
 use crate::root;
@@ -103,6 +103,9 @@ fn open_named(
         }
         match LibretroCore::open_with(path, &bios, &saves) {
             Ok(mut opened) => {
+                if platform.spec().native {
+                    opened.set_canvas(Canvas::Native);
+                }
                 apply_core_options(
                     &mut opened,
                     core,
@@ -173,6 +176,7 @@ pub fn colour_option(
             "gpsp_color_correction",
             if on { "enabled" } else { "disabled" },
         )),
+        _ => None,
     }
 }
 
@@ -194,7 +198,10 @@ pub fn apply_core_options(
     colour: bool,
     palette: Option<GbPalette>,
 ) {
-    core.set_option(&format!("{}_frameskip", which.as_str()), "auto");
+    // The two GBA cores read the audio buffer's state to skip frames; the rest have no such key.
+    if matches!(which, Core::Mgba | Core::Gpsp) {
+        core.set_option(&format!("{}_frameskip", which.as_str()), "auto");
+    }
     if which == Core::Mgba {
         core.set_option("mgba_sgb_borders", "OFF");
         core.set_option("mgba_force_gbp", "ON");

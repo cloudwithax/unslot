@@ -84,6 +84,7 @@ pub struct Gestures {
     r2_refused: bool,
     r2_last_release: Option<Millis>,
     rewinding: bool,
+    game_triggers: bool,
 }
 
 fn ramp_due(down: Option<Millis>, last: Option<Millis>, now: Millis) -> bool {
@@ -103,6 +104,12 @@ impl Gestures {
 
     pub fn set_menu_dpad_display(&mut self, enabled: bool) {
         self.menu_dpad_display = enabled;
+    }
+
+    /// Hands L2 and R2 to the game as buttons, for a system whose pad has them, instead of
+    /// rewinding and fast forwarding.
+    pub fn set_game_triggers(&mut self, on: bool) {
+        self.game_triggers = on;
     }
 
     pub fn ff_latched(&self) -> bool {
@@ -190,8 +197,8 @@ impl Gestures {
             }
             Btn::Lid => vec![Action::LidClose],
             Btn::VolUp | Btn::VolDown => self.volume_press(b, now),
-            Btn::L2 => self.rewind_start(),
-            Btn::R2 => self.ff_down(now),
+            Btn::L2 if !self.game_triggers => self.rewind_start(),
+            Btn::R2 if !self.game_triggers => self.ff_down(now),
             _ => {
                 let mut out = self.hand_over_select(now);
                 out.push(Action::GbaDown(b));
@@ -213,8 +220,8 @@ impl Gestures {
             Btn::Power => self.power_up(),
             Btn::Lid => vec![Action::LidOpen],
             Btn::VolUp | Btn::VolDown => self.volume_release(b),
-            Btn::L2 => self.rewind_stop(),
-            Btn::R2 => self.ff_up(now),
+            Btn::L2 if !self.game_triggers => self.rewind_stop(),
+            Btn::R2 if !self.game_triggers => self.ff_up(now),
             _ => vec![Action::GbaUp(b)],
         }
     }

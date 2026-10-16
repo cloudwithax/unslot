@@ -623,3 +623,16 @@ fn menu_dpad_display_chord_resets_when_menu_is_released() {
     g.feed(Down(Menu), 300);
     assert_eq!(g.tick(300 + MENU_HOLD_MS), vec![Eject]);
 }
+
+#[test]
+fn the_triggers_rewind_and_fast_forward_until_the_game_takes_them() {
+    let mut g = Gestures::new();
+    assert_eq!(g.feed(Down(Btn::L2), 0), vec![RewindStart]);
+    assert_eq!(g.feed(Up(Btn::L2), 10), vec![RewindStop]);
+
+    g.set_game_triggers(true);
+    assert_eq!(g.feed(Down(Btn::L2), 20), vec![GbaDown(Btn::L2)]);
+    assert_eq!(g.feed(Up(Btn::L2), 30), vec![GbaUp(Btn::L2)]);
+    assert_eq!(g.feed(Down(Btn::R2), 40), vec![GbaDown(Btn::R2)]);
+    assert_eq!(g.feed(Up(Btn::R2), 50), vec![GbaUp(Btn::R2)]);
+}

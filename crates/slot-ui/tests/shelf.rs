@@ -1,7 +1,7 @@
 use slot_power::{Battery, Charge};
 use slot_store::{Cart, Platform};
 use slot_ui::{
-    draw_footer, footer_ink, label_colour, rest_y, Canvas, Draw, GbShell, Printed, Shelf, TexId,
+    draw_footer, footer_ink, label_colour, rest_y, Canvas, Draw, Mould, Printed, Shelf, TexId,
     CART_H, CART_W, GB_CART_H, GB_CART_W, LABEL_W, LABEL_X, LABEL_Y, OUT_W,
 };
 
@@ -749,7 +749,7 @@ fn the_row_parts_for_the_cart_going_in() {
 fn dim_darkens_a_side_carts_face_and_not_the_black_under_it() {
     let mut s = shelf_with(3);
     let shadow = TexId::from_raw(99);
-    s.set_shadow(shadow);
+    s.set_shadow(Mould::Gba, shadow);
     let side = TexId::from_raw(11);
     s.set_faces(vec![TexId::from_raw(10), side, TexId::from_raw(12)]);
     let drawn = |dim: f32| {
@@ -847,7 +847,7 @@ fn a_game_boy_row_backs_its_carts_with_the_game_boy_shadow() {
     settle(&mut s);
     s.set_faces((0..3).map(|i| TexId::from_raw(20 + i)).collect());
     let gba = TexId::from_raw(98);
-    s.set_shadow(gba);
+    s.set_shadow(Mould::Gba, gba);
     // Off-centre carts stay opaque, so only a receding row (the core picker) shows a shadow.
     let drawn = |s: &Shelf| {
         let mut out = Vec::new();
@@ -861,7 +861,7 @@ fn a_game_boy_row_backs_its_carts_with_the_game_boy_shadow() {
         "the GBA silhouette was stretched under a Game Boy pak"
     );
     let gb = TexId::from_raw(97);
-    s.set_gb_shadow(GbShell::Notched, gb);
+    s.set_shadow(Mould::Notched, gb);
     assert!(
         drawn(&s)
             .iter()
@@ -901,8 +901,8 @@ fn a_colour_pak_and_a_grey_one_are_backed_by_their_own_shells() {
         s.select(selected);
         settle(&mut s);
         s.set_faces(vec![TexId::from_raw(20), TexId::from_raw(21)]);
-        s.set_gb_shadow(GbShell::Notched, notched);
-        s.set_gb_shadow(GbShell::Rounded, rounded);
+        s.set_shadow(Mould::Notched, notched);
+        s.set_shadow(Mould::Rounded, rounded);
         let mut out = Vec::new();
         s.draw_row(
             Canvas::FRAMED,
@@ -933,8 +933,8 @@ fn a_cart_pushed_onto_the_row_draws_rather_than_stopping_the_device() {
     let mut s = gb_shelf_with(2);
     let gb = TexId::from_raw(97);
     let gba = TexId::from_raw(98);
-    s.set_shadow(gba);
-    s.set_gb_shadow(GbShell::Notched, gb);
+    s.set_shadow(Mould::Gba, gba);
+    s.set_shadow(Mould::Notched, gb);
     settle(&mut s);
     let backed = |s: &Shelf| {
         let mut out = Vec::new();
@@ -979,7 +979,7 @@ fn a_clear_cart_is_drawn_over_its_board_and_a_solid_one_is_not() {
         settle(&mut s);
         let face = TexId::from_raw(20);
         s.set_faces(vec![face]);
-        s.set_backing(board);
+        s.set_backing(Mould::Gba, board);
         let mut out = Vec::new();
         s.draw_row(Canvas::FRAMED, None, 0.0, 0.0, 1.0, &mut out);
         let at = |t: TexId| {
@@ -1011,7 +1011,7 @@ fn a_clear_cart_draws_its_interior_then_the_board_then_the_plastic() {
         TexId::from_raw(20),
     );
     s.set_faces(vec![face]);
-    s.set_backing(board);
+    s.set_backing(Mould::Gba, board);
     s.set_interior(0, interior);
     let mut out = Vec::new();
     s.draw_row(Canvas::FRAMED, None, 0.0, 0.0, 1.0, &mut out);
@@ -1059,7 +1059,7 @@ fn a_clear_pak_draws_its_interior_then_the_board_then_the_plastic() {
         TexId::from_raw(20),
     );
     s.set_faces(vec![face]);
-    s.set_gb_backing(GbShell::Notched, board);
+    s.set_backing(Mould::Notched, board);
     s.set_interior(0, interior);
     let mut out = Vec::new();
     s.draw_row(Canvas::FRAMED, None, 0.0, 0.0, 1.0, &mut out);
@@ -1086,7 +1086,7 @@ fn only_a_clear_cart_has_anything_behind_its_plastic() {
     for (code, clear) in [("BPEE", true), ("BPRE", false)] {
         let mut s = Shelf::new(vec![cart("Game", code)]);
         s.set_faces(vec![TexId::from_raw(20)]);
-        s.set_backing(board);
+        s.set_backing(Mould::Gba, board);
         s.set_interior(0, interior);
         let want = if clear {
             [Some(interior), Some(board)]
@@ -1122,8 +1122,8 @@ fn a_pak_is_classed_when_it_is_drawn_not_when_the_shelf_is_built() {
     s.set_faces(vec![TexId::from_raw(20), TexId::from_raw(21)]);
     let notched = TexId::from_raw(90);
     let rounded = TexId::from_raw(91);
-    s.set_gb_shadow(GbShell::Notched, notched);
-    s.set_gb_shadow(GbShell::Rounded, rounded);
+    s.set_shadow(Mould::Notched, notched);
+    s.set_shadow(Mould::Rounded, rounded);
     let mut out = Vec::new();
     s.draw_row(Canvas::FRAMED, Some("Front"), 0.0, 0.3, 1.0, &mut out);
     assert!(

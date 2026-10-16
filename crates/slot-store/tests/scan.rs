@@ -157,3 +157,57 @@ fn the_same_stem_on_two_platforms_is_two_carts_with_two_labels() {
         "the GBA cart borrowed the Game Boy label"
     );
 }
+
+fn write_file(d: &TempDir, rel: &str, body: &str) {
+    let path = d.path().join("Games").join(rel);
+    std::fs::create_dir_all(path.parent().expect("a game has a folder")).expect("create dir");
+    std::fs::write(path, body).expect("write game");
+}
+
+#[test]
+fn a_multi_disc_game_is_shelved_once_as_its_playlist() {
+    let d = tmp_root();
+    write_file(&d, "PS/Final Fantasy VII (Disc 1).chd", "");
+    write_file(&d, "PS/Final Fantasy VII (Disc 2).chd", "");
+    write_file(
+        &d,
+        "PS/Final Fantasy VII.m3u",
+        "# discs\nFinal Fantasy VII (Disc 1).chd\r\nFinal Fantasy VII (Disc 2).chd\n",
+    );
+    write_file(&d, "PS/Crash Bandicoot.cue", "");
+    let stems: Vec<String> = scan(d.path())
+        .unwrap()
+        .into_iter()
+        .filter(|c| c.platform == Platform::PlayStation)
+        .map(|c| c.stem)
+        .collect();
+    assert_eq!(stems, ["Crash Bandicoot", "Final Fantasy VII"]);
+}
+
+#[test]
+fn a_playlist_hides_discs_only_on_its_own_shelf() {
+    let d = tmp_root();
+    write_file(&d, "MD/Sonic.md", "");
+    write_file(&d, "PS/Sonic.m3u", "../MD/Sonic.md\n");
+    let carts = scan(d.path()).unwrap();
+    assert!(
+        carts
+            .iter()
+            .any(|c| c.platform == Platform::Genesis && c.stem == "Sonic"),
+        "a playlist on another shelf hid a game it has no business with"
+    );
+}
+
+#[test]
+fn a_system_without_a_header_keeps_its_file_name_as_its_title() {
+    let d = tmp_root();
+    write_file(&d, "NES/Super Mario Bros. (World).nes", "NES\x1a");
+    let mut cart = scan(d.path()).unwrap().remove(0);
+    cart.read_header();
+    assert_eq!(cart.platform, Platform::Nes);
+    assert_eq!(cart.stem, "Super Mario Bros. (World)");
+    assert_eq!(
+        cart.title, "",
+        "a headerless system read a title out of the file"
+    );
+}
