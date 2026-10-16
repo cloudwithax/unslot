@@ -15,8 +15,11 @@ mod draw;
 mod footer;
 mod hud;
 mod icon;
+mod keyboard;
 mod link_art;
+mod list_page;
 mod media;
+mod page;
 mod plate;
 mod polaroids;
 mod power_menu;
@@ -59,11 +62,13 @@ pub use hud::{
     HUD_ICON_PX, HUD_INK, HUD_MS, LINK_HOST_INK, LINK_JOIN_INK, PLATE_H,
 };
 pub use icon::{badge_face, icon_box, icon_face, star_face, warm_fonts, Badge, Icon};
+pub use keyboard::{KeyInput, KeyOutcome, Keyboard};
 pub use link_art::{
     link_art, LinkArt, ADAPTER_BASE_X, ADAPTER_BASE_Y, ADAPTER_H, ADAPTER_W, ARCS, ARROW_H,
     ARROW_LEFT_X, ARROW_RIGHT_X, ARROW_W, ARROW_Y, CLICKS_H, CLICKS_W, CLICKS_X, CLICKS_Y, PLUG_H,
     PLUG_TIP_X, PLUG_W, PORT_H, PORT_W, PORT_Y,
 };
+pub use list_page::{ListPage, ListRow, LIST_ROWS};
 pub use media::Media;
 pub use plate::{
     arrows_hint_coloured, arrows_hint_face, arrows_hint_width, cap_width, centred_hints,

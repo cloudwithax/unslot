@@ -14,10 +14,11 @@ use slot_store::{
 use slot_ui::{
     board_from, board_zoom, draw_empty_slot, draw_footer, draw_ground, draw_slot_name,
     draw_sticker, ease, footer_ink, grown, lid_at, lid_from, lift_of, on_board, repeat_gap,
-    shelf_cart_at, ClockPicker, Draw, FfState, Hud, HudKind, Icon, LinkBadge, Millis, Mould,
-    Placed, Polaroids, PowerChoice, QuickMenu, QuickMenuFaces, QuickRow, QuickValue, Refusal,
-    Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H, CHIP_U, CHIP_V, CHIP_W, HINT_EDGE, HOP_LIFT,
-    MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W, TURN_PAD,
+    shelf_cart_at, ClockPicker, Draw, FfState, Hud, HudKind, Icon, KeyInput, KeyOutcome, Keyboard,
+    LinkBadge, ListPage, ListRow, Millis, Mould, Placed, Polaroids, PowerChoice, QuickMenu,
+    QuickMenuFaces, QuickRow, QuickValue, Refusal, Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H,
+    CHIP_U, CHIP_V, CHIP_W, HINT_EDGE, HOP_LIFT, MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W,
+    SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W, TURN_PAD,
 };
 
 use crate::audio::Sfx;
@@ -28,6 +29,7 @@ use crate::link_screen::LinkSprites;
 use crate::link_start::{link_port, LinkFail, LinkProgress, LinkStarter, LinkStep};
 use crate::persist::{self, Snapshot};
 use crate::video_mode::{self, VideoMode};
+use crate::wifi::{Busy, Network, Security, Wifi, WifiView};
 
 pub const INSERT_S: f32 = 0.73;
 const INSERT_HOLD_S: f32 = 0.28;
@@ -262,6 +264,39 @@ pub enum Phase {
     Doze {
         cart: Option<String>,
     },
+    /// The Wi-Fi networks in range. `note` says why the last pick went nowhere.
+    Networks {
+        cursor: usize,
+        note: Option<String>,
+    },
+    /// Typing for the network page, which it goes back to at `cursor`.
+    Keyboard {
+        keys: Keyboard,
+        typing: Typing,
+        cursor: usize,
+    },
+}
+
+/// What the keyboard is being typed for.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Typing {
+    Password(String),
+    /// The name of a network that does not announce itself.
+    HiddenName,
+    HiddenPassword(String),
+}
+
+/// A page slot draws whole, for the frontend to turn into a picture when it changes.
+#[derive(Clone, PartialEq, Debug)]
+pub enum PageModel {
+    List(ListPage),
+    Keys(Keyboard),
+}
+
+/// A row on the network page.
+enum NetRow {
+    Network(Network),
+    Other,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -412,6 +447,9 @@ pub struct App {
     powering_off: bool,
     radio: Box<dyn RadioJobs>,
     state_writer: crate::state_writer::StateWriter,
+    wifi: Option<Wifi>,
+    wifi_view: WifiView,
+    page_face: Option<(TexId, u32, u32)>,
 }
 
 const FACE_AHEAD: i32 = 8;
@@ -575,6 +613,9 @@ impl App {
             battery: None,
             last_led: None,
             powering_off: false,
+            wifi: None,
+            wifi_view: WifiView::default(),
+            page_face: None,
         }
     }
 
@@ -586,6 +627,11 @@ impl App {
         let mut app = App::new(carts);
         app.root = Some(root.to_path_buf());
         app.state = read_slot_state(root);
+        let wifi = Wifi::for_card(root);
+        if app.state.wifi {
+            wifi.turn_on();
+        }
+        app.wifi = Some(wifi);
         app.restock_recents();
         app.restock_favorites();
         if let Some((at, i)) = app.remembered_seat() {
@@ -692,8 +738,8 @@ impl App {
             return false;
         }
         match self.phase {
-            Phase::SetClock { .. } => true,
-            Phase::QuickMenu { .. } => vertical,
+            Phase::SetClock { .. } | Phase::Keyboard { .. } => true,
+            Phase::QuickMenu { .. } | Phase::Networks { .. } => vertical,
             Phase::Shelf => vertical && self.core_picker.is_none(),
             Phase::Polaroids { .. } => !vertical,
             Phase::Playing { .. } => vertical && self.in_game_menu.is_some(),
@@ -941,7 +987,10 @@ impl App {
             | QuickRow::Palette
             | QuickRow::ScreenOf(_)
             | QuickRow::BezelOf(_)
+            | QuickRow::Network
+            | QuickRow::WifiNetworks
             | QuickRow::Bezel => None,
+            QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
         }
     }
 
@@ -1128,6 +1177,9 @@ impl App {
         );
         // A disc is only swapped from inside a game.
         let mut hidden = vec![QuickRow::Disc];
+        if !self.state.wifi {
+            hidden.push(QuickRow::WifiNetworks);
+        }
         if !own {
             hidden.push(QuickRow::WallpaperTint);
         }
@@ -1510,7 +1562,7 @@ impl App {
         self.link_player = None;
         self.sync_link_badge();
         self.radio.ask(RadioJob::Down);
-        self.radio.ask(RadioJob::Cool);
+        self.cool_radio();
     }
 
     pub fn peer_lost(&mut self) {
@@ -1926,7 +1978,232 @@ impl App {
             }
             Phase::About if action == Action::GbaDown(Btn::X) => self.begin_restart(),
             Phase::QuickMenu { row } => self.quick_menu_input(row, action),
+            Phase::Networks { cursor, .. } => self.networks_input(cursor, action),
+            Phase::Keyboard { .. } => self.keyboard_input(action),
             _ => {}
+        }
+    }
+
+    fn with_wifi(&self, f: impl FnOnce(&Wifi)) {
+        if let Some(wifi) = &self.wifi {
+            f(wifi);
+        }
+    }
+
+    /// Steps the radio aside for a link session, which needs wlan0 to itself.
+    fn warm_radio(&mut self) {
+        if self.state.wifi {
+            self.with_wifi(Wifi::turn_off);
+        }
+        self.radio.ask(RadioJob::Warm);
+    }
+
+    /// Lets the link radio go and brings the Wi-Fi back if it was on.
+    fn cool_radio(&mut self) {
+        self.radio.ask(RadioJob::Cool);
+        if self.state.wifi {
+            self.with_wifi(Wifi::turn_on);
+        }
+    }
+
+    pub fn wifi_view(&self) -> &WifiView {
+        &self.wifi_view
+    }
+
+    fn network_rows(&self) -> Vec<NetRow> {
+        self.wifi_view
+            .networks
+            .iter()
+            .cloned()
+            .map(NetRow::Network)
+            .chain([NetRow::Other])
+            .collect()
+    }
+
+    fn networks_input(&mut self, cursor: usize, action: Action) {
+        let rows = self.network_rows();
+        let n = rows.len();
+        let cursor = cursor.min(n - 1);
+        let (cursor, note) = match action {
+            Action::GbaDown(Btn::Up) => ((cursor + n - 1) % n, None),
+            Action::GbaDown(Btn::Down) => ((cursor + 1) % n, None),
+            Action::GbaDown(Btn::Y) => {
+                self.with_wifi(Wifi::scan);
+                (cursor, None)
+            }
+            Action::GbaDown(Btn::X) => {
+                if let Some(NetRow::Network(net)) = rows.get(cursor) {
+                    if net.saved {
+                        self.with_wifi(|w| w.forget(&net.ssid));
+                    }
+                }
+                (cursor, None)
+            }
+            Action::GbaDown(Btn::A) => match rows.get(cursor) {
+                Some(NetRow::Other) => {
+                    self.phase = Phase::Keyboard {
+                        keys: Keyboard::new("Network name", "", false, 1, 32),
+                        typing: Typing::HiddenName,
+                        cursor,
+                    };
+                    return;
+                }
+                Some(NetRow::Network(net)) => match self.pick_network(net, cursor) {
+                    Some(note) => (cursor, Some(note)),
+                    None => return,
+                },
+                None => (cursor, None),
+            },
+            Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::WifiNetworks,
+                };
+                return;
+            }
+            _ => return,
+        };
+        self.phase = Phase::Networks { cursor, note };
+    }
+
+    /// Joins `net`, or opens the keyboard for its password. Some note when it cannot be joined.
+    fn pick_network(&mut self, net: &Network, cursor: usize) -> Option<String> {
+        if self.wifi_view.connected.as_deref() == Some(net.ssid.as_str()) {
+            return Some(format!("Already connected to {}", net.ssid));
+        }
+        match (net.security, net.saved) {
+            (Security::Unsupported, _) => {
+                Some("Enterprise and WEP networks are not supported".into())
+            }
+            (Security::Open, _) | (_, true) => {
+                self.with_wifi(|w| w.join(&net.ssid, None));
+                Some(String::new())
+            }
+            (Security::Personal, false) => {
+                self.phase = Phase::Keyboard {
+                    keys: Keyboard::new(&format!("Password for {}", net.ssid), "", true, 8, 63),
+                    typing: Typing::Password(net.ssid.clone()),
+                    cursor,
+                };
+                None
+            }
+        }
+    }
+
+    fn keyboard_input(&mut self, action: Action) {
+        let input = match action {
+            Action::GbaDown(Btn::Up) => KeyInput::Up,
+            Action::GbaDown(Btn::Down) => KeyInput::Down,
+            Action::GbaDown(Btn::Left) => KeyInput::Left,
+            Action::GbaDown(Btn::Right) => KeyInput::Right,
+            Action::GbaDown(Btn::A) => KeyInput::Pick,
+            Action::GbaDown(Btn::B) => KeyInput::Delete,
+            Action::GbaDown(Btn::Y) => KeyInput::Space,
+            Action::GbaDown(Btn::X) => KeyInput::Shift,
+            Action::GbaDown(Btn::L1 | Btn::R1) => KeyInput::Page,
+            Action::GbaDown(Btn::Start) => KeyInput::Done,
+            Action::GbaDown(Btn::Select) => KeyInput::Reveal,
+            Action::QuickMenu => KeyInput::Cancel,
+            _ => return,
+        };
+        let Phase::Keyboard {
+            keys,
+            typing,
+            cursor,
+        } = &mut self.phase
+        else {
+            return;
+        };
+        let (typing, cursor) = (typing.clone(), *cursor);
+        match keys.press(input) {
+            KeyOutcome::Typing => {}
+            KeyOutcome::Cancelled => {
+                self.phase = Phase::Networks { cursor, note: None };
+            }
+            KeyOutcome::Done(text) => match typing {
+                Typing::Password(ssid) => {
+                    self.with_wifi(|w| w.join(&ssid, Some(&text)));
+                    self.phase = Phase::Networks { cursor, note: None };
+                }
+                Typing::HiddenName => {
+                    self.phase = Phase::Keyboard {
+                        keys: Keyboard::new(
+                            &format!("Password for {text}, or none if it is open"),
+                            "",
+                            true,
+                            0,
+                            63,
+                        ),
+                        typing: Typing::HiddenPassword(text),
+                        cursor,
+                    };
+                }
+                Typing::HiddenPassword(ssid) => {
+                    let psk = Some(text.as_str()).filter(|p| !p.is_empty());
+                    self.with_wifi(|w| w.join(&ssid, psk));
+                    self.phase = Phase::Networks { cursor, note: None };
+                }
+            },
+        }
+    }
+
+    /// The page the frontend should draw for the phase, if it is one slot lays out whole.
+    pub fn page_model(&self) -> Option<PageModel> {
+        match &self.phase {
+            Phase::Networks { cursor, note } => Some(PageModel::List(
+                self.networks_page(*cursor, note.as_deref()),
+            )),
+            Phase::Keyboard { keys, .. } => Some(PageModel::Keys(keys.clone())),
+            _ => None,
+        }
+    }
+
+    pub fn set_page_face(&mut self, tex: TexId, w: u32, h: u32) {
+        self.page_face = Some((tex, w, h));
+    }
+
+    fn networks_page(&self, cursor: usize, note: Option<&str>) -> ListPage {
+        let v = &self.wifi_view;
+        let rows: Vec<ListRow> = self
+            .network_rows()
+            .into_iter()
+            .map(|row| match row {
+                NetRow::Other => ListRow {
+                    label: "Other network...".into(),
+                    ..ListRow::default()
+                },
+                NetRow::Network(net) => ListRow {
+                    detail: match () {
+                        _ if v.connected.as_deref() == Some(net.ssid.as_str()) => {
+                            "Connected".into()
+                        }
+                        _ if net.saved => "Saved".into(),
+                        _ if net.security == Security::Unsupported => "Not supported".into(),
+                        _ if net.security == Security::Open => "Open".into(),
+                        _ => String::new(),
+                    },
+                    bars: Some(net.bars()),
+                    label: net.ssid,
+                },
+            })
+            .collect();
+        let status = match (&v.busy, note.filter(|n| !n.is_empty()), &v.error) {
+            (Busy::Starting, ..) => "Turning the Wi-Fi on...".to_string(),
+            (Busy::Joining(ssid), ..) => format!("Joining {ssid}..."),
+            (_, Some(note), _) => note.to_string(),
+            (_, None, Some(error)) => error.clone(),
+            (Busy::Scanning, ..) => "Looking for networks...".to_string(),
+            (Busy::Idle, None, None) => match (&v.connected, &v.ip) {
+                (Some(ssid), Some(ip)) => format!("Connected to {ssid}, {ip}"),
+                (Some(ssid), None) => format!("Connected to {ssid}"),
+                (None, _) => "Not connected".to_string(),
+            },
+        };
+        ListPage {
+            title: "Wi-Fi".into(),
+            status,
+            cursor: cursor.min(rows.len().saturating_sub(1)),
+            rows,
+            hints: "A join   X forget   Y search again   B back".into(),
         }
     }
 
@@ -2024,7 +2301,18 @@ impl App {
                 self.phase = clock_screen(self.utc_secs(), self.state.utc_offset_min, true);
             }
             QuickRow::About => self.phase = Phase::About,
-            QuickRow::Screen | QuickRow::Game | QuickRow::General | QuickRow::ScreenOf(_) => {
+            QuickRow::WifiNetworks => {
+                self.phase = Phase::Networks {
+                    cursor: 0,
+                    note: None,
+                };
+                self.with_wifi(Wifi::scan);
+            }
+            QuickRow::Screen
+            | QuickRow::Game
+            | QuickRow::General
+            | QuickRow::Network
+            | QuickRow::ScreenOf(_) => {
                 if let Some(row) = row.child() {
                     let row = row.shown(&self.hidden_rows())[0];
                     self.phase = Phase::QuickMenu { row };
@@ -2056,12 +2344,22 @@ impl App {
             | QuickRow::ColourCorrection
             | QuickRow::Palette
             | QuickRow::BezelOf(_)
+            | QuickRow::Wifi
             | QuickRow::Bezel => {}
         }
     }
 
     fn change_setting(&mut self, row: QuickRow, right: bool) {
         let row = self.playing_row(row);
+        if row == QuickRow::Wifi {
+            self.state.wifi = !self.state.wifi;
+            match self.state.wifi {
+                true => self.with_wifi(Wifi::turn_on),
+                false => self.with_wifi(Wifi::turn_off),
+            }
+            self.persist();
+            return;
+        }
         if row == QuickRow::Palette {
             let to = match right {
                 true => self.state.gb_palette.next(),
@@ -2156,6 +2454,9 @@ impl App {
             | QuickRow::Disc
             | QuickRow::ScreenOf(_)
             | QuickRow::BezelOf(_)
+            | QuickRow::Network
+            | QuickRow::Wifi
+            | QuickRow::WifiNetworks
             | QuickRow::Bezel => return,
         }
         self.persist();
@@ -2611,6 +2912,9 @@ impl App {
     }
 
     fn timers(&mut self) {
+        if let Some(wifi) = &self.wifi {
+            self.wifi_view = wifi.view();
+        }
         self.play_hold();
         self.repeat_held_dir();
         let offer = self.undo_label();
@@ -3003,6 +3307,21 @@ impl App {
                 slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
                 draw_sticker(self.canvas(), self.sticker_face, out);
                 self.draw_menu_footer(out);
+                return;
+            }
+            Phase::Networks { .. } | Phase::Keyboard { .. } => {
+                slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
+                if let Some((tex, w, h)) = self.page_face {
+                    let canvas = self.canvas();
+                    out.push(Draw::Tex {
+                        x: canvas.centred(w as f32).round(),
+                        y: ((OUT_H - h) / 2) as f32,
+                        w: w as f32,
+                        h: h as f32,
+                        tex,
+                        alpha: 1.0,
+                    });
+                }
                 return;
             }
             Phase::Inserting { cart, resumed, .. } => {
@@ -3771,7 +4090,7 @@ impl App {
         self.polaroids = None;
         self.phase = Phase::Doze { cart };
         self.dozed_at = self.now();
-        self.radio.ask(RadioJob::Cool);
+        self.cool_radio();
         if let Some(power) = &mut self.power {
             power.on_close();
         }
@@ -3883,7 +4202,7 @@ impl App {
                 return;
             }
             self.link_hardware = LinkKind::Cable;
-            self.radio.ask(RadioJob::Warm);
+            self.warm_radio();
             self.game_menu = Some(GameMenu::Pick(self.last_role));
             return;
         }
@@ -3907,7 +4226,7 @@ impl App {
             .seated()
             .map_or(LinkKind::Cable, |stem| self.link_mode(stem).0);
         self.link_hardware = hardware;
-        self.radio.ask(RadioJob::Warm);
+        self.warm_radio();
         self.game_menu = Some(GameMenu::Pick(self.last_role));
     }
 
@@ -4103,7 +4422,7 @@ impl App {
             starting.starter.cancel();
         }
         if !self.link_active() {
-            self.radio.ask(RadioJob::Cool);
+            self.cool_radio();
         }
         let uncollected =
             self.link_reload.is_some() && self.reload.as_ref().is_some_and(|r| !r.fallback);

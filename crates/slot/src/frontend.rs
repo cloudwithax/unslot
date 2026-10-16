@@ -56,6 +56,7 @@ pub struct Frontend {
     quick_clock: QuickClock,
     quick_palette: QuickPalette,
     wallpaper: WallpaperSync,
+    page: PageSync,
     game_bezel: BezelSync,
     look: Option<ShelfLook>,
     link_shot: Option<TexId>,
@@ -182,6 +183,7 @@ impl Frontend {
             quick_clock: QuickClock::default(),
             quick_palette: QuickPalette::default(),
             wallpaper: WallpaperSync::default(),
+            page: PageSync::default(),
             game_bezel: BezelSync::default(),
             look: None,
             link_shot: None,
@@ -541,6 +543,7 @@ impl Frontend {
         sync_quick_clock(self.session.app_mut(), compositor, &mut self.quick_clock);
         sync_quick_palette(self.session.app_mut(), compositor, &mut self.quick_palette);
         sync_wallpaper(self.session.app_mut(), compositor, &mut self.wallpaper);
+        sync_page(self.session.app_mut(), compositor, &mut self.page);
         sync_game_bezel(self.session.app_mut(), compositor, &mut self.game_bezel);
         compositor.set_game_bezel(self.session.app().shown_game_bezel());
         compositor.set_sp_frame(self.session.app().sp_frame());
@@ -1156,6 +1159,30 @@ fn sync_core_picker(
     );
     app.set_core_board_faces(board_id, lid_id);
     *built = Some(faces.stem);
+}
+
+#[derive(Default)]
+struct PageSync {
+    shown: Option<crate::app::PageModel>,
+    tex: Option<TexId>,
+}
+
+/// Draws the page slot lays out whole, the keyboard or a list, each time what it shows changes.
+fn sync_page(app: &mut App, compositor: &mut Compositor, state: &mut PageSync) {
+    let model = app.page_model();
+    if model == state.shown {
+        return;
+    }
+    if let Some(page) = &model {
+        let face = match page {
+            crate::app::PageModel::List(list) => list.face(),
+            crate::app::PageModel::Keys(keys) => keys.face(),
+        };
+        let (w, h) = (face.w, face.h);
+        let tex = upload(compositor, &mut state.tex, face);
+        app.set_page_face(tex, w, h);
+    }
+    state.shown = model;
 }
 
 fn upload(compositor: &mut Compositor, slot: &mut Option<TexId>, face: slot_ui::UndoFace) -> TexId {

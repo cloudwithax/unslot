@@ -67,6 +67,20 @@ pub fn fit_box(
     }
 }
 
+/// One line of `text` as written, for where case matters: what someone typed. Shrinks from
+/// `max_px` until it fits `max_w`, down to `min_px`.
+pub fn fit_as_written(font: &Font, text: &str, max_w: f32, max_px: f32, min_px: f32) -> Layout {
+    let mut px = max_px;
+    while px > min_px && line_width(font, text, px, tracking_for(px)) > max_w {
+        px -= 1.0;
+    }
+    Layout {
+        lines: vec![text.to_string()],
+        px,
+        tracking: tracking_for(px),
+    }
+}
+
 pub fn draw_centred(dst: &mut [u8], dst_w: u32, dst_h: u32, layout: &Layout, colour: [u8; 3]) {
     for (i, a) in coverage(dst_w, dst_h, layout).into_iter().enumerate() {
         if a > 0 {

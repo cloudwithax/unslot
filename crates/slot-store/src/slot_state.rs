@@ -220,6 +220,8 @@ pub struct SlotState {
     pub wallpaper_tint: WallpaperTint,
     pub show_recents: bool,
     pub show_titles: bool,
+    /// Whether the Wi-Fi is meant to be on, so it comes back on at boot.
+    pub wifi: bool,
     pub recents: Vec<Recent>,
     pub favorites: Vec<Recent>,
     pub shelf: Option<String>,
@@ -357,6 +359,7 @@ impl Default for SlotState {
             wallpaper_tint: WallpaperTint::Off,
             show_recents: false,
             show_titles: false,
+            wifi: false,
             recents: Vec::new(),
             favorites: Vec::new(),
             shelf: None,
@@ -448,6 +451,7 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     text.push_str(&format!("wallpaper_tint={}\n", s.wallpaper_tint.key()));
     text.push_str(&format!("show_recents={}\n", s.show_recents as u8));
     text.push_str(&format!("show_titles={}\n", s.show_titles as u8));
+    text.push_str(&format!("wifi={}\n", s.wifi as u8));
     text.push_str(&format!("shelf={}\n", s.shelf.as_deref().unwrap_or("")));
     text.push_str(&format!(
         "shelf_cart={}\n",
@@ -491,6 +495,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut wallpaper_tint = None;
     let mut show_recents = None;
     let mut show_titles = None;
+    let mut wifi = None;
     let mut shelf = None;
     let mut shelf_cart = None;
     for line in text.lines().filter(|l| !l.is_empty()) {
@@ -534,6 +539,7 @@ fn parse(text: &str) -> Option<SlotState> {
             "wallpaper_tint" => wallpaper_tint = WallpaperTint::parse(value),
             "show_recents" => show_recents = flag(value),
             "show_titles" => show_titles = flag(value),
+            "wifi" => wifi = flag(value),
             "shelf" => shelf = Some(value.to_string()).filter(|v| !v.is_empty()),
             "shelf_cart" => shelf_cart = recent_value(value),
             _ => {}
@@ -583,6 +589,7 @@ fn parse(text: &str) -> Option<SlotState> {
         wallpaper_tint: wallpaper_tint.unwrap_or(fallback.wallpaper_tint),
         show_recents: show_recents.unwrap_or(fallback.show_recents),
         show_titles: show_titles.unwrap_or(fallback.show_titles),
+        wifi: wifi.unwrap_or(fallback.wifi),
         recents: Vec::new(),
         favorites: Vec::new(),
         shelf,

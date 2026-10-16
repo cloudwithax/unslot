@@ -40,6 +40,9 @@ pub enum QuickRow {
     Bezel,
     /// Which disc of a multi-disc game is in the drive.
     Disc,
+    Network,
+    Wifi,
+    WifiNetworks,
     /// A platform's own page under Screen, and the rows on it.
     ScreenOf(Platform),
     ShaderOf(Platform),
@@ -48,7 +51,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 29] = [
+const GENERIC: [QuickRow; 32] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -78,6 +81,9 @@ const GENERIC: [QuickRow; 29] = [
     QuickRow::Palette,
     QuickRow::Bezel,
     QuickRow::Disc,
+    QuickRow::Network,
+    QuickRow::Wifi,
+    QuickRow::WifiNetworks,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -124,12 +130,15 @@ impl QuickRow {
         all
     };
 
-    pub const MAIN: [QuickRow; 4] = [
+    pub const MAIN: [QuickRow; 5] = [
         QuickRow::General,
         QuickRow::Screen,
         QuickRow::Game,
+        QuickRow::Network,
         QuickRow::About,
     ];
+
+    pub const NETWORK: [QuickRow; 2] = [QuickRow::Wifi, QuickRow::WifiNetworks];
 
     pub const GENERAL: [QuickRow; 6] = [
         QuickRow::Wallpaper,
@@ -239,6 +248,7 @@ impl QuickRow {
                 QuickRow::PLAY.to_vec()
             }
             QuickRow::PlayScreen | QuickRow::PlayGameplay => QuickRow::SETTINGS.to_vec(),
+            QuickRow::Wifi | QuickRow::WifiNetworks => QuickRow::NETWORK.to_vec(),
             QuickRow::Shader | QuickRow::ColourCorrection | QuickRow::Palette | QuickRow::Bezel => {
                 QuickRow::PLAY_SCREEN.to_vec()
             }
@@ -251,6 +261,7 @@ impl QuickRow {
             QuickRow::ScreenOf(_) => Some(QuickRow::Screen),
             QuickRow::ShaderOf(p) => Some(QuickRow::ScreenOf(p)),
             QuickRow::Disc => Some(QuickRow::Game),
+            QuickRow::Wifi => Some(QuickRow::Network),
             QuickRow::Wallpaper => Some(QuickRow::General),
             QuickRow::PlayScreen => Some(QuickRow::Settings),
             QuickRow::Shader => Some(QuickRow::PlayScreen),
@@ -281,6 +292,7 @@ impl QuickRow {
             QuickRow::Settings => Some(QuickRow::SETTINGS[0]),
             QuickRow::PlayScreen => Some(QuickRow::PLAY_SCREEN[0]),
             QuickRow::PlayGameplay => Some(QuickRow::GAME[0]),
+            QuickRow::Network => Some(QuickRow::NETWORK[0]),
             QuickRow::ScreenOf(p) => Some(QuickRow::screen_of(p)[0]),
             _ => None,
         }
@@ -332,6 +344,9 @@ impl QuickRow {
             QuickRow::Bezel | QuickRow::BezelOf(_) => "Bezel",
             QuickRow::ScreenOf(p) => p.name(),
             QuickRow::Disc => "Disc",
+            QuickRow::Network => "Network",
+            QuickRow::Wifi => "Wi-Fi",
+            QuickRow::WifiNetworks => "Networks",
         }
     }
 
@@ -350,6 +365,8 @@ impl QuickRow {
                 | QuickRow::PlayScreen
                 | QuickRow::PlayGameplay
                 | QuickRow::ScreenOf(_)
+                | QuickRow::Network
+                | QuickRow::WifiNetworks
         )
     }
 

@@ -239,6 +239,7 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             wallpaper_tint: WallpaperTint::Off,
             show_recents: false,
             show_titles: false,
+            wifi: false,
             recents: Vec::new(),
             favorites: Vec::new(),
             shelf: None,
@@ -279,6 +280,7 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
         gb_palettes: true,
         gb_palette: GbPalette::parse("GBC Dark Green →A").unwrap(),
         wallpaper_tint: WallpaperTint::Medium,
+        wifi: true,
         shelf: Some("gba".into()),
         shelf_cart: Some(Recent {
             platform: Platform::Gba,
@@ -305,6 +307,7 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
         "gb_palette=GBC Dark Green →A",
         "appearance=dark",
         "wallpaper_tint=medium",
+        "wifi=1",
         "bezel_gba=none",
         "bezel_gb=default",
         "bezel_gbc=Pocket.png",
