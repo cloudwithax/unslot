@@ -16,7 +16,25 @@
 
 A bespoke, Game Boy-centric frontend for the Anbernic RG SP.
 
-Has support for GBA, GBC, and GB titles only.
+| System | Folder | Files | Core | BIOS |
+|---|---|---|---|---|
+| Game Boy Advance | `GBA` | `.gba` | mGBA, gpSP | `gba_bios.bin` (optional) |
+| Game Boy | `GB` | `.gb`, `.gbc` | mGBA | |
+| Game Boy Color | `GBC` | `.gb`, `.gbc` | mGBA | |
+| Nintendo Entertainment System | `NES` | `.nes`, `.unf`, `.unif` | FCEUmm | |
+| Super Nintendo | `SNES` | `.sfc`, `.smc` | Snes9x | |
+| Sega Genesis / Mega Drive | `MD` | `.md`, `.gen`, `.bin`, `.smd` | Genesis Plus GX | |
+| Sega Master System | `SMS` | `.sms` | Genesis Plus GX | |
+| Sega Game Gear | `GG` | `.gg` | Genesis Plus GX | |
+| PC Engine / TurboGrafx-16 | `PCE` | `.pce` | Beetle PCE Fast | |
+| Neo Geo Pocket (Color) | `NGP` | `.ngp`, `.ngc` | RACE | |
+| WonderSwan (Color) | `WS` | `.ws`, `.wsc` | Beetle Cygne | |
+| Atari Lynx | `LYNX` | `.lnx` | Handy | `lynxboot.img` (required) |
+| PlayStation | `PS` | `.cue`, `.chd`, `.pbp`, `.m3u` | PCSX ReARMed | `scph5501.bin` etc. (optional) |
+
+Games go in `Games/<Folder>`, label art in `Labels/<Folder>/<game>.png`, BIOS files in `BIOS`.
+A multi-disc game is shelved once through its `.m3u` playlist, and its discs are swapped from
+Gameplay in the game menu.
 
 > [!IMPORTANT]
 > ROMs must be unzipped. slot does not read `.zip` or `.7z` files.
