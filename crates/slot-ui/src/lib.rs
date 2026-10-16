@@ -27,6 +27,7 @@ mod qr_page;
 mod quick_menu;
 mod rebuild;
 mod refusal;
+mod scraped;
 mod shelf;
 mod shell;
 mod silhouette;
@@ -88,6 +89,7 @@ pub use quick_menu::{
 };
 pub use rebuild::{rebuild_count_face, rebuild_title_face, RebuildScreen};
 pub use refusal::Refusal;
+pub use scraped::{box_hue, hue_of, scraped_label};
 pub use shelf::{foot_y, repeat_gap, rest_y, Shelf, REPEAT_DELAY_MS, STAR_INK, STAR_SCALE};
 pub use shell::{
     gb_plastics, gb_table_shells, gba_plastics, gba_shell_for,

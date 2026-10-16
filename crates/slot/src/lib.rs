@@ -39,6 +39,7 @@ pub mod prefetch;
 pub mod resample;
 pub mod rewind;
 pub mod root;
+pub mod scrape;
 pub mod services;
 pub mod session;
 pub mod state_writer;

@@ -49,6 +49,8 @@ pub enum QuickRow {
     Services,
     /// unslot's and BaseOS's updates.
     Updates,
+    /// Labels for the card's games, found online.
+    GameArt,
     /// A platform's own page under Screen, and the rows on it.
     ScreenOf(Platform),
     ShaderOf(Platform),
@@ -57,7 +59,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 36] = [
+const GENERIC: [QuickRow; 37] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -94,6 +96,7 @@ const GENERIC: [QuickRow; 36] = [
     QuickRow::BtDevices,
     QuickRow::Services,
     QuickRow::Updates,
+    QuickRow::GameArt,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -148,13 +151,14 @@ impl QuickRow {
         QuickRow::About,
     ];
 
-    pub const NETWORK: [QuickRow; 6] = [
+    pub const NETWORK: [QuickRow; 7] = [
         QuickRow::Wifi,
         QuickRow::WifiNetworks,
         QuickRow::Bluetooth,
         QuickRow::BtDevices,
         QuickRow::Services,
         QuickRow::Updates,
+        QuickRow::GameArt,
     ];
 
     pub const GENERAL: [QuickRow; 6] = [
@@ -270,7 +274,8 @@ impl QuickRow {
             | QuickRow::Bluetooth
             | QuickRow::BtDevices
             | QuickRow::Services
-            | QuickRow::Updates => QuickRow::NETWORK.to_vec(),
+            | QuickRow::Updates
+            | QuickRow::GameArt => QuickRow::NETWORK.to_vec(),
             QuickRow::Shader | QuickRow::ColourCorrection | QuickRow::Palette | QuickRow::Bezel => {
                 QuickRow::PLAY_SCREEN.to_vec()
             }
@@ -373,6 +378,7 @@ impl QuickRow {
             QuickRow::BtDevices => "Devices",
             QuickRow::Services => "Services",
             QuickRow::Updates => "Updates",
+            QuickRow::GameArt => "Game Art",
         }
     }
 
@@ -396,6 +402,7 @@ impl QuickRow {
                 | QuickRow::BtDevices
                 | QuickRow::Services
                 | QuickRow::Updates
+                | QuickRow::GameArt
         )
     }
 

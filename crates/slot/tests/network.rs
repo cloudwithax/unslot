@@ -492,3 +492,56 @@ fn updates_offer_the_newer_releases_and_a_downloaded_one_restarts_to_install() {
     press(&mut a, Btn::A);
     assert!(a.restarting(), "A on a downloaded update did not restart");
 }
+
+#[test]
+fn game_art_labels_what_it_finds_and_restarts_to_show_it() {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    // Eight zero bytes: the game the pretend database knows by its CRC.
+    std::fs::write(d.path().join("Games/GBA/Zero.gba"), [0u8; 8]).unwrap();
+    let set = SlotState {
+        clock_set: true,
+        ..SlotState::default()
+    };
+    write_slot_state(d.path(), &set).expect("write slot.state");
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    a.apply(Action::QuickMenu);
+    for _ in 0..QuickRow::MAIN.len() {
+        if a.quick_menu() == Some(QuickRow::Network) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    press(&mut a, Btn::A);
+    for _ in 0..QuickRow::NETWORK.len() {
+        if a.quick_menu() == Some(QuickRow::GameArt) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    assert_eq!(a.quick_menu(), Some(QuickRow::GameArt), "no Game Art row");
+    press(&mut a, Btn::A);
+    assert!(
+        matches!(a.phase(), Phase::GameArt { .. }),
+        "{:?}",
+        a.phase()
+    );
+    assert_eq!(detail(&a, "All systems"), "0 of 3");
+    assert_eq!(detail(&a, "Game Boy Advance"), "0 of 3");
+    press(&mut a, Btn::A);
+    until(&mut a, |a| {
+        !a.scrape_view().running && a.scrape_view().done == 3
+    });
+    assert!(
+        d.path().join("Labels/GBA/Zero.png").exists(),
+        "no label on the card"
+    );
+    assert_eq!(detail(&a, "All systems"), "1 of 3");
+    assert_eq!(
+        list(&a).status,
+        "1 new label. Press START to restart and see them"
+    );
+    press(&mut a, Btn::A);
+    until(&mut a, |a| !a.scrape_view().running);
+    press(&mut a, Btn::Start);
+    assert!(a.restarting(), "START did not restart to show the labels");
+}

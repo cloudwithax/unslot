@@ -29,6 +29,7 @@ use crate::link_radio::{radio_jobs, LinkRole, RadioJob, RadioJobs};
 use crate::link_screen::LinkSprites;
 use crate::link_start::{link_port, LinkFail, LinkProgress, LinkStarter, LinkStep};
 use crate::persist::{self, Snapshot};
+use crate::scrape::{ScrapeView, Scraper};
 use crate::services::{Services, ServicesView, Tailnet, Wanted};
 use crate::update::{Part, Stage, Track, Updates, UpdatesView};
 use crate::video_mode::{self, VideoMode};
@@ -287,6 +288,11 @@ pub enum Phase {
     Updates {
         cursor: usize,
     },
+    /// Finding labels online, for all the card's systems or one. `note` says why A did nothing.
+    GameArt {
+        cursor: usize,
+        note: Option<String>,
+    },
     /// Typing for the network or services page, which it goes back to at `cursor`.
     Keyboard {
         keys: Keyboard,
@@ -498,6 +504,8 @@ pub struct App {
     services_view: ServicesView,
     updates: Option<Updates>,
     updates_view: UpdatesView,
+    scraper: Option<Scraper>,
+    scrape_view: ScrapeView,
     page_face: Option<(TexId, u32, u32)>,
 }
 
@@ -670,6 +678,8 @@ impl App {
             services_view: ServicesView::default(),
             updates: None,
             updates_view: UpdatesView::default(),
+            scraper: None,
+            scrape_view: ScrapeView::default(),
             page_face: None,
         }
     }
@@ -698,6 +708,7 @@ impl App {
         services.want(app.wanted());
         app.services = Some(services);
         app.updates = Some(Updates::for_card(root));
+        app.scraper = Some(Scraper::for_card(root));
         app.restock_recents();
         app.restock_favorites();
         if let Some((at, i)) = app.remembered_seat() {
@@ -809,7 +820,8 @@ impl App {
             | Phase::Networks { .. }
             | Phase::Devices { .. }
             | Phase::Services { .. }
-            | Phase::Updates { .. } => vertical,
+            | Phase::Updates { .. }
+            | Phase::GameArt { .. } => vertical,
             Phase::Shelf => vertical && self.core_picker.is_none(),
             Phase::Polaroids { .. } => !vertical,
             Phase::Playing { .. } => vertical && self.in_game_menu.is_some(),
@@ -1062,7 +1074,9 @@ impl App {
             | QuickRow::Bezel => None,
             QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
             QuickRow::Bluetooth => Some(QuickValue::flag(self.state.bluetooth)),
-            QuickRow::BtDevices | QuickRow::Services | QuickRow::Updates => None,
+            QuickRow::BtDevices | QuickRow::Services | QuickRow::Updates | QuickRow::GameArt => {
+                None
+            }
         }
     }
 
@@ -2060,6 +2074,7 @@ impl App {
             Phase::Services { cursor, .. } => self.services_input(cursor, action),
             Phase::TailscaleLogin => self.tailscale_login_input(action),
             Phase::Updates { cursor } => self.updates_input(cursor, action),
+            Phase::GameArt { cursor, .. } => self.game_art_input(cursor, action),
             Phase::Keyboard { .. } => self.keyboard_input(action),
             _ => {}
         }
@@ -2228,6 +2243,139 @@ impl App {
         };
         ListPage {
             title: "Services".into(),
+            status,
+            cursor: cursor.min(rows.len() - 1),
+            rows,
+            hints: hints.into(),
+        }
+    }
+
+    /// The systems with games on the card, in shelf order.
+    fn art_platforms(&self) -> Vec<Platform> {
+        self.shelves
+            .iter()
+            .filter_map(|(rack, shelf)| match rack {
+                Rack::Of(p) if !shelf.carts.is_empty() => Some(*p),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A system's games, or every system's for None, and which of them have a label: one found
+    /// at boot or one made since.
+    fn art_carts(&self, platform: Option<Platform>) -> Vec<(Cart, bool)> {
+        let made = &self.scrape_view.made;
+        self.shelves
+            .iter()
+            .filter(|(rack, _)| match (rack, platform) {
+                (Rack::Of(p), Some(want)) => *p == want,
+                (Rack::Of(_), None) => true,
+                _ => false,
+            })
+            .flat_map(|(_, shelf)| shelf.carts.iter())
+            .map(|c| {
+                let has = c.label.is_some()
+                    || made
+                        .iter()
+                        .any(|(p, stem)| *p == c.platform && *stem == c.stem);
+                (c.clone(), has)
+            })
+            .collect()
+    }
+
+    fn game_art_input(&mut self, cursor: usize, action: Action) {
+        let platforms = self.art_platforms();
+        let n = platforms.len() + 1;
+        let cursor = cursor.min(n - 1);
+        let (cursor, note) = match action {
+            Action::GbaDown(Btn::Up) => ((cursor + n - 1) % n, None),
+            Action::GbaDown(Btn::Down) => ((cursor + 1) % n, None),
+            Action::GbaDown(Btn::A) if !self.scrape_view.running => {
+                let which = cursor.checked_sub(1).map(|i| platforms[i]);
+                let missing: Vec<Cart> = self
+                    .art_carts(which)
+                    .into_iter()
+                    .filter(|(_, has)| !has)
+                    .map(|(c, _)| c)
+                    .collect();
+                if missing.is_empty() {
+                    (cursor, Some("Every game here has a label".to_string()))
+                } else {
+                    if let Some(scraper) = &self.scraper {
+                        scraper.fetch(missing);
+                    }
+                    (cursor, None)
+                }
+            }
+            Action::GbaDown(Btn::Start)
+                if !self.scrape_view.made.is_empty() && !self.scrape_view.running =>
+            {
+                self.begin_restart();
+                (cursor, None)
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::GameArt,
+                };
+                return;
+            }
+            _ => return,
+        };
+        self.phase = Phase::GameArt { cursor, note };
+    }
+
+    pub fn scrape_view(&self) -> &ScrapeView {
+        &self.scrape_view
+    }
+
+    fn game_art_page(&self, cursor: usize, note: Option<&str>) -> ListPage {
+        let v = &self.scrape_view;
+        let count = |platform: Option<Platform>| {
+            let carts = self.art_carts(platform);
+            let has = carts.iter().filter(|(_, has)| *has).count();
+            format!("{has} of {}", carts.len())
+        };
+        let rows: Vec<ListRow> = std::iter::once(ListRow {
+            label: "All systems".into(),
+            detail: count(None),
+            bars: None,
+        })
+        .chain(self.art_platforms().into_iter().map(|p| ListRow {
+            label: p.name().into(),
+            detail: count(Some(p)),
+            bars: None,
+        }))
+        .collect();
+        let made = v.made.len();
+        let status = match () {
+            _ if v.running => format!(
+                "Finding art for {} ({} of {})",
+                v.current.as_deref().unwrap_or("..."),
+                (v.done + 1).min(v.total),
+                v.total
+            ),
+            _ if note.is_some() => note.unwrap_or_default().to_string(),
+            _ if v.error.is_some() => v.error.clone().unwrap_or_default(),
+            _ if made > 0 => format!(
+                "{made} new label{}. Press START to restart and see them",
+                if made == 1 { "" } else { "s" }
+            ),
+            _ if v.missed > 0 => format!(
+                "No art found for {} game{}",
+                v.missed,
+                if v.missed == 1 { "" } else { "s" }
+            ),
+            _ if self.scraper.as_ref().is_some_and(|s| s.screenscraper) => {
+                "Art from ScreenScraper and libretro".into()
+            }
+            _ => "Art from libretro-thumbnails".into(),
+        };
+        let hints = match made > 0 && !v.running {
+            true => "A find missing art   START restart   B back",
+            false => "A find missing art   B back",
+        };
+        ListPage {
+            title: "Game Art".into(),
             status,
             cursor: cursor.min(rows.len() - 1),
             rows,
@@ -2629,6 +2777,9 @@ impl App {
                 self.services_page(*cursor, note.as_deref()),
             )),
             Phase::Updates { cursor } => Some(PageModel::List(self.updates_page(*cursor))),
+            Phase::GameArt { cursor, note } => Some(PageModel::List(
+                self.game_art_page(*cursor, note.as_deref()),
+            )),
             Phase::TailscaleLogin => match &self.services_view.tailnet {
                 Tailnet::SignIn(url) => Some(PageModel::Qr(QrPage {
                     title: "Tailscale".into(),
@@ -2788,6 +2939,12 @@ impl App {
             QuickRow::About => self.phase = Phase::About,
             QuickRow::Services => {
                 self.phase = Phase::Services {
+                    cursor: 0,
+                    note: None,
+                }
+            }
+            QuickRow::GameArt => {
+                self.phase = Phase::GameArt {
                     cursor: 0,
                     note: None,
                 }
@@ -2975,6 +3132,7 @@ impl App {
             | QuickRow::BtDevices
             | QuickRow::Services
             | QuickRow::Updates
+            | QuickRow::GameArt
             | QuickRow::Bezel => return,
         }
         self.persist();
@@ -3446,6 +3604,9 @@ impl App {
         if let Some(updates) = &self.updates {
             self.updates_view = updates.view();
         }
+        if let Some(scraper) = &self.scraper {
+            self.scrape_view = scraper.view();
+        }
         if let Some(services) = &self.services {
             self.services_view = services.view();
             // The code goes once it has been used, or when there is no longer one to show.
@@ -3857,6 +4018,7 @@ impl App {
             | Phase::Services { .. }
             | Phase::TailscaleLogin
             | Phase::Updates { .. }
+            | Phase::GameArt { .. }
             | Phase::Keyboard { .. } => {
                 slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
                 if let Some((tex, w, h)) = self.page_face {

@@ -182,6 +182,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::BtDevices,
             QuickRow::Services,
             QuickRow::Updates,
+            QuickRow::GameArt,
         ]
         .into_iter()
         .chain(Platform::ALL.map(QuickRow::ScreenOf))
