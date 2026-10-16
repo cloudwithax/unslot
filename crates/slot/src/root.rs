@@ -1,34 +1,32 @@
 use std::path::{Path, PathBuf};
 
-pub const DIRS: [&str; 24] = [
-    "BIOS",
-    "Bezels",
-    "Bezels/GB",
-    "Bezels/GBC",
-    "Config",
-    "Games",
-    "Games/GBA",
-    "Games/GB",
-    "Games/GBC",
-    "Labels",
-    "Labels/GBA",
-    "Labels/GB",
-    "Labels/GBC",
-    "Logs",
-    "Saves",
-    "Saves/GBA",
-    "Saves/GB",
-    "Saves/GBC",
-    "States",
-    "States/GBA",
-    "States/GB",
-    "States/GBC",
-    "System",
-    "Wallpapers",
-];
+use slot_store::Platform;
+
+/// Every folder slot keeps on the card, each parent before the folders in it.
+pub fn dirs() -> Vec<String> {
+    let mut dirs: Vec<String> = ["BIOS", "Config", "Logs", "System", "Wallpapers"]
+        .map(String::from)
+        .to_vec();
+    for (top, only_with_bezels) in [
+        ("Bezels", true),
+        ("Games", false),
+        ("Labels", false),
+        ("Saves", false),
+        ("States", false),
+    ] {
+        dirs.push(top.to_string());
+        dirs.extend(
+            Platform::ALL
+                .into_iter()
+                .filter(|p| !only_with_bezels || p.spec().bezels)
+                .map(|p| format!("{top}/{}", p.dir_name())),
+        );
+    }
+    dirs
+}
 
 pub fn ensure(root: &Path) {
-    for sub in DIRS {
+    for sub in dirs() {
         let _ = std::fs::create_dir_all(root.join(sub));
     }
     if let Err(e) = slot_store::move_config(root) {

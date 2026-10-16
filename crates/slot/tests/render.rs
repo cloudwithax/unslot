@@ -85,8 +85,12 @@ fn a_saved_frame_arrives_intact_on_its_screenshot() {
     let d = tempfile::tempdir().expect("tempdir");
     let ring = StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Mock");
     let stamp = "2026-08-09_14-32-05";
-    ring.push(b"state", &thumb::png(&src, (SRC_W, SRC_H)).expect("encode"), stamp)
-        .expect("push");
+    ring.push(
+        b"state",
+        &thumb::png(&src, (SRC_W, SRC_H)).expect("encode"),
+        stamp,
+    )
+    .expect("push");
     let entries = ring.list().expect("list");
 
     let face = photo_face(&entries[0]);

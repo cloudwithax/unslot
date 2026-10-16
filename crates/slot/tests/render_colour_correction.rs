@@ -151,11 +151,11 @@ fn the_cards_setting_reaches_the_core_through_the_session() {
             return;
         };
         std::fs::copy(&dylib, d.path().join("System/mgba_libretro.dylib")).expect("plant a core");
-        let state = SlotState {
+        let mut state = SlotState {
             clock_set: true,
-            colour_correction_gba: colour,
             ..SlotState::default()
         };
+        state.screen_mut(Platform::Gba).colour_correction = colour;
         write_slot_state(d.path(), &state).expect("write slot.state");
 
         let mut s = Session::boot(d.path().to_path_buf());

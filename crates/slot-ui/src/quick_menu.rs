@@ -6,6 +6,7 @@ use crate::plate::{
 use crate::power_menu::{MENU_H, MENU_INK, MENU_PAD, MENU_PX};
 use crate::slot_chrome::{opening, MOUTH_H};
 use crate::text;
+use slot_store::Platform;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum QuickRow {
@@ -15,10 +16,6 @@ pub enum QuickRow {
     Rumble,
     DateTime,
     About,
-    GbaShader,
-    GbShader,
-    GbaColourCorrection,
-    GbColourCorrection,
     Game,
     EjectSave,
     Turbo,
@@ -31,8 +28,6 @@ pub enum QuickRow {
     Recents,
     ShowTitles,
     WallpaperTint,
-    GbcShader,
-    GbcColourCorrection,
     Resume,
     States,
     Settings,
@@ -42,58 +37,75 @@ pub enum QuickRow {
     Shader,
     ColourCorrection,
     Palette,
-    ScreenGba,
-    GbBezel,
-    GbcBezel,
     Bezel,
-    GbaBezel,
-    ScreenGbc,
-    ScreenGb,
+    /// A platform's own page under Screen, and the rows on it.
+    ScreenOf(Platform),
+    ShaderOf(Platform),
+    ColourCorrectionOf(Platform),
+    BezelOf(Platform),
 }
 
+/// The rows that are the same whatever the platform, in index order.
+const GENERIC: [QuickRow; 28] = [
+    QuickRow::FastForward,
+    QuickRow::FastForwardSound,
+    QuickRow::Screen,
+    QuickRow::Rumble,
+    QuickRow::DateTime,
+    QuickRow::About,
+    QuickRow::Game,
+    QuickRow::EjectSave,
+    QuickRow::Turbo,
+    QuickRow::Rewind,
+    QuickRow::GbPalettes,
+    QuickRow::RunAhead,
+    QuickRow::Theme,
+    QuickRow::Wallpaper,
+    QuickRow::General,
+    QuickRow::Recents,
+    QuickRow::ShowTitles,
+    QuickRow::WallpaperTint,
+    QuickRow::Resume,
+    QuickRow::States,
+    QuickRow::Settings,
+    QuickRow::ExitGame,
+    QuickRow::PlayScreen,
+    QuickRow::PlayGameplay,
+    QuickRow::Shader,
+    QuickRow::ColourCorrection,
+    QuickRow::Palette,
+    QuickRow::Bezel,
+];
+
+/// How many rows each platform has of its own: its page, shader, colour correction and bezel.
+const PER_PLATFORM: usize = 4;
+
+/// The order the Screen page lists the platforms in, which is not the shelves' order.
+const SCREEN_ORDER: [Platform; Platform::COUNT] = [Platform::Gba, Platform::Gbc, Platform::Gb];
+
 impl QuickRow {
-    pub const ALL: [QuickRow; 40] = [
-        QuickRow::FastForward,
-        QuickRow::FastForwardSound,
-        QuickRow::Screen,
-        QuickRow::Rumble,
-        QuickRow::DateTime,
-        QuickRow::About,
-        QuickRow::GbaShader,
-        QuickRow::GbShader,
-        QuickRow::GbaColourCorrection,
-        QuickRow::GbColourCorrection,
-        QuickRow::Game,
-        QuickRow::EjectSave,
-        QuickRow::Turbo,
-        QuickRow::Rewind,
-        QuickRow::GbPalettes,
-        QuickRow::RunAhead,
-        QuickRow::Theme,
-        QuickRow::Wallpaper,
-        QuickRow::General,
-        QuickRow::Recents,
-        QuickRow::ShowTitles,
-        QuickRow::WallpaperTint,
-        QuickRow::GbcShader,
-        QuickRow::GbcColourCorrection,
-        QuickRow::Resume,
-        QuickRow::States,
-        QuickRow::Settings,
-        QuickRow::ExitGame,
-        QuickRow::PlayScreen,
-        QuickRow::PlayGameplay,
-        QuickRow::Shader,
-        QuickRow::ColourCorrection,
-        QuickRow::Palette,
-        QuickRow::ScreenGba,
-        QuickRow::GbBezel,
-        QuickRow::GbcBezel,
-        QuickRow::Bezel,
-        QuickRow::GbaBezel,
-        QuickRow::ScreenGbc,
-        QuickRow::ScreenGb,
-    ];
+    pub const COUNT: usize = GENERIC.len() + PER_PLATFORM * Platform::COUNT;
+
+    /// Every row, each at its own `index`.
+    pub const ALL: [QuickRow; QuickRow::COUNT] = {
+        let mut all = [QuickRow::FastForward; QuickRow::COUNT];
+        let mut i = 0;
+        while i < GENERIC.len() {
+            all[i] = GENERIC[i];
+            i += 1;
+        }
+        let mut p = 0;
+        while p < Platform::COUNT {
+            let platform = Platform::ALL[p];
+            let at = GENERIC.len() + p;
+            all[at] = QuickRow::ScreenOf(platform);
+            all[at + Platform::COUNT] = QuickRow::ShaderOf(platform);
+            all[at + 2 * Platform::COUNT] = QuickRow::ColourCorrectionOf(platform);
+            all[at + 3 * Platform::COUNT] = QuickRow::BezelOf(platform);
+            p += 1;
+        }
+        all
+    };
 
     pub const MAIN: [QuickRow; 4] = [
         QuickRow::General,
@@ -109,28 +121,6 @@ impl QuickRow {
         QuickRow::Recents,
         QuickRow::ShowTitles,
         QuickRow::DateTime,
-    ];
-
-    pub const SCREEN: [QuickRow; 3] =
-        [QuickRow::ScreenGba, QuickRow::ScreenGbc, QuickRow::ScreenGb];
-
-    pub const SCREEN_GBA: [QuickRow; 3] = [
-        QuickRow::GbaShader,
-        QuickRow::GbaColourCorrection,
-        QuickRow::GbaBezel,
-    ];
-
-    pub const SCREEN_GBC: [QuickRow; 3] = [
-        QuickRow::GbcShader,
-        QuickRow::GbcColourCorrection,
-        QuickRow::GbcBezel,
-    ];
-
-    pub const SCREEN_GB: [QuickRow; 4] = [
-        QuickRow::GbShader,
-        QuickRow::GbColourCorrection,
-        QuickRow::GbPalettes,
-        QuickRow::GbBezel,
     ];
 
     pub const GAME: [QuickRow; 7] = [
@@ -159,53 +149,88 @@ impl QuickRow {
         QuickRow::Bezel,
     ];
 
-    pub fn index(self) -> usize {
-        self as usize
+    /// The Screen page: one row for each platform.
+    pub fn screen_page() -> Vec<QuickRow> {
+        SCREEN_ORDER.map(QuickRow::ScreenOf).to_vec()
     }
 
-    pub fn page(self) -> &'static [QuickRow] {
+    /// A platform's page under Screen.
+    pub fn screen_of(platform: Platform) -> Vec<QuickRow> {
+        let mut rows = vec![
+            QuickRow::ShaderOf(platform),
+            QuickRow::ColourCorrectionOf(platform),
+        ];
+        if platform.spec().palettes {
+            rows.push(QuickRow::GbPalettes);
+        }
+        rows.push(QuickRow::BezelOf(platform));
+        rows
+    }
+
+    pub fn index(self) -> usize {
+        let own = |kind: usize, p: Platform| GENERIC.len() + kind * Platform::COUNT + p.index();
         match self {
-            QuickRow::ScreenGba | QuickRow::ScreenGbc | QuickRow::ScreenGb => &QuickRow::SCREEN,
-            QuickRow::GbaShader | QuickRow::GbaColourCorrection | QuickRow::GbaBezel => {
-                &QuickRow::SCREEN_GBA
-            }
-            QuickRow::GbcShader | QuickRow::GbcColourCorrection | QuickRow::GbcBezel => {
-                &QuickRow::SCREEN_GBC
-            }
-            QuickRow::GbShader
-            | QuickRow::GbColourCorrection
-            | QuickRow::GbPalettes
-            | QuickRow::GbBezel => &QuickRow::SCREEN_GB,
+            QuickRow::ScreenOf(p) => own(0, p),
+            QuickRow::ShaderOf(p) => own(1, p),
+            QuickRow::ColourCorrectionOf(p) => own(2, p),
+            QuickRow::BezelOf(p) => own(3, p),
+            row => GENERIC
+                .iter()
+                .position(|r| *r == row)
+                .expect("every row without a platform is in GENERIC"),
+        }
+    }
+
+    /// The platform a row belongs to, for the rows that belong to one.
+    pub fn platform(self) -> Option<Platform> {
+        match self {
+            QuickRow::ScreenOf(p)
+            | QuickRow::ShaderOf(p)
+            | QuickRow::ColourCorrectionOf(p)
+            | QuickRow::BezelOf(p) => Some(p),
+            QuickRow::GbPalettes => Platform::ALL.into_iter().find(|p| p.spec().palettes),
+            _ => None,
+        }
+    }
+
+    pub fn page(self) -> Vec<QuickRow> {
+        match self {
+            QuickRow::ScreenOf(_) => QuickRow::screen_page(),
+            QuickRow::ShaderOf(_)
+            | QuickRow::ColourCorrectionOf(_)
+            | QuickRow::BezelOf(_)
+            | QuickRow::GbPalettes => match self.platform() {
+                Some(p) => QuickRow::screen_of(p),
+                None => QuickRow::MAIN.to_vec(),
+            },
             QuickRow::FastForward
             | QuickRow::FastForwardSound
             | QuickRow::Rewind
             | QuickRow::RunAhead
             | QuickRow::Turbo
             | QuickRow::Rumble
-            | QuickRow::EjectSave => &QuickRow::GAME,
+            | QuickRow::EjectSave => QuickRow::GAME.to_vec(),
             QuickRow::Wallpaper
             | QuickRow::WallpaperTint
             | QuickRow::DateTime
             | QuickRow::Theme
             | QuickRow::Recents
-            | QuickRow::ShowTitles => &QuickRow::GENERAL,
+            | QuickRow::ShowTitles => QuickRow::GENERAL.to_vec(),
             QuickRow::Resume | QuickRow::States | QuickRow::Settings | QuickRow::ExitGame => {
-                &QuickRow::PLAY
+                QuickRow::PLAY.to_vec()
             }
-            QuickRow::PlayScreen | QuickRow::PlayGameplay => &QuickRow::SETTINGS,
+            QuickRow::PlayScreen | QuickRow::PlayGameplay => QuickRow::SETTINGS.to_vec(),
             QuickRow::Shader | QuickRow::ColourCorrection | QuickRow::Palette | QuickRow::Bezel => {
-                &QuickRow::PLAY_SCREEN
+                QuickRow::PLAY_SCREEN.to_vec()
             }
-            _ => &QuickRow::MAIN,
+            _ => QuickRow::MAIN.to_vec(),
         }
     }
 
     pub fn parent(self) -> Option<QuickRow> {
         match self.page()[0] {
-            QuickRow::ScreenGba => Some(QuickRow::Screen),
-            QuickRow::GbaShader => Some(QuickRow::ScreenGba),
-            QuickRow::GbcShader => Some(QuickRow::ScreenGbc),
-            QuickRow::GbShader => Some(QuickRow::ScreenGb),
+            QuickRow::ScreenOf(_) => Some(QuickRow::Screen),
+            QuickRow::ShaderOf(p) => Some(QuickRow::ScreenOf(p)),
             QuickRow::FastForward => Some(QuickRow::Game),
             QuickRow::Wallpaper => Some(QuickRow::General),
             QuickRow::PlayScreen => Some(QuickRow::Settings),
@@ -222,34 +247,29 @@ impl QuickRow {
     }
 
     pub fn centred(self) -> bool {
-        [
-            &QuickRow::MAIN[..],
-            &QuickRow::PLAY,
-            &QuickRow::SETTINGS,
-            &QuickRow::SCREEN,
-        ]
-        .contains(&self.page())
+        let page = self.page();
+        page == QuickRow::MAIN
+            || page == QuickRow::PLAY
+            || page == QuickRow::SETTINGS
+            || page == QuickRow::screen_page()
     }
 
     pub fn child(self) -> Option<QuickRow> {
         match self {
-            QuickRow::Screen => Some(QuickRow::SCREEN[0]),
+            QuickRow::Screen => Some(QuickRow::screen_page()[0]),
             QuickRow::Game => Some(QuickRow::GAME[0]),
             QuickRow::General => Some(QuickRow::GENERAL[0]),
             QuickRow::Settings => Some(QuickRow::SETTINGS[0]),
             QuickRow::PlayScreen => Some(QuickRow::PLAY_SCREEN[0]),
             QuickRow::PlayGameplay => Some(QuickRow::GAME[0]),
-            QuickRow::ScreenGba => Some(QuickRow::SCREEN_GBA[0]),
-            QuickRow::ScreenGbc => Some(QuickRow::SCREEN_GBC[0]),
-            QuickRow::ScreenGb => Some(QuickRow::SCREEN_GB[0]),
+            QuickRow::ScreenOf(p) => Some(QuickRow::screen_of(p)[0]),
             _ => None,
         }
     }
 
     pub fn shown(self, hidden: &[QuickRow]) -> Vec<QuickRow> {
         self.page()
-            .iter()
-            .copied()
+            .into_iter()
             .filter(|r| !hidden.contains(r))
             .collect()
     }
@@ -269,12 +289,6 @@ impl QuickRow {
             QuickRow::Rumble => "Rumble",
             QuickRow::DateTime => "Date & Time",
             QuickRow::About => "About",
-            QuickRow::GbaShader => "Shader",
-            QuickRow::GbShader => "Shader",
-            QuickRow::GbcShader => "Shader",
-            QuickRow::GbaColourCorrection => "Color Correction",
-            QuickRow::GbColourCorrection => "Color Correction",
-            QuickRow::GbcColourCorrection => "Color Correction",
             QuickRow::Game => "Gameplay",
             QuickRow::EjectSave => "Auto Save on Eject",
             QuickRow::Turbo => "Turbo Buttons",
@@ -293,16 +307,11 @@ impl QuickRow {
             QuickRow::ExitGame => "Exit Game",
             QuickRow::PlayScreen => "Screen",
             QuickRow::PlayGameplay => "Gameplay",
-            QuickRow::Shader => "Shader",
-            QuickRow::ColourCorrection => "Color Correction",
+            QuickRow::Shader | QuickRow::ShaderOf(_) => "Shader",
+            QuickRow::ColourCorrection | QuickRow::ColourCorrectionOf(_) => "Color Correction",
             QuickRow::Palette => "Palette",
-            QuickRow::ScreenGba => "Game Boy Advance",
-            QuickRow::ScreenGbc => "Game Boy Color",
-            QuickRow::ScreenGb => "Game Boy",
-            QuickRow::GbBezel => "Bezel",
-            QuickRow::GbcBezel => "Bezel",
-            QuickRow::GbaBezel => "Bezel",
-            QuickRow::Bezel => "Bezel",
+            QuickRow::Bezel | QuickRow::BezelOf(_) => "Bezel",
+            QuickRow::ScreenOf(p) => p.name(),
         }
     }
 
@@ -320,9 +329,7 @@ impl QuickRow {
                 | QuickRow::ExitGame
                 | QuickRow::PlayScreen
                 | QuickRow::PlayGameplay
-                | QuickRow::ScreenGba
-                | QuickRow::ScreenGbc
-                | QuickRow::ScreenGb
+                | QuickRow::ScreenOf(_)
         )
     }
 
@@ -651,15 +658,14 @@ pub struct QuickMenuFaces {
 pub struct QuickMenu<'a> {
     pub row: QuickRow,
     pub hidden: &'a [QuickRow],
-    pub values: [Option<QuickValue>; QuickRow::ALL.len()],
+    pub values: [Option<QuickValue>; QuickRow::COUNT],
     pub clock: Option<[(TexId, u32, u32); 2]>,
     pub wallpaper: Option<[(TexId, u32, u32); 2]>,
     pub faces: Option<&'a QuickMenuFaces>,
     pub ground: Option<TexId>,
     pub palette: Option<[(TexId, u32, u32); 2]>,
-    pub gba_bezel: Option<[(TexId, u32, u32); 2]>,
-    pub gb_bezel: Option<[(TexId, u32, u32); 2]>,
-    pub gbc_bezel: Option<[(TexId, u32, u32); 2]>,
+    /// Each platform's bezel name, for its page under Screen.
+    pub bezels: [Option<[(TexId, u32, u32); 2]>; Platform::COUNT],
     pub bezel: Option<[(TexId, u32, u32); 2]>,
     pub over_game: bool,
     /// The carousel footer carries the legends, so the centred pair is not drawn.
@@ -719,9 +725,7 @@ impl QuickMenu<'_> {
                 QuickRow::DateTime => self.clock.map(|c| c[lit as usize]),
                 QuickRow::Wallpaper => self.wallpaper.map(|c| c[lit as usize]),
                 QuickRow::Palette => self.palette.map(|c| c[lit as usize]),
-                QuickRow::GbaBezel => self.gba_bezel.map(|c| c[lit as usize]),
-                QuickRow::GbBezel => self.gb_bezel.map(|c| c[lit as usize]),
-                QuickRow::GbcBezel => self.gbc_bezel.map(|c| c[lit as usize]),
+                QuickRow::BezelOf(p) => self.bezels[p.index()].map(|c| c[lit as usize]),
                 QuickRow::Bezel => self.bezel.map(|c| c[lit as usize]),
                 _ => self.values[row.index()]
                     .and_then(|v| faces.values.get(v.index()))

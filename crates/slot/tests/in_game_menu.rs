@@ -105,7 +105,7 @@ fn shader_edits_the_running_platforms_shader() {
     assert_ne!(a.screen_shader(), Shader::Off);
     assert_eq!(
         a.quick_value(QuickRow::Shader),
-        a.quick_value(QuickRow::GbaShader)
+        a.quick_value(QuickRow::ShaderOf(Platform::Gba))
     );
 }
 

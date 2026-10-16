@@ -2117,7 +2117,10 @@ fn the_colour_shortcut_flips_only_the_system_that_is_playing() {
         .apply(slot_input::Action::ColourCorrectionToggle);
     let saved = slot_store::read_slot_state(d.path());
     assert_eq!(
-        (saved.colour_correction_gba, saved.colour_correction_gb),
+        (
+            saved.screen(Platform::Gba).colour_correction,
+            saved.screen(Platform::Gb).colour_correction
+        ),
         (false, true),
         "a Game Boy game's shortcut did not land on the Game Boy setting alone"
     );
@@ -2135,15 +2138,18 @@ fn a_game_boy_color_game_keeps_its_own_colour_and_shader() {
     let saved = slot_store::read_slot_state(d.path());
     assert_eq!(
         (
-            saved.colour_correction_gba,
-            saved.colour_correction_gb,
-            saved.colour_correction_gbc
+            saved.screen(Platform::Gba).colour_correction,
+            saved.screen(Platform::Gb).colour_correction,
+            saved.screen(Platform::Gbc).colour_correction
         ),
         (false, false, true),
         "a Game Boy Color game's colour shortcut did not land on GBC alone"
     );
     assert_eq!(
-        (saved.shader_gb, saved.shader_gbc),
+        (
+            saved.screen(Platform::Gb).shader,
+            saved.screen(Platform::Gbc).shader
+        ),
         (Shader::Simpletex, Shader::Off),
         "a Game Boy Color game's shader shortcut did not land on GBC alone"
     );
@@ -2250,14 +2256,18 @@ fn the_shader_shortcut_steps_the_seated_carts_shader_both_ways_and_names_it() {
     ] {
         s.app_mut().apply(action);
         assert_eq!(
-            slot_store::read_slot_state(d.path()).shader_gba,
+            slot_store::read_slot_state(d.path())
+                .screen(Platform::Gba)
+                .shader,
             want,
             "{action:?}"
         );
         assert_eq!(s.app().toast(), Some(said), "{action:?}");
     }
     assert_eq!(
-        slot_store::read_slot_state(d.path()).shader_gb,
+        slot_store::read_slot_state(d.path())
+            .screen(Platform::Gb)
+            .shader,
         Shader::Simpletex,
         "a GBA cart moved the Game Boy shader"
     );
@@ -2271,8 +2281,14 @@ fn the_shader_shortcut_does_nothing_on_the_shelf() {
     s.app_mut().apply(slot_input::Action::ShaderNext);
     let after = slot_store::read_slot_state(d.path());
     assert_eq!(
-        (after.shader_gba, after.shader_gb),
-        (before.shader_gba, before.shader_gb)
+        (
+            after.screen(Platform::Gba).shader,
+            after.screen(Platform::Gb).shader
+        ),
+        (
+            before.screen(Platform::Gba).shader,
+            before.screen(Platform::Gb).shader
+        )
     );
     assert_eq!(s.app().toast(), None);
 }
@@ -2285,10 +2301,17 @@ fn the_shader_shortcut_does_nothing_in_the_save_state_switcher() {
         .unwrap();
     let mut a = common::app_in_switcher(d.path(), "Emerald");
     assert!(matches!(a.phase(), Phase::Polaroids { .. }));
-    let before = slot_store::read_slot_state(d.path()).shader_gba;
+    let before = slot_store::read_slot_state(d.path())
+        .screen(Platform::Gba)
+        .shader;
     a.apply(Action::ShaderNext);
     a.apply(Action::ShaderPrev);
     a.apply(Action::ShaderPrev);
-    assert_eq!(slot_store::read_slot_state(d.path()).shader_gba, before);
+    assert_eq!(
+        slot_store::read_slot_state(d.path())
+            .screen(Platform::Gba)
+            .shader,
+        before
+    );
     assert_eq!(a.toast(), None);
 }

@@ -251,9 +251,9 @@ fn boot_creates_the_folders_a_person_has_to_file_into() {
 
     App::boot(d.path());
 
-    for name in slot::root::DIRS {
+    for name in slot::root::dirs() {
         assert!(
-            d.path().join(name).is_dir(),
+            d.path().join(&name).is_dir(),
             "{name} is missing, so nothing on the card says where its files go"
         );
     }

@@ -92,8 +92,8 @@ struct QuickPalette {
 struct BezelSync {
     tex: Option<TexId>,
     image: Option<(Console, BezelPick)>,
-    labels: [String; 3],
-    faces: [(Option<TexId>, Option<TexId>); 3],
+    labels: [String; Console::COUNT],
+    faces: [(Option<TexId>, Option<TexId>); Console::COUNT],
 }
 
 #[derive(Default)]
@@ -971,10 +971,7 @@ fn sync_game_bezel(app: &mut App, compositor: &mut Compositor, state: &mut Bezel
     if app.quick_menu().is_none() && app.in_game_menu().is_none() {
         return;
     }
-    for (at, platform) in [Console::Gba, Console::Gb, Console::Gbc]
-        .into_iter()
-        .enumerate()
-    {
+    for (at, platform) in Console::ALL.into_iter().enumerate() {
         let label = app.resolved_bezel(platform).label();
         if state.labels[at] == label {
             continue;

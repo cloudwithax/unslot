@@ -9,6 +9,7 @@ use slot::frontend::Frontend;
 use slot_gfx::{Compositor, HeadlessSurface, OUT_H, OUT_W};
 use slot_input::{Btn, InputSource, Millis, RawEvent};
 use slot_power::SimPlatform;
+use slot_store::Platform;
 use slot_ui::{quick_row_top, QuickRow};
 
 struct Script(VecDeque<Vec<RawEvent>>);
@@ -191,8 +192,8 @@ fn the_quick_menu_renders_full_screen() {
     tap(&mut f, &mut input, Btn::A);
     let px = composed(&mut f, &mut c, "general-page");
     let hidden = f.app().hidden_rows();
-    for row in QuickRow::Wallpaper.shown(hidden) {
-        let top = quick_row_top(row, hidden) as usize;
+    for row in QuickRow::Wallpaper.shown(&hidden) {
+        let top = quick_row_top(row, &hidden) as usize;
         let first = *inked(&px, 56..360, top)
             .first()
             .unwrap_or_else(|| panic!("{row:?} has no label"));
@@ -201,7 +202,7 @@ fn the_quick_menu_renders_full_screen() {
             "{row:?}'s label starts at x {first}"
         );
     }
-    for _ in 0..QuickRow::DateTime.position(f.app().hidden_rows()) {
+    for _ in 0..QuickRow::DateTime.position(&f.app().hidden_rows()) {
         tap(&mut f, &mut input, Btn::Down);
     }
     tap(&mut f, &mut input, Btn::A);
@@ -278,7 +279,7 @@ fn the_screen_page_sets_gb_palettes_in_line_with_the_rows_above() {
         tap(&mut f, &mut input, Btn::Down);
     }
     tap(&mut f, &mut input, Btn::A);
-    for _ in 0..QuickRow::ScreenGb.position(&[]) {
+    for _ in 0..QuickRow::ScreenOf(Platform::Gb).position(&[]) {
         tap(&mut f, &mut input, Btn::Down);
     }
     tap(&mut f, &mut input, Btn::A);
@@ -289,7 +290,7 @@ fn the_screen_page_sets_gb_palettes_in_line_with_the_rows_above() {
 
     let top = quick_row_top(QuickRow::GbPalettes, &[]) as usize;
     beside("Palettes", pointer(&px, top));
-    for row in QuickRow::SCREEN_GB {
+    for row in QuickRow::screen_of(Platform::Gb) {
         let top = quick_row_top(row, &[]) as usize;
         if row != QuickRow::GbPalettes {
             assert!(pointer(&px, top).is_none(), "a pointer at {row:?} as well");

@@ -207,12 +207,8 @@ pub struct SlotState {
     pub rumble: bool,
     pub ff_speed: u8,
     pub ff_sound: bool,
-    pub colour_correction_gba: bool,
-    pub colour_correction_gb: bool,
-    pub colour_correction_gbc: bool,
-    pub shader_gba: Shader,
-    pub shader_gb: Shader,
-    pub shader_gbc: Shader,
+    /// One a platform, in `Platform::ALL` order.
+    pub screens: [Screen; Platform::COUNT],
     pub eject_save: bool,
     pub turbo: bool,
     pub rewind: bool,
@@ -224,16 +220,39 @@ pub struct SlotState {
     pub wallpaper_tint: WallpaperTint,
     pub show_recents: bool,
     pub show_titles: bool,
-    pub bezel_gba: BezelPick,
-    pub bezel_gb: BezelPick,
-    pub bezel_gbc: BezelPick,
     pub recents: Vec<Recent>,
     pub favorites: Vec<Recent>,
     pub shelf: Option<String>,
     pub shelf_cart: Option<Recent>,
 }
 
+/// How one platform's picture is drawn.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Screen {
+    pub shader: Shader,
+    pub colour_correction: bool,
+    pub bezel: BezelPick,
+}
+
+impl Screen {
+    pub fn default_for(platform: Platform) -> Screen {
+        Screen {
+            shader: platform.spec().shader,
+            colour_correction: false,
+            bezel: BezelPick::Ags102,
+        }
+    }
+}
+
 impl SlotState {
+    pub fn screen(&self, platform: Platform) -> &Screen {
+        &self.screens[platform.index()]
+    }
+
+    pub fn screen_mut(&mut self, platform: Platform) -> &mut Screen {
+        &mut self.screens[platform.index()]
+    }
+
     pub fn played(&mut self, platform: Platform, stem: &str) {
         self.recents
             .retain(|r| !(r.platform == platform && r.stem == stem));
@@ -277,9 +296,6 @@ pub enum Shader {
 }
 
 impl Shader {
-    pub const GBA: [Shader; 4] = [Shader::Off, Shader::Lcd3x, Shader::Grid, Shader::Dot];
-    pub const GB: [Shader; 4] = [Shader::Off, Shader::Lcd3x, Shader::Grid, Shader::Simpletex];
-
     pub fn name(self) -> &'static str {
         match self {
             Shader::Off => "off",
@@ -329,12 +345,7 @@ impl Default for SlotState {
             rumble: true,
             ff_speed: FF_SPEED_DEFAULT,
             ff_sound: false,
-            colour_correction_gba: false,
-            colour_correction_gb: false,
-            colour_correction_gbc: false,
-            shader_gba: Shader::Grid,
-            shader_gb: Shader::Simpletex,
-            shader_gbc: Shader::Simpletex,
+            screens: Platform::ALL.map(Screen::default_for),
             eject_save: true,
             turbo: true,
             rewind: true,
@@ -346,9 +357,6 @@ impl Default for SlotState {
             wallpaper_tint: WallpaperTint::Off,
             show_recents: false,
             show_titles: false,
-            bezel_gba: BezelPick::Ags102,
-            bezel_gb: BezelPick::Ags102,
-            bezel_gbc: BezelPick::Ags102,
             recents: Vec::new(),
             favorites: Vec::new(),
             shelf: None,
@@ -394,7 +402,7 @@ fn read_list(root: &Path, name: &str) -> Vec<Recent> {
 fn write_list(root: &Path, name: &str, list: &[Recent]) -> std::io::Result<()> {
     let text: String = list
         .iter()
-        .map(|r| format!("{}/{}\n", platform_key(r.platform), r.stem))
+        .map(|r| format!("{}/{}\n", r.platform.key(), r.stem))
         .collect();
     let path = list_path(root, name);
     if std::fs::read(&path).map_or(text.is_empty(), |old| old == text.as_bytes()) {
@@ -405,9 +413,9 @@ fn write_list(root: &Path, name: &str, list: &[Recent]) -> std::io::Result<()> {
 
 pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     let mut text = format!(
-        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction_gba={}\ncolour_correction_gb={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\nrunahead={}\ngb_palettes={}\ngb_palette={}\nappearance={}\nwallpaper={}\n",
+        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\neject_save={}\nturbo={}\nrewind={}\nrunahead={}\ngb_palettes={}\ngb_palette={}\nappearance={}\nwallpaper={}\n",
         s.cart.as_deref().unwrap_or(""),
-        s.cart_platform.map_or(String::new(), platform_key),
+        s.cart_platform.map_or(String::new(), Platform::key),
         s.brightness,
         s.blue_light,
         s.volume,
@@ -419,10 +427,6 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         s.rumble as u8,
         s.ff_speed,
         s.ff_sound as u8,
-        s.colour_correction_gba as u8,
-        s.colour_correction_gb as u8,
-        s.shader_gba.name(),
-        s.shader_gb.name(),
         s.eject_save as u8,
         s.turbo as u8,
         s.rewind as u8,
@@ -432,23 +436,24 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         s.appearance.name(),
         s.wallpaper.key()
     );
-    text.push_str(&format!(
-        "colour_correction_gbc={}\n",
-        s.colour_correction_gbc as u8
-    ));
-    text.push_str(&format!("shader_gbc={}\n", s.shader_gbc.name()));
+    for p in Platform::ALL {
+        let (key, screen) = (p.key(), s.screen(p));
+        text.push_str(&format!(
+            "colour_correction_{key}={}\n",
+            screen.colour_correction as u8
+        ));
+        text.push_str(&format!("shader_{key}={}\n", screen.shader.name()));
+        text.push_str(&format!("bezel_{key}={}\n", screen.bezel.key()));
+    }
     text.push_str(&format!("wallpaper_tint={}\n", s.wallpaper_tint.key()));
     text.push_str(&format!("show_recents={}\n", s.show_recents as u8));
     text.push_str(&format!("show_titles={}\n", s.show_titles as u8));
-    text.push_str(&format!("bezel_gba={}\n", s.bezel_gba.key()));
-    text.push_str(&format!("bezel_gb={}\n", s.bezel_gb.key()));
-    text.push_str(&format!("bezel_gbc={}\n", s.bezel_gbc.key()));
     text.push_str(&format!("shelf={}\n", s.shelf.as_deref().unwrap_or("")));
     text.push_str(&format!(
         "shelf_cart={}\n",
         s.shelf_cart.as_ref().map_or(String::new(), |r| format!(
             "{}/{}",
-            platform_key(r.platform),
+            r.platform.key(),
             r.stem
         ))
     ));
@@ -472,12 +477,9 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut ff_speed = None;
     let mut ff_sound = None;
     let mut colour_correction = None;
-    let mut colour_correction_gba = None;
-    let mut colour_correction_gb = None;
-    let mut colour_correction_gbc = None;
-    let mut shader_gba = None;
-    let mut shader_gb = None;
-    let mut shader_gbc = None;
+    let mut colour_corrections: [Option<bool>; Platform::COUNT] = [None; Platform::COUNT];
+    let mut shaders: [Option<Shader>; Platform::COUNT] = [None; Platform::COUNT];
+    let mut bezels: [Option<BezelPick>; Platform::COUNT] = Default::default();
     let mut eject_save = None;
     let mut turbo = None;
     let mut rewind = None;
@@ -489,15 +491,23 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut wallpaper_tint = None;
     let mut show_recents = None;
     let mut show_titles = None;
-    let mut bezel_gba = None;
-    let mut bezel_gb = None;
-    let mut bezel_gbc = None;
     let mut shelf = None;
     let mut shelf_cart = None;
     for line in text.lines().filter(|l| !l.is_empty()) {
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
+        if let Some((setting, p)) = per_platform(key) {
+            match setting {
+                "colour_correction" => colour_corrections[p.index()] = flag(value),
+                "shader" => {
+                    shaders[p.index()] =
+                        Shader::parse(value).filter(|s| p.spec().shaders.contains(s))
+                }
+                _ => bezels[p.index()] = Some(BezelPick::parse(value)),
+            }
+            continue;
+        }
         match key {
             "cart" => cart = Some(value.to_string()),
             "cart_platform" => cart_platform = platform_value(value),
@@ -513,10 +523,6 @@ fn parse(text: &str) -> Option<SlotState> {
             "ff_speed" => ff_speed = ff_speed_value(value),
             "ff_sound" => ff_sound = flag(value),
             "colour_correction" => colour_correction = flag(value),
-            "colour_correction_gba" => colour_correction_gba = flag(value),
-            "colour_correction_gb" => colour_correction_gb = flag(value),
-            "colour_correction_gbc" => colour_correction_gbc = flag(value),
-            "shader_gba" => shader_gba = Shader::parse(value).filter(|s| Shader::GBA.contains(s)),
             "eject_save" => eject_save = flag(value),
             "turbo" => turbo = flag(value),
             "rewind" => rewind = flag(value),
@@ -528,18 +534,29 @@ fn parse(text: &str) -> Option<SlotState> {
             "wallpaper_tint" => wallpaper_tint = WallpaperTint::parse(value),
             "show_recents" => show_recents = flag(value),
             "show_titles" => show_titles = flag(value),
-            "bezel_gba" => bezel_gba = Some(BezelPick::parse(value)),
-            "bezel_gb" => bezel_gb = Some(BezelPick::parse(value)),
-            "bezel_gbc" => bezel_gbc = Some(BezelPick::parse(value)),
             "shelf" => shelf = Some(value.to_string()).filter(|v| !v.is_empty()),
             "shelf_cart" => shelf_cart = recent_value(value),
-            "shader_gb" => shader_gb = Shader::parse(value).filter(|s| Shader::GB.contains(s)),
-            "shader_gbc" => shader_gbc = Shader::parse(value).filter(|s| Shader::GB.contains(s)),
             _ => {}
         }
     }
     let cart = cart?;
     let fallback = SlotState::default();
+    let screens = Platform::ALL.map(|p| {
+        let at = p.index();
+        let parent = settings_parent(p).map(Platform::index);
+        let own = Screen::default_for(p);
+        Screen {
+            colour_correction: colour_corrections[at]
+                .or_else(|| parent.and_then(|q| colour_corrections[q]))
+                .or(colour_correction)
+                .unwrap_or(own.colour_correction),
+            shader: shaders[at]
+                .or_else(|| parent.and_then(|q| shaders[q]))
+                .filter(|s| p.spec().shaders.contains(s))
+                .unwrap_or(own.shader),
+            bezel: bezels[at].clone().unwrap_or(own.bezel),
+        }
+    });
     Some(SlotState {
         cart: (!cart.is_empty()).then_some(cart),
         cart_platform,
@@ -554,19 +571,7 @@ fn parse(text: &str) -> Option<SlotState> {
         rumble: rumble.unwrap_or(fallback.rumble),
         ff_speed: ff_speed.unwrap_or(fallback.ff_speed),
         ff_sound: ff_sound.unwrap_or(fallback.ff_sound),
-        colour_correction_gba: colour_correction_gba
-            .or(colour_correction)
-            .unwrap_or(fallback.colour_correction_gba),
-        colour_correction_gb: colour_correction_gb
-            .or(colour_correction)
-            .unwrap_or(fallback.colour_correction_gb),
-        colour_correction_gbc: colour_correction_gbc
-            .or(colour_correction_gb)
-            .or(colour_correction)
-            .unwrap_or(fallback.colour_correction_gbc),
-        shader_gba: shader_gba.unwrap_or(fallback.shader_gba),
-        shader_gb: shader_gb.unwrap_or(fallback.shader_gb),
-        shader_gbc: shader_gbc.or(shader_gb).unwrap_or(fallback.shader_gbc),
+        screens,
         eject_save: eject_save.unwrap_or(fallback.eject_save),
         turbo: turbo.unwrap_or(fallback.turbo),
         rewind: rewind.unwrap_or(fallback.rewind),
@@ -578,9 +583,6 @@ fn parse(text: &str) -> Option<SlotState> {
         wallpaper_tint: wallpaper_tint.unwrap_or(fallback.wallpaper_tint),
         show_recents: show_recents.unwrap_or(fallback.show_recents),
         show_titles: show_titles.unwrap_or(fallback.show_titles),
-        bezel_gba: bezel_gba.unwrap_or(fallback.bezel_gba),
-        bezel_gb: bezel_gb.unwrap_or(fallback.bezel_gb),
-        bezel_gbc: bezel_gbc.unwrap_or(fallback.bezel_gbc),
         recents: Vec::new(),
         favorites: Vec::new(),
         shelf,
@@ -588,8 +590,23 @@ fn parse(text: &str) -> Option<SlotState> {
     })
 }
 
-fn platform_key(platform: Platform) -> String {
-    platform.dir_name().to_ascii_lowercase()
+/// Splits a key like `shader_gbc` into the setting and the platform it is for.
+fn per_platform(key: &str) -> Option<(&str, Platform)> {
+    ["colour_correction", "shader", "bezel"]
+        .into_iter()
+        .find_map(|setting| {
+            let rest = key.strip_prefix(setting)?.strip_prefix('_')?;
+            Some((setting, Platform::from_key(rest)?))
+        })
+}
+
+/// Whose settings a platform starts from when the card has none of its own: a card from before
+/// GBC had its own row ran Game Boy Color games on the Game Boy's.
+fn settings_parent(platform: Platform) -> Option<Platform> {
+    match platform {
+        Platform::Gbc => Some(Platform::Gb),
+        _ => None,
+    }
 }
 
 fn recent_value(value: &str) -> Option<Recent> {
@@ -602,9 +619,7 @@ fn recent_value(value: &str) -> Option<Recent> {
 }
 
 fn platform_value(value: &str) -> Option<Platform> {
-    Platform::ALL
-        .into_iter()
-        .find(|p| value.eq_ignore_ascii_case(p.dir_name()))
+    Platform::from_key(value)
 }
 
 fn offset(value: &str) -> Option<i16> {

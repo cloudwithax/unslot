@@ -362,7 +362,7 @@ pub struct App {
     quick_clock_faces: Option<[(TexId, u32, u32); 2]>,
     quick_wallpaper_faces: Option<[(TexId, u32, u32); 2]>,
     quick_palette_faces: Option<[(TexId, u32, u32); 2]>,
-    quick_bezel_faces: [Option<[(TexId, u32, u32); 2]>; 3],
+    quick_bezel_faces: [Option<[(TexId, u32, u32); 2]>; Platform::COUNT],
     game_bezel: Option<TexId>,
     in_game_menu: Option<QuickRow>,
     /// 0 while the pause footer is off the bottom, 1 when it sits in the carousel's place.
@@ -526,7 +526,7 @@ impl App {
             quick_clock_faces: None,
             quick_wallpaper_faces: None,
             quick_palette_faces: None,
-            quick_bezel_faces: [None, None, None],
+            quick_bezel_faces: [None; Platform::COUNT],
             game_bezel: None,
             in_game_menu: None,
             footer: 0.0,
@@ -836,7 +836,7 @@ impl App {
     }
 
     pub fn in_game_hidden(&self) -> &'static [QuickRow] {
-        let no_bezel = self.playing_platform() == Platform::Gba && !self.framed_panel();
+        let no_bezel = !self.playing_platform().spec().bezels && !self.framed_panel();
         match (self.palette_live, no_bezel, self.single_cart()) {
             (true, false, false) => &[],
             (true, false, true) => &[QuickRow::ExitGame],
@@ -858,17 +858,12 @@ impl App {
     }
 
     fn playing_row(&self, row: QuickRow) -> QuickRow {
-        match (row, self.playing_platform()) {
-            (QuickRow::Shader, Platform::Gba) => QuickRow::GbaShader,
-            (QuickRow::Shader, Platform::Gb) => QuickRow::GbShader,
-            (QuickRow::Shader, Platform::Gbc) => QuickRow::GbcShader,
-            (QuickRow::ColourCorrection, Platform::Gba) => QuickRow::GbaColourCorrection,
-            (QuickRow::ColourCorrection, Platform::Gb) => QuickRow::GbColourCorrection,
-            (QuickRow::ColourCorrection, Platform::Gbc) => QuickRow::GbcColourCorrection,
-            (QuickRow::Bezel, Platform::Gba) => QuickRow::GbaBezel,
-            (QuickRow::Bezel, Platform::Gb) => QuickRow::GbBezel,
-            (QuickRow::Bezel, Platform::Gbc) => QuickRow::GbcBezel,
-            (row, _) => row,
+        let platform = self.playing_platform();
+        match row {
+            QuickRow::Shader => QuickRow::ShaderOf(platform),
+            QuickRow::ColourCorrection => QuickRow::ColourCorrectionOf(platform),
+            QuickRow::Bezel => QuickRow::BezelOf(platform),
+            row => row,
         }
     }
 
@@ -879,17 +874,11 @@ impl App {
             }
             QuickRow::FastForward => QuickValue::speed(self.state.ff_speed),
             QuickRow::FastForwardSound => Some(QuickValue::flag(self.state.ff_sound)),
-            QuickRow::GbaColourCorrection => {
-                Some(QuickValue::flag(self.state.colour_correction_gba))
-            }
-            QuickRow::GbColourCorrection => Some(QuickValue::flag(self.state.colour_correction_gb)),
-            QuickRow::GbcColourCorrection => {
-                Some(QuickValue::flag(self.state.colour_correction_gbc))
+            QuickRow::ColourCorrectionOf(p) => {
+                Some(QuickValue::flag(self.state.screen(p).colour_correction))
             }
             QuickRow::GbPalettes => Some(QuickValue::flag(self.state.gb_palettes)),
-            QuickRow::GbaShader => Some(shader_value(self.state.shader_gba)),
-            QuickRow::GbShader => Some(shader_value(self.state.shader_gb)),
-            QuickRow::GbcShader => Some(shader_value(self.state.shader_gbc)),
+            QuickRow::ShaderOf(p) => Some(shader_value(self.state.screen(p).shader)),
             QuickRow::Rumble => Some(QuickValue::flag(self.state.rumble)),
             QuickRow::EjectSave => Some(QuickValue::flag(self.state.eject_save)),
             QuickRow::Turbo => Some(QuickValue::flag(self.state.turbo)),
@@ -929,12 +918,8 @@ impl App {
             | QuickRow::PlayScreen
             | QuickRow::PlayGameplay
             | QuickRow::Palette
-            | QuickRow::ScreenGba
-            | QuickRow::ScreenGbc
-            | QuickRow::ScreenGb
-            | QuickRow::GbBezel
-            | QuickRow::GbcBezel
-            | QuickRow::GbaBezel
+            | QuickRow::ScreenOf(_)
+            | QuickRow::BezelOf(_)
             | QuickRow::Bezel => None,
         }
     }
@@ -957,22 +942,21 @@ impl App {
         dim: (TexId, u32, u32),
         lit: (TexId, u32, u32),
     ) {
-        self.quick_bezel_faces[bezel_slot(platform)] = Some([dim, lit]);
+        self.quick_bezel_faces[platform.index()] = Some([dim, lit]);
     }
 
     pub fn bezel_files(&self, platform: Platform) -> Vec<String> {
-        match platform {
-            Platform::Gba => Vec::new(),
-            _ => self
-                .root()
-                .map(|root| crate::bezel::list(root, platform))
-                .unwrap_or_default(),
+        if !platform.spec().bezels {
+            return Vec::new();
         }
+        self.root()
+            .map(|root| crate::bezel::list(root, platform))
+            .unwrap_or_default()
     }
 
     fn bezel_choices(&self, platform: Platform) -> Vec<BezelPick> {
         let mut choices = vec![BezelPick::None];
-        if platform != Platform::Gba {
+        if platform.spec().bezels {
             choices.push(BezelPick::Default);
         }
         if self.framed_panel() {
@@ -983,19 +967,11 @@ impl App {
     }
 
     fn bezel_pick(&mut self, platform: Platform) -> &mut BezelPick {
-        match platform {
-            Platform::Gba => &mut self.state.bezel_gba,
-            Platform::Gb => &mut self.state.bezel_gb,
-            Platform::Gbc => &mut self.state.bezel_gbc,
-        }
+        &mut self.state.screen_mut(platform).bezel
     }
 
     pub fn resolved_bezel(&self, platform: Platform) -> BezelPick {
-        let pick = match platform {
-            Platform::Gba => &self.state.bezel_gba,
-            Platform::Gb => &self.state.bezel_gb,
-            Platform::Gbc => &self.state.bezel_gbc,
-        };
+        let pick = &self.state.screen(platform).bezel;
         match self.bezel_choices(platform).contains(pick) {
             true => pick.clone(),
             false => BezelPick::None,
@@ -1124,17 +1100,25 @@ impl App {
         }
     }
 
-    pub fn hidden_rows(&self) -> &'static [QuickRow] {
+    pub fn hidden_rows(&self) -> Vec<QuickRow> {
         let own = matches!(
             self.state.wallpaper,
             WallpaperPick::File(_) | WallpaperPick::Random
         );
-        match (own, self.framed_panel()) {
-            (true, true) => &[],
-            (true, false) => &[QuickRow::GbaBezel],
-            (false, true) => &[QuickRow::WallpaperTint],
-            (false, false) => &[QuickRow::WallpaperTint, QuickRow::GbaBezel],
+        let mut hidden = Vec::new();
+        if !own {
+            hidden.push(QuickRow::WallpaperTint);
         }
+        if !self.framed_panel() {
+            // Without the SP's frame a platform with no bezels of its own has nothing to pick.
+            hidden.extend(
+                Platform::ALL
+                    .into_iter()
+                    .filter(|p| !p.spec().bezels)
+                    .map(QuickRow::BezelOf),
+            );
+        }
+        hidden
     }
 
     fn random_drawn(&self) -> bool {
@@ -1404,7 +1388,7 @@ impl App {
     }
 
     fn slot_owns_the_shoulders(&self) -> bool {
-        matches!(self.phase, Phase::Playing { .. }) && self.platform != Platform::Gba
+        matches!(self.phase, Phase::Playing { .. }) && !self.platform.spec().shoulders
     }
 
     pub fn taken_buttons(&self) -> &'static [Btn] {
@@ -1637,11 +1621,7 @@ impl App {
     }
 
     pub fn screen_shader(&self) -> Shader {
-        match self.playing_platform() {
-            Platform::Gba => self.state.shader_gba,
-            Platform::Gb => self.state.shader_gb,
-            Platform::Gbc => self.state.shader_gbc,
-        }
+        self.state.screen(self.playing_platform()).shader
     }
 
     pub fn colour_correction(&self) -> bool {
@@ -1653,11 +1633,7 @@ impl App {
     }
 
     pub fn colour_correction_for(&self, platform: Platform) -> bool {
-        match platform {
-            Platform::Gba => self.state.colour_correction_gba,
-            Platform::Gb => self.state.colour_correction_gb,
-            Platform::Gbc => self.state.colour_correction_gbc,
-        }
+        self.state.screen(platform).colour_correction
     }
 
     pub fn light(&self) -> bool {
@@ -1933,8 +1909,8 @@ impl App {
 
     fn quick_menu_input(&mut self, row: QuickRow, action: Action) {
         let row = match action {
-            Action::GbaDown(Btn::Up) => row.up(self.hidden_rows()),
-            Action::GbaDown(Btn::Down) => row.down(self.hidden_rows()),
+            Action::GbaDown(Btn::Up) => row.up(&self.hidden_rows()),
+            Action::GbaDown(Btn::Down) => row.down(&self.hidden_rows()),
             Action::GbaDown(Btn::Left) => return self.change_setting(row, false),
             Action::GbaDown(Btn::Right) => return self.change_setting(row, true),
             Action::GbaDown(Btn::A) => return self.open_quick_row(row),
@@ -2017,14 +1993,9 @@ impl App {
                 self.phase = clock_screen(self.utc_secs(), self.state.utc_offset_min, true);
             }
             QuickRow::About => self.phase = Phase::About,
-            QuickRow::Screen
-            | QuickRow::Game
-            | QuickRow::General
-            | QuickRow::ScreenGba
-            | QuickRow::ScreenGbc
-            | QuickRow::ScreenGb => {
+            QuickRow::Screen | QuickRow::Game | QuickRow::General | QuickRow::ScreenOf(_) => {
                 if let Some(row) = row.child() {
-                    let row = row.shown(self.hidden_rows())[0];
+                    let row = row.shown(&self.hidden_rows())[0];
                     self.phase = Phase::QuickMenu { row };
                 }
             }
@@ -2033,12 +2004,8 @@ impl App {
             | QuickRow::Rewind
             | QuickRow::FastForward
             | QuickRow::FastForwardSound
-            | QuickRow::GbaColourCorrection
-            | QuickRow::GbColourCorrection
-            | QuickRow::GbcColourCorrection
-            | QuickRow::GbaShader
-            | QuickRow::GbShader
-            | QuickRow::GbcShader
+            | QuickRow::ColourCorrectionOf(_)
+            | QuickRow::ShaderOf(_)
             | QuickRow::GbPalettes
             | QuickRow::RunAhead
             | QuickRow::Rumble
@@ -2056,9 +2023,7 @@ impl App {
             | QuickRow::Shader
             | QuickRow::ColourCorrection
             | QuickRow::Palette
-            | QuickRow::GbBezel
-            | QuickRow::GbcBezel
-            | QuickRow::GbaBezel
+            | QuickRow::BezelOf(_)
             | QuickRow::Bezel => {}
         }
     }
@@ -2075,12 +2040,7 @@ impl App {
             self.persist();
             return;
         }
-        if let QuickRow::GbaBezel | QuickRow::GbBezel | QuickRow::GbcBezel = row {
-            let platform = match row {
-                QuickRow::GbaBezel => Platform::Gba,
-                QuickRow::GbBezel => Platform::Gb,
-                _ => Platform::Gbc,
-            };
+        if let QuickRow::BezelOf(platform) = row {
             self.cycle_bezel(platform, right);
             self.persist();
             return;
@@ -2111,38 +2071,18 @@ impl App {
                 s.ff_speed = to;
             }
             QuickRow::FastForwardSound => s.ff_sound = !s.ff_sound,
-            QuickRow::GbaColourCorrection => {
-                s.colour_correction_gba = !s.colour_correction_gba;
+            QuickRow::ColourCorrectionOf(p) => {
+                let screen = s.screen_mut(p);
+                screen.colour_correction = !screen.colour_correction;
                 self.colour_pending = Some(self.colour_correction());
             }
-            QuickRow::GbColourCorrection => {
-                s.colour_correction_gb = !s.colour_correction_gb;
-                self.colour_pending = Some(self.colour_correction());
-            }
-            QuickRow::GbcColourCorrection => {
-                s.colour_correction_gbc = !s.colour_correction_gbc;
-                self.colour_pending = Some(self.colour_correction());
-            }
-            QuickRow::GbaShader => {
-                let to = s.shader_gba.step(&Shader::GBA, right);
-                if to == s.shader_gba {
+            QuickRow::ShaderOf(p) => {
+                let screen = s.screen_mut(p);
+                let to = screen.shader.step(p.spec().shaders, right);
+                if to == screen.shader {
                     return;
                 }
-                s.shader_gba = to;
-            }
-            QuickRow::GbShader => {
-                let to = s.shader_gb.step(&Shader::GB, right);
-                if to == s.shader_gb {
-                    return;
-                }
-                s.shader_gb = to;
-            }
-            QuickRow::GbcShader => {
-                let to = s.shader_gbc.step(&Shader::GB, right);
-                if to == s.shader_gbc {
-                    return;
-                }
-                s.shader_gbc = to;
+                screen.shader = to;
             }
             QuickRow::Rumble => s.rumble = !s.rumble,
             QuickRow::EjectSave => s.eject_save = !s.eject_save,
@@ -2172,12 +2112,8 @@ impl App {
             | QuickRow::Shader
             | QuickRow::ColourCorrection
             | QuickRow::Palette
-            | QuickRow::ScreenGba
-            | QuickRow::ScreenGbc
-            | QuickRow::ScreenGb
-            | QuickRow::GbBezel
-            | QuickRow::GbcBezel
-            | QuickRow::GbaBezel
+            | QuickRow::ScreenOf(_)
+            | QuickRow::BezelOf(_)
             | QuickRow::Bezel => return,
         }
         self.persist();
@@ -2192,12 +2128,9 @@ impl App {
         if !matches!(self.phase, Phase::Inserting { .. } | Phase::Playing { .. }) {
             return;
         }
-        let (shader, choices) = match self.playing_platform() {
-            Platform::Gba => (&mut self.state.shader_gba, &Shader::GBA[..]),
-            Platform::Gb => (&mut self.state.shader_gb, &Shader::GB[..]),
-            Platform::Gbc => (&mut self.state.shader_gbc, &Shader::GB[..]),
-        };
-        *shader = shader.step(choices, right);
+        let platform = self.playing_platform();
+        let shader = &mut self.state.screen_mut(platform).shader;
+        *shader = shader.step(platform.spec().shaders, right);
         let said = match *shader {
             Shader::Off => Toast::ShaderOff,
             Shader::Lcd3x => Toast::ShaderLcd3x,
@@ -2244,12 +2177,7 @@ impl App {
             return true;
         }
         if action == Action::ColourCorrectionToggle {
-            let row = match self.playing_platform() {
-                Platform::Gba => QuickRow::GbaColourCorrection,
-                Platform::Gb => QuickRow::GbColourCorrection,
-                Platform::Gbc => QuickRow::GbcColourCorrection,
-            };
-            self.change_setting(row, true);
+            self.change_setting(QuickRow::ColourCorrectionOf(self.playing_platform()), true);
             let said = match self.colour_correction() {
                 true => Toast::ColourOn,
                 false => Toast::ColourOff,
@@ -2971,16 +2899,14 @@ impl App {
             }
             Phase::QuickMenu { row } => QuickMenu {
                 row: *row,
-                hidden: self.hidden_rows(),
+                hidden: &self.hidden_rows(),
                 values: QuickRow::ALL.map(|r| self.quick_value(r)),
                 clock: self.quick_clock_faces,
                 wallpaper: self.quick_wallpaper_faces,
                 faces: self.quick_menu_faces.as_ref(),
                 ground: self.menu_ground(),
                 palette: None,
-                gba_bezel: self.quick_bezel_faces[bezel_slot(Platform::Gba)],
-                gb_bezel: self.quick_bezel_faces[bezel_slot(Platform::Gb)],
-                gbc_bezel: self.quick_bezel_faces[bezel_slot(Platform::Gbc)],
+                bezels: self.quick_bezel_faces,
                 bezel: None,
                 over_game: false,
                 footer_legends: true,
@@ -3100,10 +3026,8 @@ impl App {
                 faces: self.quick_menu_faces.as_ref(),
                 ground: None,
                 palette: self.quick_palette_faces,
-                gba_bezel: None,
-                gb_bezel: None,
-                gbc_bezel: None,
-                bezel: self.quick_bezel_faces[bezel_slot(self.playing_platform())],
+                bezels: [None; Platform::COUNT],
+                bezel: self.quick_bezel_faces[self.playing_platform().index()],
                 over_game: true,
                 footer_legends: false,
                 footer_top: OUT_H as f32 - MOUTH_H + self.menu_footer_offset(),
@@ -3845,7 +3769,7 @@ impl App {
         let Some(cart) = self.shelf().carts.get(self.shelf().index) else {
             return;
         };
-        if cart.platform != Platform::Gba {
+        if cart.platform.spec().cores.len() < 2 {
             return;
         }
         let seat = slot_store::core_for(&root, &cart.stem);
@@ -3903,7 +3827,7 @@ impl App {
             self.game_menu = Some(GameMenu::Pick(self.last_role));
             return;
         }
-        if self.platform != Platform::Gba {
+        if !self.platform.spec().link {
             self.hud.toast(Toast::NoLink, self.now());
             return;
         }
@@ -4663,12 +4587,4 @@ fn free_stamp(ring: &StateRing, now: i64) -> String {
         stamp = format_stamp(secs);
     }
     stamp
-}
-
-fn bezel_slot(platform: Platform) -> usize {
-    match platform {
-        Platform::Gba => 0,
-        Platform::Gb => 1,
-        Platform::Gbc => 2,
-    }
 }

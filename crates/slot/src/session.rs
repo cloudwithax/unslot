@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use slot_input::{Action, Gestures, Millis, RawEvent};
 use slot_retro::Rumble;
-use slot_store::Platform;
 use slot_ui::FfState;
 
 pub const RUMBLE_MIN_MS: Millis = 100;
@@ -490,7 +489,7 @@ impl Session {
         let sav = persist::read_sav(&self.root, platform, stem);
         launch("save read");
         let ring = self.sink.ring();
-        let emu = match player.filter(|_| platform == Platform::Gba) {
+        let emu = match player.filter(|_| platform.spec().link) {
             Some(p) => EmuHandle::spawn_linked(opened.core, rom, ring, sav, resume, p),
             None => EmuHandle::spawn(opened.core, rom, ring, sav, resume),
         };

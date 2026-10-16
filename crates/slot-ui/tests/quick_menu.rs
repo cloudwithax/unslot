@@ -1,4 +1,4 @@
-use slot_store::{parse_stamp, FF_SPEEDS};
+use slot_store::{parse_stamp, Platform, FF_SPEEDS};
 use slot_ui::{
     date_time_text, quick_caret_face, quick_label_face, quick_value_face, ClockPicker, QuickRow,
     QuickValue, UndoFace, MENU_PAD,
@@ -108,19 +108,31 @@ fn the_rows_run_in_the_order_the_user_chose() {
         ]
     );
     assert_eq!(
-        QuickRow::SCREEN.map(QuickRow::label),
+        QuickRow::screen_page()
+            .into_iter()
+            .map(QuickRow::label)
+            .collect::<Vec<_>>(),
         ["Game Boy Advance", "Game Boy Color", "Game Boy"]
     );
     assert_eq!(
-        QuickRow::SCREEN_GBA.map(QuickRow::label),
+        QuickRow::screen_of(Platform::Gba)
+            .into_iter()
+            .map(QuickRow::label)
+            .collect::<Vec<_>>(),
         ["Shader", "Color Correction", "Bezel"]
     );
     assert_eq!(
-        QuickRow::SCREEN_GBC.map(QuickRow::label),
+        QuickRow::screen_of(Platform::Gbc)
+            .into_iter()
+            .map(QuickRow::label)
+            .collect::<Vec<_>>(),
         ["Shader", "Color Correction", "Bezel"]
     );
     assert_eq!(
-        QuickRow::SCREEN_GB.map(QuickRow::label),
+        QuickRow::screen_of(Platform::Gb)
+            .into_iter()
+            .map(QuickRow::label)
+            .collect::<Vec<_>>(),
         ["Shader", "Color Correction", "Palettes", "Bezel"]
     );
     assert_eq!(
@@ -150,22 +162,22 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::ExitGame,
             QuickRow::PlayScreen,
             QuickRow::PlayGameplay,
-            QuickRow::ScreenGba,
-            QuickRow::ScreenGbc,
-            QuickRow::ScreenGb
+            QuickRow::ScreenOf(Platform::Gba),
+            QuickRow::ScreenOf(Platform::Gb),
+            QuickRow::ScreenOf(Platform::Gbc)
         ]
     );
     for page in [
         &QuickRow::MAIN[..],
-        &QuickRow::SCREEN[..],
+        &QuickRow::screen_page()[..],
         &QuickRow::GAME[..],
         &QuickRow::GENERAL[..],
         &QuickRow::PLAY[..],
         &QuickRow::SETTINGS[..],
         &QuickRow::PLAY_SCREEN[..],
-        &QuickRow::SCREEN_GBA[..],
-        &QuickRow::SCREEN_GBC[..],
-        &QuickRow::SCREEN_GB[..],
+        &QuickRow::screen_of(Platform::Gba)[..],
+        &QuickRow::screen_of(Platform::Gbc)[..],
+        &QuickRow::screen_of(Platform::Gb)[..],
     ] {
         for &row in page {
             assert_eq!(row.page(), page, "{row:?}");
@@ -391,11 +403,23 @@ fn a_hidden_palette_and_bezel_leave_two_screen_rows() {
 
 #[test]
 fn screen_opens_a_page_per_console_and_each_backs_out_to_its_console() {
-    assert_eq!(QuickRow::Screen.child(), Some(QuickRow::ScreenGba));
+    assert_eq!(
+        QuickRow::Screen.child(),
+        Some(QuickRow::ScreenOf(Platform::Gba))
+    );
     for (console, page) in [
-        (QuickRow::ScreenGba, &QuickRow::SCREEN_GBA[..]),
-        (QuickRow::ScreenGbc, &QuickRow::SCREEN_GBC[..]),
-        (QuickRow::ScreenGb, &QuickRow::SCREEN_GB[..]),
+        (
+            QuickRow::ScreenOf(Platform::Gba),
+            &QuickRow::screen_of(Platform::Gba)[..],
+        ),
+        (
+            QuickRow::ScreenOf(Platform::Gbc),
+            &QuickRow::screen_of(Platform::Gbc)[..],
+        ),
+        (
+            QuickRow::ScreenOf(Platform::Gb),
+            &QuickRow::screen_of(Platform::Gb)[..],
+        ),
     ] {
         assert_eq!(console.parent(), Some(QuickRow::Screen));
         assert_eq!(console.child(), Some(page[0]));
@@ -403,8 +427,8 @@ fn screen_opens_a_page_per_console_and_each_backs_out_to_its_console() {
             assert_eq!(row.parent(), Some(console), "{row:?}");
         }
     }
-    assert!(QuickRow::ScreenGb.centred());
-    assert!(!QuickRow::GbShader.centred());
+    assert!(QuickRow::ScreenOf(Platform::Gb).centred());
+    assert!(!QuickRow::ShaderOf(Platform::Gb).centred());
 }
 
 #[test]

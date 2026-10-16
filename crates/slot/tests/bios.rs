@@ -115,16 +115,16 @@ fn a_missing_bios_folder_turns_the_boot_splash_off() {
 fn boot_creates_every_content_folder() {
     let d = tempdir().unwrap();
     let _ = slot::app::App::boot(d.path());
-    for sub in slot::root::DIRS {
-        assert!(d.path().join(sub).is_dir(), "{sub} was not created");
+    for sub in slot::root::dirs() {
+        assert!(d.path().join(&sub).is_dir(), "{sub} was not created");
     }
 }
 
 #[test]
 fn the_content_root_has_no_art_directory() {
-    assert!(slot::root::DIRS.contains(&"Labels"));
+    assert!(slot::root::dirs().iter().any(|d| d == "Labels"));
     assert!(
-        !slot::root::DIRS.contains(&"Art"),
+        !slot::root::dirs().iter().any(|d| d == "Art"),
         "Art survived the rename"
     );
 }

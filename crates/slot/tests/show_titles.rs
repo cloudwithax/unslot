@@ -85,7 +85,7 @@ fn show_titles_is_flipped_from_the_general_page_and_saved() {
         press(&mut a, Btn::Down);
     }
     press(&mut a, Btn::A);
-    for _ in 0..QuickRow::ShowTitles.position(a.hidden_rows()) {
+    for _ in 0..QuickRow::ShowTitles.position(&a.hidden_rows()) {
         press(&mut a, Btn::Down);
     }
     assert_eq!(a.quick_menu(), Some(QuickRow::ShowTitles));
