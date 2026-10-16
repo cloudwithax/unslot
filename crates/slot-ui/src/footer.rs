@@ -25,18 +25,40 @@ impl Printed {
     }
 }
 
+/// How big the network icons are drawn, and the room between them and the clock.
+const NET_PX: f32 = 16.0;
+const NET_GAP: f32 = 8.0;
+
+/// The battery on the left; on the right the clock, and left of it an icon for each network
+/// that is up, Wi-Fi then Bluetooth.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_footer(
     canvas: Canvas,
     battery: Option<Battery>,
     percent: Printed,
     bolt: Option<TexId>,
     clock: Printed,
+    net: &[TexId],
     ink: [u8; 3],
     out: &mut Vec<Draw>,
 ) {
     let y = FOOTER_Y + (HINT_H as f32 - GAUGE_H) / 2.0;
     draw_gauge(FOOTER_MARGIN, y, battery, percent, bolt, ink, out);
-    printed(canvas.w - FOOTER_MARGIN - clock.w as f32, clock, out);
+    let clock_x = canvas.w - FOOTER_MARGIN - clock.w as f32;
+    printed(clock_x, clock, out);
+    let mut x = clock_x - NET_GAP;
+    for &tex in net.iter().rev() {
+        x -= NET_PX;
+        out.push(Draw::Tex {
+            x,
+            y: FOOTER_Y + (HINT_H as f32 - NET_PX) / 2.0,
+            w: NET_PX,
+            h: NET_PX,
+            tex,
+            alpha: 1.0,
+        });
+        x -= NET_GAP / 2.0;
+    }
 }
 
 pub fn draw_corners(

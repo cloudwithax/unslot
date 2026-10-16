@@ -27,12 +27,12 @@ jobs:
           curl -fsSL https://taskfile.dev/install.sh | sh -s -- -b /usr/local/bin
 
       - name: Build the tree
-        run: task dist:device OUT="slot-${GITHUB_REF_NAME}" VERSION="${GITHUB_REF_NAME}"
+        run: task dist:device OUT="unslot-${GITHUB_REF_NAME}" VERSION="${GITHUB_REF_NAME}"
 
       - name: Check what is about to ship
         run: |
           set -eu
-          out="slot-${GITHUB_REF_NAME}"
+          out="unslot-${GITHUB_REF_NAME}"
           file "$out/System/slot" | grep -q aarch64
           test "$(cat "$out/System/version")" = "$GITHUB_REF_NAME"
           file "$out/System/mgba_libretro.so" | grep -q aarch64
@@ -64,7 +64,7 @@ jobs:
         id: package
         run: |
           set -eu
-          out="slot-${GITHUB_REF_NAME}"
+          out="unslot-${GITHUB_REF_NAME}"
           zip="$out-h700.zip"
           zip -qry "$zip" "$out"
           # The same System folder as an update pack, which BaseOS installs from a card's root.
@@ -100,11 +100,11 @@ jobs:
         run: |
           set -eu
           cat > notes.md <<NOTES
-          Unzip and copy the contents of \`slot-${GITHUB_REF_NAME}/\` onto SD2.
+          **New card:** unzip and copy the contents of \`unslot-${GITHUB_REF_NAME}/\` to the root of your frontend card: BaseOS's \`BASEOS\` volume on TF1, or a card in TF2.
 
-          Already running slot or unslot? Copy \`MinUI.zip\` to the root of that card and restart with the power connected. BaseOS installs it before the frontend starts, replacing \`System/\` and keeping your games, saves and settings. unslot can also download it itself, from Settings, Network, Updates.
+          **Already running slot or unslot?** Copy \`MinUI.zip\` to the root of that card and restart with the power connected. BaseOS installs it before the frontend starts, replacing \`System/\` and keeping your games, saves and settings. unslot can also download it itself, from Settings, Network, Updates.
 
-          Emulation by mGBA (MPL-2.0) and gpSP (GPL-2.0). Their licences, patches and gpSP's source are in \`System/licenses/\`.
+          unslot is a fork of [slot](https://github.com/BrandonKowalski/slot) by Brandon T. Kowalski. Emulation by mGBA (MPL-2.0), gpSP (GPL-2.0) and libretro cores; every licence, and gpSP's source, is in \`System/licenses/\`.
           NOTES
           gh release create "$GITHUB_REF_NAME" "$ZIP" MinUI.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" --notes-file notes.md

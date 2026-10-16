@@ -545,3 +545,16 @@ fn game_art_labels_what_it_finds_and_restarts_to_show_it() {
     press(&mut a, Btn::Start);
     assert!(a.restarting(), "START did not restart to show the labels");
 }
+
+#[test]
+fn the_footer_shows_wi_fi_once_it_has_joined_a_network() {
+    let (_d, mut a) = on_network_list();
+    let (wifi, bt) = (slot_ui::TexId::from_raw(901), slot_ui::TexId::from_raw(902));
+    a.set_net_faces([wifi, bt]);
+    assert!(a.net_icons().is_empty(), "an icon before joining anything");
+    let at = row_of(&a, "Cafe Guest");
+    go_to_row(&mut a, at);
+    press(&mut a, Btn::A);
+    until(&mut a, |a| a.wifi_view().connected.is_some());
+    assert_eq!(a.net_icons(), [wifi], "no Wi-Fi icon once joined");
+}

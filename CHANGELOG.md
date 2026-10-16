@@ -1,5 +1,20 @@
 # Changelog
 
+## unslot (unreleased)
+
+The first unslot, forked from slot 1.7.0.
+
+- Ten more systems: NES, SNES, Genesis, Master System, Game Gear, PC Engine, Neo Geo Pocket, WonderSwan, Lynx and PlayStation, each on its own shelf as its own media.
+- Wi-Fi with an on-screen keyboard; Bluetooth controllers and headphones.
+- Analog sticks on the models that have them.
+- Services: SSH, card sharing over SMB, Tailscale and WireGuard.
+- Updates over the air for unslot and BaseOS. A release's `MinUI.zip` also turns a slot card into an unslot one.
+- Game Art: labels found online, by CRC and file name.
+- Twelve bundled wallpapers, and JPG wallpapers of your own.
+- Wi-Fi and Bluetooth in the shelf footer, and the unslot name and logo throughout.
+
+## slot
+
 ## [1.7.0](https://github.com/BrandonKowalski/slot/releases/tag/v1.7.0)
 
 - The slot, carts and shelf now have a skeuomorphic effect, with light and dark themes and bundled wallpapers. Huge thanks to Markus for this amazing work! (#74, @MarkusMaribu)

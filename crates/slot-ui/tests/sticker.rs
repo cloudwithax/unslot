@@ -11,7 +11,7 @@ fn fields() -> StickerFields<'static> {
 #[test]
 fn the_headline_rows_read_as_a_device_plate() {
     let all = sticker_lines(&fields()).join("\n");
-    assert!(all.contains("AGS-102"), "{all}");
+    assert!(all.contains("MODEL NO. UNS-102"), "{all}");
     assert!(all.contains("5V"), "{all}");
     assert!(all.contains("1.5A"), "{all}");
     assert!(all.contains("87"), "the gauge reading is missing: {all}");
@@ -51,6 +51,10 @@ fn the_compliance_block_is_the_credits() {
         "NERD",
         "LCD3X",
         "MARKUS",
+        "FORK OF SLOT",
+        "KOWALSKI",
+        "LIBRETRO",
+        "CART STUDIO",
     ] {
         assert!(all.contains(owed), "the credits do not mention {owed}");
     }
@@ -79,15 +83,21 @@ fn the_wordmarks_top_edge_is_antialiased_not_a_hard_step() {
         [face.rgba[i], face.rgba[i + 1], face.rgba[i + 2]]
     };
     let dark = |c: [u8; 3]| (c[0] as u32 + c[1] as u32 + c[2] as u32) < 120;
-    let edges: Vec<[u8; 3]> = (400..413)
+    // The white "slot." of the logo, right of its red "un".
+    let grey = |c: [u8; 3]| c[0].abs_diff(c[1]) < 12 && c[1].abs_diff(c[2]) < 12;
+    let edges: Vec<[u8; 3]> = (560..600)
         .filter_map(|x| {
-            (129..142).find_map(|y| {
+            (125..175).find_map(|y| {
                 let above = get(x, y - 1);
                 let here = get(x, y);
-                (dark(above) && !dark(here)).then_some(here)
+                (dark(above) && !dark(here) && grey(here)).then_some(here)
             })
         })
         .collect();
+    assert!(
+        !edges.is_empty(),
+        "no white letter was found where the logo is"
+    );
     assert!(
         edges.iter().any(|&e| e != INK),
         "every sampled column's top edge jumps straight from the ground to the ink: {edges:?}"

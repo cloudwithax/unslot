@@ -132,6 +132,8 @@ struct Clocks {
 struct ShelfLook {
     slot: [[TexId; 2]; 2],
     bolt: [TexId; 2],
+    /// The footer's Wi-Fi and Bluetooth icons, for the dark look and the light.
+    net: [[TexId; 2]; 2],
     port: [Option<TexId>; 2],
     legend: [Vec<(TexId, u32)>; 2],
     applied: Option<(bool, bool, bool)>,
@@ -283,9 +285,16 @@ impl Frontend {
             compositor.create_texture(dark_bolt.w, dark_bolt.h, &dark_bolt.rgba),
             compositor.create_texture(light_bolt.w, light_bolt.h, &light_bolt.rgba),
         ];
+        let net = [false, true].map(|light| {
+            [Icon::Wifi, Icon::Bluetooth].map(|icon| {
+                let f = icon_face(icon, BOLT_PX, footer_ink(light));
+                compositor.create_texture(f.w, f.h, &f.rgba)
+            })
+        });
         self.look = Some(ShelfLook {
             slot,
             bolt,
+            net,
             port: [None, None],
             legend: [Vec::new(), Vec::new()],
             applied: None,
@@ -330,6 +339,10 @@ impl Frontend {
         };
         if done {
             return;
+        }
+        if let Some(look) = &self.look {
+            let net = look.net[usize::from(light)];
+            self.session.app_mut().set_net_faces(net);
         }
         self.session.app_mut().set_slot_faces(slot[0], slot[1]);
         self.session.app_mut().set_bolt_face(bolt);

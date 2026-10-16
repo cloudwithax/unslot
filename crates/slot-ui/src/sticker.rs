@@ -6,9 +6,9 @@ use crate::bitmaps;
 use crate::plate::UndoFace;
 use crate::text;
 
-const WORDMARK_SVG: &str = include_str!("../assets/wordmark.svg");
+const WORDMARK_SVG: &str = include_str!("../assets/unslot.svg");
 
-const WORDMARK_W: u32 = 250;
+const WORDMARK_W: u32 = 170;
 
 pub const STICKER_W: u32 = 660;
 pub const STICKER_H: u32 = 228;
@@ -36,28 +36,31 @@ pub struct StickerFields<'a> {
 }
 
 pub const CREDITS: [&str; 11] = [
-    "THE EXQUISITE SKEUOMORPHIC",
-    "ARTWORK MADE BY MARKUS.",
-    "EMULATION POWERED BY MGBA",
-    "AND GPSP. UNDERLYING OS IS",
-    "BASEOS BY PVAIBHAV. TYPE IS",
+    "UNSLOT IS A FORK OF SLOT BY",
+    "BRANDON T. KOWALSKI, WITH",
+    "SKEUOMORPHIC ART BY MARKUS.",
+    "EMULATION BY MGBA, GPSP AND",
+    "LIBRETRO CORES. THE OS IS",
+    "BASEOS BY PVAIBHAV. LABELS",
+    "AFTER CART STUDIO. TYPE IS",
     "OPEN SANS AND NERD FONTS",
-    "SYMBOLS BY RYAN L MCINTYRE.",
-    "THE PANEL MASK IS DERIVED",
-    "FROM GIGAHERZ'S LCD3X. THE",
-    "CART SOUNDS ARE MY CHILDHOOD",
-    "GAMEBOY.",
+    "SYMBOLS. PANEL MASK FROM",
+    "GIGAHERZ'S LCD3X. SOUNDS ARE",
+    "BRANDON'S CHILDHOOD GAMEBOY.",
 ];
 
-pub const ORIGIN: [&str; 2] = ["S/LOT-USA", "MADE IN ITHACA"];
+pub const ORIGIN: [&str; 2] = ["UN/SLOT", "FROM S/LOT, ITHACA"];
 
 pub const COPYRIGHT: &str = "\u{a9} 2026 BRANDON T. KOWALSKI";
+
+/// The fork's own line, under slot's.
+pub const FORK: &str = "UNSLOT \u{a9} 2026 CLOUDWITHAX";
 
 pub const HOME: &str = "SEE README.";
 
 pub fn head_rows(f: &StickerFields) -> [String; 3] {
     [
-        "MODEL NO. AGS-102".into(),
+        "MODEL NO. UNS-102".into(),
         format!("INPUT : 5V{DC}1.5A"),
         match f.battery {
             Some(p) => format!("BATTERY : LI-ION ({p}%)"),
@@ -72,6 +75,7 @@ pub fn sticker_lines(f: &StickerFields) -> Vec<String> {
     out.extend(ORIGIN.iter().map(|s| s.to_string()));
     out.push(format!("{} {}", f.serial, f.dirty_digit));
     out.push(COPYRIGHT.to_string());
+    out.push(FORK.to_string());
     out.push(HOME.to_string());
     out
 }
@@ -291,7 +295,7 @@ pub fn sticker_face(f: &StickerFields) -> UndoFace {
         );
         ry += mh as f32 + 4.0;
     }
-    for line in [COPYRIGHT, HOME] {
+    for line in [COPYRIGHT, FORK, HOME] {
         let lw = c.print_measure(line, SMALL_PX);
         ry = c.print(right_edge - lw - 10.0, ry, line, SMALL_PX, WHITE);
     }

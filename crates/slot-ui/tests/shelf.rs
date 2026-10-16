@@ -482,6 +482,7 @@ fn the_gauge_is_white_in_dark_mode_and_black_in_light_mode() {
             Printed { face: None, w: 30 },
             None,
             Printed { face: None, w: 40 },
+            &[],
             footer_ink(light),
             &mut out,
         );
@@ -508,6 +509,7 @@ fn the_gauge_starts_at_the_case_margin() {
         Printed { face: None, w: 30 },
         Some(TexId::from_raw(1)),
         Printed { face: None, w: 40 },
+        &[],
         [255, 255, 255],
         &mut out,
     );
@@ -533,6 +535,7 @@ fn the_band_prints_the_charge_at_one_margin_and_the_clock_at_the_other() {
         Printed { face: None, w: 30 },
         Some(TexId::from_raw(1)),
         Printed { face: None, w: 40 },
+        &[],
         [255, 255, 255],
         &mut out,
     );
@@ -582,6 +585,7 @@ fn the_footer_does_not_move_the_gauge_when_the_charge_state_changes() {
         Printed { face: None, w: 30 },
         None,
         Printed { face: None, w: 40 },
+        &[],
         [255, 255, 255],
         &mut idle,
     );
@@ -595,6 +599,7 @@ fn the_footer_does_not_move_the_gauge_when_the_charge_state_changes() {
         Printed { face: None, w: 30 },
         Some(TexId::from_raw(2)),
         Printed { face: None, w: 40 },
+        &[],
         [255, 255, 255],
         &mut charging,
     );
@@ -615,6 +620,7 @@ fn the_clock_stays_at_the_right_margin() {
         Printed::default(),
         None,
         Printed { face: None, w: 40 },
+        &[],
         [255, 255, 255],
         &mut out,
     );
@@ -637,6 +643,7 @@ fn a_band_with_no_gauge_still_draws_its_clock() {
         Printed::default(),
         None,
         Printed { face: None, w: 40 },
+        &[],
         [255, 255, 255],
         &mut out,
     );
@@ -1276,4 +1283,41 @@ fn only_a_starred_cart_wears_the_star_in_its_label_top_right_corner() {
         top >= ly && top < ly + 16.0,
         "star top {top}, label top {ly}"
     );
+}
+
+#[test]
+fn the_network_icons_sit_left_of_the_clock_wifi_first() {
+    let (wifi, bt, clock) = (
+        TexId::from_raw(51),
+        TexId::from_raw(52),
+        TexId::from_raw(53),
+    );
+    let mut out = Vec::new();
+    draw_footer(
+        Canvas::FRAMED,
+        None,
+        Printed::default(),
+        None,
+        Printed {
+            face: Some(clock),
+            w: 40,
+        },
+        &[wifi, bt],
+        footer_ink(false),
+        &mut out,
+    );
+    let x_of = |want: TexId| {
+        out.iter()
+            .find_map(|d| match d {
+                Draw::Tex { tex, x, w, .. } if *tex == want => Some((*x, *w)),
+                _ => None,
+            })
+            .expect("not drawn")
+    };
+    let ((wx, ww), (bx, bw), (cx, _)) = (x_of(wifi), x_of(bt), x_of(clock));
+    assert!(
+        wx + ww <= bx,
+        "Wi-Fi and Bluetooth overlap or are the wrong way round"
+    );
+    assert!(bx + bw <= cx, "Bluetooth runs into the clock");
 }

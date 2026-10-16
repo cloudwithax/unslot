@@ -465,6 +465,8 @@ pub struct App {
     battery_percent: slot_ui::Printed,
     bolt: Option<TexId>,
     hud_bolt: Option<TexId>,
+    /// The footer's Wi-Fi and Bluetooth icons.
+    net_faces: Option<[TexId; 2]>,
     slot_faces: Option<(TexId, TexId)>,
     shelf_platform: slot_ui::Printed,
     shelf_title: slot_ui::Printed,
@@ -641,6 +643,7 @@ impl App {
             battery_percent: slot_ui::Printed::default(),
             bolt: None,
             hud_bolt: None,
+            net_faces: None,
             slot_faces: None,
             shelf_platform: slot_ui::Printed::default(),
             shelf_title: slot_ui::Printed::default(),
@@ -1351,6 +1354,26 @@ impl App {
 
     pub fn set_wallpaper(&mut self, face: TexId) {
         self.wallpaper = Some(face);
+    }
+
+    pub fn set_net_faces(&mut self, faces: [TexId; 2]) {
+        self.net_faces = Some(faces);
+    }
+
+    /// The footer's icons for the networks that are up: Wi-Fi when it has joined one, Bluetooth
+    /// when a device is connected.
+    pub fn net_icons(&self) -> Vec<TexId> {
+        let Some([wifi, bt]) = self.net_faces else {
+            return Vec::new();
+        };
+        let mut icons = Vec::new();
+        if self.wifi_view.connected.is_some() {
+            icons.push(wifi);
+        }
+        if self.bt_view.devices.iter().any(|d| d.connected) {
+            icons.push(bt);
+        }
+        icons
     }
 
     pub fn set_bolt_face(&mut self, bolt: TexId) {
@@ -4003,6 +4026,7 @@ impl App {
                     self.battery_percent,
                     self.bolt,
                     self.shelf_clock,
+                    &self.net_icons(),
                     footer_ink(self.light()),
                     out,
                 );
@@ -4203,6 +4227,7 @@ impl App {
             self.battery_percent,
             self.bolt,
             self.shelf_clock,
+            &self.net_icons(),
             footer_ink(self.light()),
             out,
         );
