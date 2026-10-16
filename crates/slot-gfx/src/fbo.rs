@@ -140,6 +140,10 @@ impl Compositor {
         self.game.set_aspect(aspect);
     }
 
+    pub fn set_game_rotation(&mut self, quarter_turns: u32) {
+        self.game.set_rotation(quarter_turns);
+    }
+
     pub fn draw_game(&mut self) {
         self.game.draw(&self.quad);
     }

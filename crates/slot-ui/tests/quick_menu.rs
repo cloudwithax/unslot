@@ -152,6 +152,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
     assert_eq!(
         QuickRow::GAME.map(QuickRow::label),
         [
+            "Disc",
             "Fast Forward",
             "Fast Forward Sound",
             "Rewind",
@@ -238,8 +239,16 @@ fn the_values_read_as_the_menu_prints_them() {
             "25%",
             "45%",
             "65%",
+            "Disc 1",
+            "Disc 2",
+            "Disc 3",
+            "Disc 4",
+            "Disc 5",
         ]
     );
+    assert_eq!(QuickValue::disc(0), Some(QuickValue::Disc1));
+    assert_eq!(QuickValue::disc(4), Some(QuickValue::Disc5));
+    assert_eq!(QuickValue::disc(5), None);
     assert_eq!(QuickValue::flag(true), QuickValue::On);
     assert_eq!(QuickValue::flag(false), QuickValue::Off);
 }
@@ -362,7 +371,7 @@ fn the_in_game_pages_hold_their_rows_in_order() {
 fn in_game_pages_climb_back_through_settings() {
     assert_eq!(QuickRow::Settings.child(), Some(QuickRow::PlayScreen));
     assert_eq!(QuickRow::PlayScreen.child(), Some(QuickRow::Shader));
-    assert_eq!(QuickRow::PlayGameplay.child(), Some(QuickRow::FastForward));
+    assert_eq!(QuickRow::PlayGameplay.child(), Some(QuickRow::Disc));
     assert_eq!(
         QuickRow::Shader.parent_in_game(),
         Some(QuickRow::PlayScreen)

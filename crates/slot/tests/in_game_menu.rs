@@ -4,7 +4,9 @@ use common::{app_playing_in, tmp_root_with_carts};
 use slot::app::{App, Phase};
 use slot_input::{Action, Btn};
 use slot_store::{Platform, Shader, StateRing};
-use slot_ui::{Draw, QuickMenuFaces, QuickRow, TexId, HINT_EDGE, MOUTH_H, OUT_H, OUT_W};
+use slot_ui::{
+    Draw, QuickMenuFaces, QuickRow, QuickValue, TexId, HINT_EDGE, MOUTH_H, OUT_H, OUT_W,
+};
 use tempfile::TempDir;
 
 fn playing() -> (TempDir, App) {
@@ -90,9 +92,28 @@ fn b_climbs_the_in_game_pages_and_never_the_shelf_ones() {
 #[test]
 fn screen_shows_the_palette_only_when_palettes_are_live() {
     let (_d, mut a) = playing();
-    assert_eq!(a.in_game_hidden(), &[QuickRow::Palette, QuickRow::Bezel]);
+    assert_eq!(
+        a.in_game_hidden(),
+        &[QuickRow::Palette, QuickRow::Bezel, QuickRow::Disc]
+    );
     a.set_palette_live(true);
-    assert_eq!(a.in_game_hidden(), &[QuickRow::Bezel]);
+    assert_eq!(a.in_game_hidden(), &[QuickRow::Bezel, QuickRow::Disc]);
+}
+
+#[test]
+fn a_game_on_one_disc_has_no_disc_row_and_one_on_several_swaps_them_round() {
+    let (_d, mut a) = playing();
+    a.set_disks(1, 0);
+    assert!(a.in_game_hidden().contains(&QuickRow::Disc));
+    assert!(
+        a.hidden_rows().contains(&QuickRow::Disc),
+        "the carousel menu offered a disc swap with no game in"
+    );
+
+    a.set_disks(3, 0);
+    assert!(!a.in_game_hidden().contains(&QuickRow::Disc));
+    assert_eq!(a.quick_value(QuickRow::Disc), QuickValue::disc(0));
+    assert_eq!(a.take_disc(), None, "nothing was asked for yet");
 }
 
 #[test]
@@ -551,4 +572,32 @@ fn a_hotkey_eject_slides_the_footer_up_while_the_picture_closes() {
         last > MOUTH_H * 0.8,
         "the footer was only at {last} when the picture went"
     );
+}
+
+#[test]
+fn gameplay_opens_on_fast_forward_for_one_disc_and_on_the_disc_for_several() {
+    let (_d, mut a) = playing();
+    a.set_disks(1, 0);
+    go_to(&mut a, QuickRow::PlayGameplay);
+    press(&mut a, Btn::A);
+    assert_eq!(
+        a.in_game_menu(),
+        Some(QuickRow::FastForward),
+        "a one-disc game opened on a hidden row"
+    );
+
+    let (_d, mut a) = playing();
+    a.set_disks(2, 0);
+    go_to(&mut a, QuickRow::Disc);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::Disc), QuickValue::disc(1));
+    assert_eq!(a.take_disc(), Some(1), "the swap never reached the core");
+    press(&mut a, Btn::Right);
+    assert_eq!(
+        a.take_disc(),
+        Some(0),
+        "the last disc did not wrap to the first"
+    );
+    press(&mut a, Btn::Left);
+    assert_eq!(a.take_disc(), Some(1), "left did not step back");
 }

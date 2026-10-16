@@ -19,6 +19,9 @@ pub struct GamePass {
     /// How wide the picture should look against its height, or None to fill the screen rect
     /// the way the Game Boy family's 240x160 canvas does.
     aspect: Option<f32>,
+    /// Quarter turns counter-clockwise the picture is drawn at.
+    rotation: u32,
+    u_rot: gl::types::GLint,
     u_rect: gl::types::GLint,
     u_bright: gl::types::GLint,
     u_uv: gl::types::GLint,
@@ -52,11 +55,12 @@ impl GamePass {
             crate::gl::gray_format(),
             Some(&[255]),
         );
-        let (u_rect, u_bright, u_uv, u_mode, u_paper_size, u_pic, u_fbo, u_origin, u_src);
+        let (u_rect, u_bright, u_uv, u_mode, u_paper_size, u_pic, u_fbo, u_origin, u_src, u_rot);
         unsafe {
             gl::UseProgram(prog);
             gl::Uniform1i(crate::gl::uniform_location(prog, "u_game"), 0);
             u_src = crate::gl::uniform_location(prog, "u_src");
+            u_rot = crate::gl::uniform_location(prog, "u_rot");
             gl::Uniform2f(
                 crate::gl::uniform_location(prog, "u_target"),
                 OUT_W as f32,
@@ -78,6 +82,8 @@ impl GamePass {
             texels: (SRC_W, SRC_H),
             u_src,
             aspect: None,
+            rotation: 0,
+            u_rot,
             u_rect,
             u_bright,
             u_uv,
@@ -121,6 +127,10 @@ impl GamePass {
             Some(aspect) => fit_aspect(rect, aspect),
             None => rect,
         }
+    }
+
+    pub fn set_rotation(&mut self, quarter_turns: u32) {
+        self.rotation = quarter_turns % 4;
     }
 
     pub fn set_aspect(&mut self, aspect: Option<f32>) {
@@ -194,7 +204,11 @@ impl GamePass {
 
     pub fn draw(&self, quad: &Quad) {
         let src = match self.effect {
-            ScreenEffect::Grid => whole_scale_source(self.src, self.fbo_scale, self.texels),
+            // The whole-texel fit pairs the texture's width with the screen's, which a quarter
+            // turn swaps, so a turned picture keeps the plain source.
+            ScreenEffect::Grid if self.rotation.is_multiple_of(2) => {
+                whole_scale_source(self.src, self.fbo_scale, self.texels)
+            }
             _ => self.src,
         };
         self.draw_source(self.game, quad, src);
@@ -220,6 +234,7 @@ impl GamePass {
         unsafe {
             gl::UseProgram(self.prog);
             gl::Uniform2f(self.u_src, self.texels.0 as f32, self.texels.1 as f32);
+            gl::Uniform1f(self.u_rot, self.rotation as f32);
             gl::Uniform4f(self.u_rect, x, y, w, h);
             gl::Uniform4f(self.u_uv, src[0], src[1], src[2], src[3]);
             gl::Uniform1f(self.u_bright, bright);

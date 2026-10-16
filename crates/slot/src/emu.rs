@@ -86,12 +86,15 @@ enum Cmd {
     EndLink,
     BeginCable(u8, Box<dyn LinkChannel>),
     SetOption(String, String),
+    SetDisk(u32),
     Refresh,
 }
 
 struct Shared {
     input: AtomicU16,
     sticks: AtomicU64,
+    /// The core's disc count in the high half and the disc in the drive in the low.
+    disks: AtomicU64,
     speed: AtomicU8,
     observed: AtomicU8,
     state: AtomicU8,
@@ -161,6 +164,7 @@ impl EmuHandle {
         let shared = Arc::new(Shared {
             input: AtomicU16::new(0),
             sticks: AtomicU64::new(0),
+            disks: AtomicU64::new(0),
             speed: AtomicU8::new(Speed::Paused as u8),
             observed: AtomicU8::new(Speed::Paused as u8),
             state: AtomicU8::new(CoreState::Loading as u8),
@@ -307,6 +311,19 @@ impl EmuHandle {
 
     pub fn input(&self) -> ButtonMask {
         ButtonMask(self.shared.input.load(Ordering::Relaxed))
+    }
+
+    pub fn disk_count(&self) -> u32 {
+        (self.shared.disks.load(Ordering::Relaxed) >> 32) as u32
+    }
+
+    pub fn disk_index(&self) -> u32 {
+        self.shared.disks.load(Ordering::Relaxed) as u32
+    }
+
+    /// Swaps the disc in the drive, as the console's tray would.
+    pub fn set_disk(&self, index: u32) {
+        let _ = self.cmds.send(Cmd::SetDisk(index));
     }
 
     pub fn set_sticks(&self, sticks: Sticks) {
@@ -591,6 +608,10 @@ impl Worker {
             for cmd in self.cmds.try_iter() {
                 self.apply(cmd, core.as_mut(), &mut transport, &mut cable, &link);
             }
+            self.shared.disks.store(
+                u64::from(core.disk_count()) << 32 | u64::from(core.disk_index()),
+                Ordering::Relaxed,
+            );
 
             if let Some(t) = transport.as_mut() {
                 match cable.as_mut() {
@@ -998,6 +1019,10 @@ impl Worker {
             Cmd::SetOption(key, value) => {
                 core.set_option(&key, &value);
             }
+            Cmd::SetDisk(index) => match core.set_disk(index) {
+                Ok(()) => eprintln!("slot: emu: disc {} is in", index + 1),
+                Err(e) => eprintln!("slot: emu: disc {}: {e}", index + 1),
+            },
             Cmd::EndLink => {
                 self.shared.link_lost.store(false, Ordering::Relaxed);
                 self.shared.peer_ended.store(false, Ordering::Relaxed);
@@ -1083,6 +1108,7 @@ fn shape_of(core: &dyn RetroCore) -> Shape {
         width,
         height,
         aspect: core.display_aspect(),
+        rotation: core.rotation(),
     }
 }
 

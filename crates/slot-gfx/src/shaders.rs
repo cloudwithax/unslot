@@ -63,7 +63,16 @@ uniform vec2 u_origin;
 uniform vec4 u_rect;
 uniform vec2 u_fbo;
 uniform vec4 u_pic;
+uniform float u_rot;
 varying vec2 v_uv;
+// Where on the texture a point of the screen rect reads, for a picture turned u_rot quarter
+// turns counter-clockwise. Both run top down.
+vec2 turned(vec2 s) {
+    if (u_rot > 2.5) return vec2(s.y, 1.0 - s.x);
+    if (u_rot > 1.5) return vec2(1.0 - s.x, 1.0 - s.y);
+    if (u_rot > 0.5) return vec2(1.0 - s.y, s.x);
+    return s;
+}
 const vec3 offsets = vec3(3.141592654) * vec3(1.0 / 2.0, 1.0 / 2.0 - 2.0 / 3.0, 1.0 / 2.0 - 4.0 / 3.0);
 const vec3 luma_coeff = vec3(0.2126, 0.7152, 0.0722);
 vec2 grid_band(vec2 x) {
@@ -73,7 +82,7 @@ float dot_weight(vec2 f, vec2 o, float bloom) {
     return exp(-4.0 * length(f - (o + vec2(0.5))) * bloom);
 }
 void main() {
-    vec2 uv = u_uv.xy + v_uv * u_uv.zw;
+    vec2 uv = u_uv.xy + turned(v_uv) * u_uv.zw;
     vec2 f = fract(uv * u_src);
     vec3 c = texture2D(u_game, uv).rgb;
     bool inside = all(greaterThanEqual(uv, u_pic.xy)) && all(lessThan(uv, u_pic.zw));
@@ -102,7 +111,8 @@ void main() {
         }
         c = mix(c, mix(1.2 * c * mid, c * sum, 0.85), 0.85);
     } else if (u_mode > 1.5) {
-        vec2 hp = 0.5 * u_uv.zw * u_src / (u_rect.zw * u_fbo);
+        vec2 span = abs(u_rot - 1.0) < 0.5 || abs(u_rot - 3.0) < 0.5 ? u_rect.wz : u_rect.zw;
+        vec2 hp = 0.5 * u_uv.zw * u_src / (span * u_fbo);
         vec2 edge = (grid_band(f + hp) - grid_band(f - hp)) / (2.0 * hp);
         c *= 1.0 - 0.75 * max(edge.x, edge.y);
     } else if (u_mode > 0.5) {

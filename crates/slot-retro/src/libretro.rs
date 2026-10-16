@@ -37,6 +37,7 @@ struct Host {
     size: (u32, u32),
     canvas: Canvas,
     aspect: f32,
+    rotation: u32,
     timing: AvInfo,
     format: PixelFormat,
     audio: Vec<i16>,
@@ -249,6 +250,13 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             .is_some()
         }
         GET_INPUT_BITMASKS => true,
+        SET_ROTATION => {
+            if data.is_null() {
+                return false;
+            }
+            let quarter_turns = *(data as *const c_uint) % 4;
+            with_host(|h| h.rotation = quarter_turns).is_some()
+        }
         GET_DISK_CONTROL_INTERFACE_VERSION => {
             if data.is_null() {
                 return false;
@@ -632,6 +640,7 @@ impl LibretroCore {
             size: (GBA_W, GBA_H),
             canvas: Canvas::Fixed(GBA_W, GBA_H),
             aspect: GBA_W as f32 / GBA_H as f32,
+            rotation: 0,
             timing: AvInfo {
                 fps: 0.0,
                 sample_rate: 0.0,
@@ -806,6 +815,10 @@ impl RetroCore for LibretroCore {
         (self.host.canvas == Canvas::Native).then_some(self.host.aspect)
     }
 
+    fn rotation(&self) -> u32 {
+        self.host.rotation
+    }
+
     fn set_sticks(&mut self, port: usize, sticks: Sticks) {
         if let Some(slot) = self.host.sticks.get_mut(port) {
             *slot = sticks;
@@ -931,6 +944,7 @@ mod tests {
             size: (GBA_W, GBA_H),
             canvas: Canvas::Fixed(GBA_W, GBA_H),
             aspect: 1.5,
+            rotation: 0,
             timing: AvInfo {
                 fps: 0.0,
                 sample_rate: 0.0,
@@ -2112,6 +2126,18 @@ mod tests {
         let _active = Active::bind(&mut host);
         let subclassed = DEVICE_JOYPAD | (1 << 8);
         assert_eq!(unsafe { input_state(0, subclassed, 0, 8) }, 1);
+    }
+
+    #[test]
+    fn set_rotation_keeps_the_quarter_turns_the_core_asks_for() {
+        let mut host = host_with(HashMap::new(), false);
+        let _active = Active::bind(&mut host);
+        for (asked, kept) in [(1, 1), (3, 3), (0, 0), (5, 1)] {
+            let mut turns: c_uint = asked;
+            let ok = unsafe { environment(SET_ROTATION, &mut turns as *mut c_uint as *mut c_void) };
+            assert!(ok, "a core that asks to turn the picture was refused");
+            assert_eq!(unsafe { with_host(|h| h.rotation) }.unwrap(), kept);
+        }
     }
 
     #[test]

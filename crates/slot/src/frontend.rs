@@ -64,6 +64,7 @@ pub struct Frontend {
     /// The aspect of the last game frame drawn at its own size, or None for the Game Boy
     /// family's fixed canvas.
     game_aspect: Option<f32>,
+    game_rotation: u32,
 }
 
 #[derive(Default)]
@@ -187,6 +188,7 @@ impl Frontend {
             link_shot_size: (0, 0),
             link_shot_shown: false,
             game_aspect: None,
+            game_rotation: 0,
         }
     }
 
@@ -519,6 +521,7 @@ impl Frontend {
         if let Some(frame) = self.session.frame() {
             compositor.upload_game(&frame, (frame.shape.width, frame.shape.height));
             self.game_aspect = frame.shape.aspect;
+            self.game_rotation = frame.shape.rotation;
             crate::latency::taken();
         }
         if self.game_aspect.is_some() {
@@ -527,7 +530,11 @@ impl Frontend {
             compositor.set_game_source_rect(slot_gfx::WHOLE_TEXTURE);
         }
         let stretched = self.session.app().video_mode() == crate::video_mode::VideoMode::Stretch;
-        compositor.set_game_aspect(self.game_aspect.filter(|_| !stretched));
+        // A picture turned on its side shows the other way round.
+        let turned = self.game_rotation % 2 == 1;
+        let aspect = self.game_aspect.map(|a| if turned { 1.0 / a } else { a });
+        compositor.set_game_rotation(self.game_rotation);
+        compositor.set_game_aspect(aspect.filter(|_| !stretched));
         self.cart_faces.sync(self.session.app_mut(), compositor);
         sync_clock(self.session.app_mut(), compositor, &mut self.clocks);
         sync_about(self.session.app_mut(), compositor, &mut self.about);

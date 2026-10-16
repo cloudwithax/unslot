@@ -784,3 +784,42 @@ fn the_dot_shader_keeps_a_white_screen_a_little_over_half_lit() {
         "a white cell averages {mean} under the dot shader"
     );
 }
+
+#[test]
+fn a_picture_turned_counter_clockwise_brings_each_corner_round_with_it() {
+    let Some((_g, _s, mut c)) = compositor() else {
+        return;
+    };
+    // Red, green / blue, white, in BGRX.
+    let (red, green, blue, white) = ([255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 255]);
+    let texels: Vec<u8> = [red, green, blue, white]
+        .iter()
+        .flat_map(|[r, g, b]| [*b, *g, *r, 0])
+        .collect();
+    let corner = |frame: &[u8], right: bool, bottom: bool| {
+        let x = if right { OUT_W as usize - 10 } else { 10 };
+        let y = if bottom { OUT_H as usize - 10 } else { 10 };
+        px(frame, x, y)
+    };
+    // Each turn's top left, top right, bottom left and bottom right.
+    for (turns, want) in [
+        (0, [red, green, blue, white]),
+        (1, [green, white, red, blue]),
+        (2, [white, blue, green, red]),
+        (3, [blue, red, white, green]),
+    ] {
+        c.set_screen_effect(ScreenEffect::None);
+        c.set_game_rotation(turns);
+        c.begin_frame(slot_gfx::Layout::Framed);
+        c.upload_game(&texels, (2, 2));
+        c.draw_game();
+        let frame = c.read_frame();
+        let got = [
+            corner(&frame, false, false),
+            corner(&frame, true, false),
+            corner(&frame, false, true),
+            corner(&frame, true, true),
+        ];
+        assert_eq!(got, want, "{turns} quarter turns");
+    }
+}

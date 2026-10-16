@@ -101,6 +101,10 @@ pub trait RetroCore: Send {
     fn display_aspect(&self) -> Option<f32> {
         None
     }
+    /// How far the picture should be turned for display, in quarter turns counter-clockwise.
+    fn rotation(&self) -> u32 {
+        0
+    }
     fn set_sticks(&mut self, _port: usize, _sticks: Sticks) {}
     fn disk_count(&self) -> u32 {
         0

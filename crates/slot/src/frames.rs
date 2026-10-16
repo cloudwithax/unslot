@@ -11,6 +11,8 @@ pub struct Shape {
     pub width: u32,
     pub height: u32,
     pub aspect: Option<f32>,
+    /// Quarter turns counter-clockwise the picture is shown at.
+    pub rotation: u32,
 }
 
 impl Default for Shape {
@@ -19,6 +21,7 @@ impl Default for Shape {
             width: GBA_W,
             height: GBA_H,
             aspect: None,
+            rotation: 0,
         }
     }
 }

@@ -346,6 +346,9 @@ pub struct App {
     colour_pending: Option<bool>,
     palette_live: bool,
     palette_pending: Option<GbPalette>,
+    /// The running game's discs and which is in the drive.
+    disks: (u32, u32),
+    disc_pending: Option<u32>,
     link_player: Option<u8>,
     platform: Platform,
     named_core: bool,
@@ -510,6 +513,8 @@ impl App {
             colour_pending: None,
             palette_live: false,
             palette_pending: None,
+            disks: (0, 0),
+            disc_pending: None,
             link_player: None,
             platform: Platform::default(),
             named_core: false,
@@ -835,18 +840,33 @@ impl App {
         self.in_game_menu
     }
 
-    pub fn in_game_hidden(&self) -> &'static [QuickRow] {
+    pub fn in_game_hidden(&self) -> Vec<QuickRow> {
         let no_bezel = !self.playing_platform().spec().bezels && !self.framed_panel();
-        match (self.palette_live, no_bezel, self.single_cart()) {
-            (true, false, false) => &[],
-            (true, false, true) => &[QuickRow::ExitGame],
-            (true, true, false) => &[QuickRow::Bezel],
-            (true, true, true) => &[QuickRow::Bezel, QuickRow::ExitGame],
-            (false, false, false) => &[QuickRow::Palette],
-            (false, false, true) => &[QuickRow::Palette, QuickRow::ExitGame],
-            (false, true, false) => &[QuickRow::Palette, QuickRow::Bezel],
-            (false, true, true) => &[QuickRow::Palette, QuickRow::Bezel, QuickRow::ExitGame],
+        let mut hidden = Vec::new();
+        if !self.palette_live {
+            hidden.push(QuickRow::Palette);
         }
+        if no_bezel {
+            hidden.push(QuickRow::Bezel);
+        }
+        if self.single_cart() {
+            hidden.push(QuickRow::ExitGame);
+        }
+        if self.disks.0 < 2 {
+            hidden.push(QuickRow::Disc);
+        }
+        hidden
+    }
+
+    /// What the running core says of its discs: how many, and which is in the drive.
+    pub fn set_disks(&mut self, count: u32, index: u32) {
+        if self.disc_pending.is_none() {
+            self.disks = (count, index);
+        }
+    }
+
+    pub fn take_disc(&mut self) -> Option<u32> {
+        self.disc_pending.take()
     }
 
     pub fn gb_palette_label(&self) -> &'static str {
@@ -878,6 +898,7 @@ impl App {
                 Some(QuickValue::flag(self.state.screen(p).colour_correction))
             }
             QuickRow::GbPalettes => Some(QuickValue::flag(self.state.gb_palettes)),
+            QuickRow::Disc => QuickValue::disc(self.disks.1),
             QuickRow::ShaderOf(p) => Some(shader_value(self.state.screen(p).shader)),
             QuickRow::Rumble => Some(QuickValue::flag(self.state.rumble)),
             QuickRow::EjectSave => Some(QuickValue::flag(self.state.eject_save)),
@@ -1105,7 +1126,8 @@ impl App {
             self.state.wallpaper,
             WallpaperPick::File(_) | WallpaperPick::Random
         );
-        let mut hidden = Vec::new();
+        // A disc is only swapped from inside a game.
+        let mut hidden = vec![QuickRow::Disc];
         if !own {
             hidden.push(QuickRow::WallpaperTint);
         }
@@ -1936,8 +1958,8 @@ impl App {
     fn in_game_menu_input(&mut self, row: QuickRow, action: Action) {
         let hidden = self.in_game_hidden();
         self.in_game_menu = match action {
-            Action::GbaDown(Btn::Up) => Some(row.up(hidden)),
-            Action::GbaDown(Btn::Down) => Some(row.down(hidden)),
+            Action::GbaDown(Btn::Up) => Some(row.up(&hidden)),
+            Action::GbaDown(Btn::Down) => Some(row.down(&hidden)),
             Action::GbaDown(Btn::Left) => return self.change_setting(row, false),
             Action::GbaDown(Btn::Right) => return self.change_setting(row, true),
             Action::GbaDown(Btn::A) => return self.open_in_game_row(row),
@@ -1955,7 +1977,9 @@ impl App {
             QuickRow::ExitGame => self.eject(),
             _ => {
                 if let Some(child) = row.child() {
-                    self.in_game_menu = Some(child);
+                    // The page's first row may be hidden, as the disc is for a one-disc game.
+                    let shown = child.shown(&self.in_game_hidden());
+                    self.in_game_menu = Some(shown.first().copied().unwrap_or(child));
                 }
             }
         }
@@ -2011,6 +2035,7 @@ impl App {
             | QuickRow::Rewind
             | QuickRow::FastForward
             | QuickRow::FastForwardSound
+            | QuickRow::Disc
             | QuickRow::ColourCorrectionOf(_)
             | QuickRow::ShaderOf(_)
             | QuickRow::GbPalettes
@@ -2045,6 +2070,15 @@ impl App {
             self.state.gb_palette = to;
             self.palette_pending = Some(to);
             self.persist();
+            return;
+        }
+        if row == QuickRow::Disc {
+            let (count, at) = self.disks;
+            if count > 1 {
+                let to = (at + if right { 1 } else { count - 1 }) % count;
+                self.disks.1 = to;
+                self.disc_pending = Some(to);
+            }
             return;
         }
         if let QuickRow::BezelOf(platform) = row {
@@ -2119,6 +2153,7 @@ impl App {
             | QuickRow::Shader
             | QuickRow::ColourCorrection
             | QuickRow::Palette
+            | QuickRow::Disc
             | QuickRow::ScreenOf(_)
             | QuickRow::BezelOf(_)
             | QuickRow::Bezel => return,
@@ -3026,7 +3061,7 @@ impl App {
         {
             QuickMenu {
                 row,
-                hidden: self.in_game_hidden(),
+                hidden: &self.in_game_hidden(),
                 values: QuickRow::ALL.map(|r| self.quick_value(r)),
                 clock: None,
                 wallpaper: None,
@@ -3602,12 +3637,18 @@ impl App {
             return;
         }
         let at = self.shelf().index;
-        let Some(cart) = self.shelf_mut().carts.get_mut(at).map(|c| {
+        let Some((cart, platform)) = self.shelf_mut().carts.get_mut(at).map(|c| {
             c.read_header();
-            c.stem.clone()
+            (c.stem.clone(), c.platform)
         }) else {
             return;
         };
+        if let Some(missing) = self.missing_bios(platform) {
+            eprintln!("slot: launch: {cart} needs BIOS/{missing}, which is not on the card");
+            self.hud.toast(Toast::NoBios, self.now());
+            self.refuse();
+            return;
+        }
         eprintln!(
             "slot: launch: insert {cart} at {:.1} ms",
             crate::boot_time::ms()
@@ -3622,6 +3663,18 @@ impl App {
             resumed: false,
             clean,
         };
+    }
+
+    /// The first file a platform's core cannot start without that is not in the BIOS folder.
+    fn missing_bios(&self, platform: Platform) -> Option<&'static str> {
+        let root = self.root.as_ref()?;
+        let dir = crate::root::bios_dir(root);
+        platform
+            .spec()
+            .bios
+            .iter()
+            .copied()
+            .find(|name| !dir.join(name).is_file())
     }
 
     pub fn starting_clean(&self) -> bool {

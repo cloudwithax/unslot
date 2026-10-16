@@ -89,7 +89,7 @@ fn the_in_game_menu_darkens_the_game_and_screen_leaves_it_bare() {
     assert_eq!(f.app().in_game_menu(), Some(QuickRow::Shader));
     let screen = composed(&mut f, &mut c, "screen");
 
-    let panel = quick_row_top(QuickRow::Shader, f.app().in_game_hidden()) as usize - 16;
+    let panel = quick_row_top(QuickRow::Shader, &f.app().in_game_hidden()) as usize - 16;
     let (mut probed, mut lit) = (0, 0);
     for y in (48..panel).step_by(17) {
         for x in (0..150).chain(570..OUT_W as usize).step_by(13) {
@@ -128,7 +128,7 @@ fn the_in_game_menu_darkens_the_game_and_screen_leaves_it_bare() {
         );
     }
 
-    let row = quick_row_top(QuickRow::Shader, f.app().in_game_hidden()) as usize;
+    let row = quick_row_top(QuickRow::Shader, &f.app().in_game_hidden()) as usize;
     let ink = (row..row + 40)
         .flat_map(|y| (64..400).map(move |x| (x, y)))
         .filter(|&(x, y)| bright(at(&screen, x, y)) > 600)

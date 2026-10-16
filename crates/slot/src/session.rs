@@ -268,6 +268,12 @@ impl Session {
                 emu.refresh();
             }
         }
+        if let Some(emu) = &self.emu {
+            if let Some(disc) = self.app.take_disc() {
+                emu.set_disk(disc);
+            }
+            self.app.set_disks(emu.disk_count(), emu.disk_index());
+        }
         if let Some((stem, serial)) = self.app.take_link_reload() {
             self.reload_for_link(&stem, serial);
         }

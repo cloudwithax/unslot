@@ -153,3 +153,31 @@ fn an_empty_slot_loads_no_core_at_boot() {
     assert!(matches!(s.app().phase(), Phase::Shelf));
     assert!(!s.has_core(), "a core opened with nothing in the slot");
 }
+
+#[test]
+fn a_system_whose_core_needs_a_bios_stays_on_the_shelf_until_the_bios_is_there() {
+    let d = tmp_root_with_carts(&[]);
+    let lynx = d.path().join("Games/LYNX");
+    std::fs::create_dir_all(&lynx).unwrap();
+    std::fs::write(lynx.join("California Games.lnx"), b"LYNX").unwrap();
+
+    let mut a = boot(d.path());
+    a.apply_at(Action::GbaDown(Btn::A), 0);
+    a.apply_at(Action::GbaUp(Btn::A), 120);
+    assert!(
+        matches!(a.phase(), Phase::Shelf),
+        "a Lynx cart went in with no lynxboot.img: {:?}",
+        a.phase()
+    );
+    assert_eq!(a.toast(), Some(slot_ui::Toast::NoBios), "it said nothing");
+
+    std::fs::write(d.path().join("BIOS/lynxboot.img"), [0u8; 512]).unwrap();
+    let mut a = boot(d.path());
+    a.apply_at(Action::GbaDown(Btn::A), 0);
+    a.apply_at(Action::GbaUp(Btn::A), 120);
+    assert!(
+        matches!(a.phase(), Phase::Inserting { .. }),
+        "the cart stayed out with its BIOS in place: {:?}",
+        a.phase()
+    );
+}

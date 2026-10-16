@@ -38,6 +38,8 @@ pub enum QuickRow {
     ColourCorrection,
     Palette,
     Bezel,
+    /// Which disc of a multi-disc game is in the drive.
+    Disc,
     /// A platform's own page under Screen, and the rows on it.
     ScreenOf(Platform),
     ShaderOf(Platform),
@@ -46,7 +48,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 28] = [
+const GENERIC: [QuickRow; 29] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -75,6 +77,7 @@ const GENERIC: [QuickRow; 28] = [
     QuickRow::ColourCorrection,
     QuickRow::Palette,
     QuickRow::Bezel,
+    QuickRow::Disc,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -137,7 +140,8 @@ impl QuickRow {
         QuickRow::DateTime,
     ];
 
-    pub const GAME: [QuickRow; 7] = [
+    pub const GAME: [QuickRow; 8] = [
+        QuickRow::Disc,
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Rewind,
@@ -217,7 +221,8 @@ impl QuickRow {
                 Some(p) => QuickRow::screen_of(p),
                 None => QuickRow::MAIN.to_vec(),
             },
-            QuickRow::FastForward
+            QuickRow::Disc
+            | QuickRow::FastForward
             | QuickRow::FastForwardSound
             | QuickRow::Rewind
             | QuickRow::RunAhead
@@ -245,7 +250,7 @@ impl QuickRow {
         match self.page()[0] {
             QuickRow::ScreenOf(_) => Some(QuickRow::Screen),
             QuickRow::ShaderOf(p) => Some(QuickRow::ScreenOf(p)),
-            QuickRow::FastForward => Some(QuickRow::Game),
+            QuickRow::Disc => Some(QuickRow::Game),
             QuickRow::Wallpaper => Some(QuickRow::General),
             QuickRow::PlayScreen => Some(QuickRow::Settings),
             QuickRow::Shader => Some(QuickRow::PlayScreen),
@@ -326,6 +331,7 @@ impl QuickRow {
             QuickRow::Palette => "Palette",
             QuickRow::Bezel | QuickRow::BezelOf(_) => "Bezel",
             QuickRow::ScreenOf(p) => p.name(),
+            QuickRow::Disc => "Disc",
         }
     }
 
@@ -378,10 +384,15 @@ pub enum QuickValue {
     Low,
     Medium,
     High,
+    Disc1,
+    Disc2,
+    Disc3,
+    Disc4,
+    Disc5,
 }
 
 impl QuickValue {
-    pub const ALL: [QuickValue; 18] = [
+    pub const ALL: [QuickValue; 23] = [
         QuickValue::Speed2,
         QuickValue::Speed3,
         QuickValue::Speed4,
@@ -400,6 +411,11 @@ impl QuickValue {
         QuickValue::Low,
         QuickValue::Medium,
         QuickValue::High,
+        QuickValue::Disc1,
+        QuickValue::Disc2,
+        QuickValue::Disc3,
+        QuickValue::Disc4,
+        QuickValue::Disc5,
     ];
 
     pub fn index(self) -> usize {
@@ -426,7 +442,25 @@ impl QuickValue {
             QuickValue::Low => "25%",
             QuickValue::Medium => "45%",
             QuickValue::High => "65%",
+            QuickValue::Disc1 => "Disc 1",
+            QuickValue::Disc2 => "Disc 2",
+            QuickValue::Disc3 => "Disc 3",
+            QuickValue::Disc4 => "Disc 4",
+            QuickValue::Disc5 => "Disc 5",
         }
+    }
+
+    /// The disc at `index`, counting from 0, for the most discs a game comes on.
+    pub fn disc(index: u32) -> Option<QuickValue> {
+        [
+            QuickValue::Disc1,
+            QuickValue::Disc2,
+            QuickValue::Disc3,
+            QuickValue::Disc4,
+            QuickValue::Disc5,
+        ]
+        .get(index as usize)
+        .copied()
     }
 
     pub fn speed(frames: u8) -> Option<QuickValue> {
