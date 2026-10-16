@@ -6,6 +6,9 @@ mod gl;
 mod grade;
 #[cfg(target_os = "macos")]
 mod headless;
+#[cfg(target_os = "linux")]
+#[path = "headless_egl.rs"]
+mod headless;
 #[cfg(feature = "host")]
 mod host;
 mod layout;
@@ -21,7 +24,7 @@ pub use draw::{Draw, TexId};
 pub use fbdev::{egl_error, panel_mode, panel_size, FbdevSurface};
 pub use fbo::{canvas_size, Compositor, BACKDROP};
 pub use grade::{blue_light_gain, BLUE_LIGHT_MAX};
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub use headless::HeadlessSurface;
 #[cfg(feature = "host")]
 pub use host::HostSurface;

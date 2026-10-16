@@ -1,4 +1,4 @@
-#![cfg(target_os = "macos")]
+#![cfg(any(target_os = "macos", target_os = "linux"))]
 
 use slot_gfx::{Canvas, Compositor, Draw, HeadlessSurface, Layout, ScreenEffect, SRC_H, SRC_W};
 use std::sync::{Mutex, MutexGuard, PoisonError};
