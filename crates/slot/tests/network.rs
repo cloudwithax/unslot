@@ -558,3 +558,64 @@ fn the_footer_shows_wi_fi_once_it_has_joined_a_network() {
     until(&mut a, |a| a.wifi_view().connected.is_some());
     assert_eq!(a.net_icons(), [wifi], "no Wi-Fi icon once joined");
 }
+
+#[test]
+fn a_screenscraper_login_is_typed_in_on_game_art_and_saved_to_the_card() {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    let set = SlotState {
+        clock_set: true,
+        ..SlotState::default()
+    };
+    write_slot_state(d.path(), &set).expect("write slot.state");
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    a.apply(Action::QuickMenu);
+    for _ in 0..QuickRow::MAIN.len() {
+        if a.quick_menu() == Some(QuickRow::Network) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    press(&mut a, Btn::A);
+    for _ in 0..QuickRow::NETWORK.len() {
+        if a.quick_menu() == Some(QuickRow::GameArt) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    press(&mut a, Btn::A);
+    assert_eq!(detail(&a, "ScreenScraper"), "Sign in");
+    // Up from the first row wraps to the last, the sign in.
+    press(&mut a, Btn::Up);
+    assert_eq!(list(&a).hints, "A sign in   B back");
+    press(&mut a, Btn::A);
+    let Some(PageModel::Keys(_)) = a.page_model() else {
+        panic!("no keyboard for the username: {:?}", a.phase());
+    };
+    for _ in 0..2 {
+        press(&mut a, Btn::A);
+    }
+    press(&mut a, Btn::Start);
+    let Some(PageModel::Keys(_)) = a.page_model() else {
+        panic!("no keyboard for the password: {:?}", a.phase());
+    };
+    for _ in 0..4 {
+        press(&mut a, Btn::A);
+    }
+    press(&mut a, Btn::Start);
+    assert!(
+        matches!(a.phase(), Phase::GameArt { .. }),
+        "{:?}",
+        a.phase()
+    );
+    let conf = std::fs::read_to_string(d.path().join(slot::scrape::SS_CONF)).unwrap();
+    let user = conf
+        .lines()
+        .find_map(|l| l.strip_prefix("ssid="))
+        .unwrap_or_default();
+    assert_eq!(user.chars().count(), 2, "{conf}");
+    assert_eq!(detail(&a, "ScreenScraper"), user);
+    assert_eq!(
+        list(&a).status,
+        "Signed in, but ScreenScraper needs unslot's developer ID"
+    );
+}

@@ -38,17 +38,35 @@ pub fn hhmm(secs: i64) -> String {
     format!("{:02}:{:02}", rem / 3600, rem / 60 % 60)
 }
 
+/// The time of day the way the clock setting wants it: `19:05`, or `7:05 PM` on a 12-hour clock.
+pub fn time_text(secs: i64, twelve: bool) -> String {
+    if !twelve {
+        return hhmm(secs);
+    }
+    let rem = secs.rem_euclid(DAY);
+    let (h, m) = (rem / 3600, rem / 60 % 60);
+    let hour = match h % 12 {
+        0 => 12,
+        h => h,
+    };
+    format!("{hour}:{m:02} {}", if h < 12 { "AM" } else { "PM" })
+}
+
 const MONTHS: [&str; 12] = [
     "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
 ];
 
 pub fn date_time_text(secs: i64) -> String {
+    date_time_text_as(secs, false)
+}
+
+pub fn date_time_text_as(secs: i64, twelve: bool) -> String {
     let (_, month, day) = civil_from_days(secs.div_euclid(DAY));
     let name = MONTHS
         .get((month - 1) as usize)
         .copied()
         .unwrap_or_default();
-    format!("{name} {day} {}", hhmm(secs))
+    format!("{name} {day} {}", time_text(secs, twelve))
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]

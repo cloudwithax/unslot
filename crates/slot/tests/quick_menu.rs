@@ -1281,3 +1281,20 @@ fn a_frame_file_that_is_gone_reads_back_as_none() {
     let (_d, a, _) = on_carousel_with(state);
     assert_eq!(a.resolved_bezel(Platform::Gb), BezelPick::None);
 }
+
+#[test]
+fn the_clock_turns_to_12_hours_and_back_and_saves() {
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::Clock);
+    assert_eq!(a.quick_value(QuickRow::Clock), Some(QuickValue::Hours24));
+    assert!(!a.clock_12h());
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::Clock), Some(QuickValue::Hours12));
+    assert!(a.clock_12h());
+    assert!(
+        read_slot_state(d.path()).clock_12h,
+        "the 12-hour clock was not saved"
+    );
+    press(&mut a, Btn::Left);
+    assert!(!read_slot_state(d.path()).clock_12h);
+}

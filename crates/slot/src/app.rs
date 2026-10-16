@@ -29,7 +29,7 @@ use crate::link_radio::{radio_jobs, LinkRole, RadioJob, RadioJobs};
 use crate::link_screen::LinkSprites;
 use crate::link_start::{link_port, LinkFail, LinkProgress, LinkStarter, LinkStep};
 use crate::persist::{self, Snapshot};
-use crate::scrape::{ScrapeView, Scraper};
+use crate::scrape::{ScrapeView, Scraper, SsState};
 use crate::services::{Services, ServicesView, Tailnet, Wanted};
 use crate::update::{Part, Stage, Track, Updates, UpdatesView};
 use crate::video_mode::{self, VideoMode};
@@ -312,6 +312,9 @@ pub enum Typing {
     RootPassword {
         share: bool,
     },
+    /// The player's ScreenScraper username, then their password.
+    SsUser,
+    SsPassword(String),
 }
 
 /// A row on the services page.
@@ -508,6 +511,8 @@ pub struct App {
     updates_view: UpdatesView,
     scraper: Option<Scraper>,
     scrape_view: ScrapeView,
+    /// Whether Game Art can ask ScreenScraper, read at boot and after a sign in.
+    ss_state: SsState,
     page_face: Option<(TexId, u32, u32)>,
 }
 
@@ -683,6 +688,7 @@ impl App {
             updates_view: UpdatesView::default(),
             scraper: None,
             scrape_view: ScrapeView::default(),
+            ss_state: SsState::Off,
             page_face: None,
         }
     }
@@ -712,6 +718,7 @@ impl App {
         app.services = Some(services);
         app.updates = Some(Updates::for_card(root));
         app.scraper = Some(Scraper::for_card(root));
+        app.ss_state = crate::scrape::ss_state(root);
         app.restock_recents();
         app.restock_favorites();
         if let Some((at, i)) = app.remembered_seat() {
@@ -1036,6 +1043,10 @@ impl App {
             QuickRow::Turbo => Some(QuickValue::flag(self.state.turbo)),
             QuickRow::Rewind => Some(QuickValue::flag(self.state.rewind)),
             QuickRow::RunAhead => QuickValue::frames(self.state.runahead),
+            QuickRow::Clock => Some(match self.state.clock_12h {
+                true => QuickValue::Hours12,
+                false => QuickValue::Hours24,
+            }),
             QuickRow::Recents => Some(if self.state.show_recents {
                 QuickValue::Show
             } else {
@@ -1354,6 +1365,11 @@ impl App {
 
     pub fn set_wallpaper(&mut self, face: TexId) {
         self.wallpaper = Some(face);
+    }
+
+    /// Whether the clock reads 7:05 PM rather than 19:05.
+    pub fn clock_12h(&self) -> bool {
+        self.state.clock_12h
     }
 
     pub fn set_net_faces(&mut self, faces: [TexId; 2]) {
@@ -2306,13 +2322,42 @@ impl App {
             .collect()
     }
 
+    /// Saves a ScreenScraper login typed in on the device; a note if it could not be.
+    fn save_ss_login(&mut self, user: &str, password: &str) -> Option<String> {
+        let root = self.root.clone()?;
+        let saved = crate::scrape::save_ss_login(&root, user, password);
+        self.ss_state = crate::scrape::ss_state(&root);
+        saved
+            .err()
+            .map(|e| format!("Could not save the login: {e}"))
+    }
+
     fn game_art_input(&mut self, cursor: usize, action: Action) {
         let platforms = self.art_platforms();
-        let n = platforms.len() + 1;
+        // All systems, each system, then the ScreenScraper sign in.
+        let n = platforms.len() + 2;
         let cursor = cursor.min(n - 1);
         let (cursor, note) = match action {
             Action::GbaDown(Btn::Up) => ((cursor + n - 1) % n, None),
             Action::GbaDown(Btn::Down) => ((cursor + 1) % n, None),
+            Action::GbaDown(Btn::A) if cursor == n - 1 => {
+                let user = match &self.ss_state {
+                    SsState::NoDevId(u) | SsState::On(Some(u)) => u.clone(),
+                    _ => String::new(),
+                };
+                self.phase = Phase::Keyboard {
+                    keys: Keyboard::new(
+                        "ScreenScraper username, or none to sign out",
+                        &user,
+                        false,
+                        0,
+                        64,
+                    ),
+                    typing: Typing::SsUser,
+                    cursor,
+                };
+                return;
+            }
             Action::GbaDown(Btn::A) if !self.scrape_view.running => {
                 let which = cursor.checked_sub(1).map(|i| platforms[i]);
                 let missing: Vec<Cart> = self
@@ -2368,7 +2413,16 @@ impl App {
             detail: count(Some(p)),
             bars: None,
         }))
+        .chain(std::iter::once(ListRow {
+            label: "ScreenScraper".into(),
+            detail: match &self.ss_state {
+                SsState::Off | SsState::On(None) => "Sign in".into(),
+                SsState::NoDevId(user) | SsState::On(Some(user)) => user.clone(),
+            },
+            bars: None,
+        }))
         .collect();
+        let on_ss = cursor >= rows.len() - 1;
         let made = v.made.len();
         let status = match () {
             _ if v.running => format!(
@@ -2388,14 +2442,18 @@ impl App {
                 v.missed,
                 if v.missed == 1 { "" } else { "s" }
             ),
-            _ if self.scraper.as_ref().is_some_and(|s| s.screenscraper) => {
-                "Art from ScreenScraper and libretro".into()
-            }
-            _ => "Art from libretro-thumbnails".into(),
+            _ => match &self.ss_state {
+                SsState::On(_) => "Art from ScreenScraper and libretro".into(),
+                SsState::NoDevId(_) => {
+                    "Signed in, but ScreenScraper needs unslot's developer ID".into()
+                }
+                SsState::Off => "Art from libretro-thumbnails".into(),
+            },
         };
-        let hints = match made > 0 && !v.running {
-            true => "A find missing art   START restart   B back",
-            false => "A find missing art   B back",
+        let hints = match (on_ss, made > 0 && !v.running) {
+            (true, _) => "A sign in   B back",
+            (false, true) => "A find missing art   START restart   B back",
+            (false, false) => "A find missing art   B back",
         };
         ListPage {
             title: "Game Art".into(),
@@ -2752,10 +2810,32 @@ impl App {
             KeyOutcome::Cancelled => {
                 self.phase = match typing {
                     Typing::RootPassword { .. } => Phase::Services { cursor, note: None },
+                    Typing::SsUser | Typing::SsPassword(_) => Phase::GameArt { cursor, note: None },
                     _ => Phase::Networks { cursor, note: None },
                 };
             }
             KeyOutcome::Done(text) => match typing {
+                Typing::SsUser if text.is_empty() => {
+                    let note = self.save_ss_login("", "");
+                    self.phase = Phase::GameArt { cursor, note };
+                }
+                Typing::SsUser => {
+                    self.phase = Phase::Keyboard {
+                        keys: Keyboard::new(
+                            &format!("ScreenScraper password for {text}"),
+                            "",
+                            true,
+                            1,
+                            64,
+                        ),
+                        typing: Typing::SsPassword(text),
+                        cursor,
+                    };
+                }
+                Typing::SsPassword(user) => {
+                    let note = self.save_ss_login(&user, &text);
+                    self.phase = Phase::GameArt { cursor, note };
+                }
                 Typing::RootPassword { share } => {
                     self.state.password = Some(text);
                     self.state.samba |= share;
@@ -3014,6 +3094,7 @@ impl App {
             | QuickRow::RunAhead
             | QuickRow::Rumble
             | QuickRow::Theme
+            | QuickRow::Clock
             | QuickRow::Recents
             | QuickRow::ShowTitles
             | QuickRow::Wallpaper
@@ -3127,6 +3208,7 @@ impl App {
                 s.runahead = (s.runahead + if right { 1 } else { n - 1 }) % n;
             }
             QuickRow::Theme => s.appearance = s.appearance.toggle(),
+            QuickRow::Clock => s.clock_12h = !s.clock_12h,
             QuickRow::WallpaperTint => s.wallpaper_tint = s.wallpaper_tint.step(right),
             QuickRow::Wallpaper
             | QuickRow::Recents

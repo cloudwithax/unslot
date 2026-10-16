@@ -232,23 +232,91 @@ pub struct SsLogin {
     pub sspassword: Option<String>,
 }
 
-/// `Config/screenscraper.conf`, `key=value` lines. None until a developer id is in it.
+/// unslot's own ScreenScraper developer id, built in when a release is made with one, from the
+/// `UNSLOT_SS_DEVID` and `UNSLOT_SS_DEVPASSWORD` secrets. Never written in the source.
+const BUILT_DEVID: Option<&str> = option_env!("UNSLOT_SS_DEVID");
+const BUILT_DEVPASSWORD: Option<&str> = option_env!("UNSLOT_SS_DEVPASSWORD");
+
+fn built_dev() -> Option<(&'static str, &'static str)> {
+    BUILT_DEVID
+        .zip(BUILT_DEVPASSWORD)
+        .filter(|(id, pw)| !id.is_empty() && !pw.is_empty())
+}
+
+/// A `key=value` line's value in `Config/screenscraper.conf`.
+fn conf_get(text: &str, key: &str) -> Option<String> {
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .find_map(|l| l.split_once('=').filter(|(k, _)| k.trim() == key))
+        .map(|(_, v)| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn ss_conf(root: &Path) -> String {
+    std::fs::read_to_string(root.join(SS_CONF)).unwrap_or_default()
+}
+
+/// The login ScreenScraper is asked with: a developer id from `Config/screenscraper.conf`, else
+/// the one built in, and the player's own account from the file. None with no developer id.
 pub fn read_ss_conf(root: &Path) -> Option<SsLogin> {
-    let text = std::fs::read_to_string(root.join(SS_CONF)).ok()?;
-    let get = |key: &str| {
-        text.lines()
-            .filter(|l| !l.trim_start().starts_with('#'))
-            .find_map(|l| l.split_once('=').filter(|(k, _)| k.trim() == key))
-            .map(|(_, v)| v.trim().to_string())
-            .filter(|v| !v.is_empty())
+    read_ss_conf_with(root, built_dev())
+}
+
+fn read_ss_conf_with(root: &Path, built: Option<(&str, &str)>) -> Option<SsLogin> {
+    let text = ss_conf(root);
+    let (devid, devpassword) = match (conf_get(&text, "devid"), conf_get(&text, "devpassword")) {
+        (Some(id), Some(pw)) => (id, pw),
+        _ => built.map(|(id, pw)| (id.to_string(), pw.to_string()))?,
     };
     Some(SsLogin {
-        devid: get("devid")?,
-        devpassword: get("devpassword")?,
-        softname: get("softname").unwrap_or_else(|| "unslot".into()),
-        ssid: get("ssid"),
-        sspassword: get("sspassword"),
+        devid,
+        devpassword,
+        softname: conf_get(&text, "softname").unwrap_or_else(|| "unslot".into()),
+        ssid: conf_get(&text, "ssid"),
+        sspassword: conf_get(&text, "sspassword"),
     })
+}
+
+/// Whether Game Art can ask ScreenScraper, and as whom.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum SsState {
+    /// No developer id and no login.
+    Off,
+    /// The player has signed in, but there is no developer id to call with.
+    NoDevId(String),
+    /// Asked first, as the player when they have signed in.
+    On(Option<String>),
+}
+
+pub fn ss_state(root: &Path) -> SsState {
+    let user = conf_get(&ss_conf(root), "ssid");
+    match (read_ss_conf(root), user) {
+        (Some(_), user) => SsState::On(user),
+        (None, Some(user)) => SsState::NoDevId(user),
+        (None, None) => SsState::Off,
+    }
+}
+
+/// Saves the player's ScreenScraper login, keeping whatever else the file says. An empty user
+/// signs them out.
+pub fn save_ss_login(root: &Path, user: &str, password: &str) -> std::io::Result<()> {
+    let text = ss_conf(root);
+    let mut lines: Vec<String> = text
+        .lines()
+        .filter(|l| {
+            !l.split_once('=')
+                .is_some_and(|(k, _)| matches!(k.trim(), "ssid" | "sspassword"))
+        })
+        .map(str::to_string)
+        .collect();
+    if !user.is_empty() {
+        lines.push(format!("ssid={user}"));
+        lines.push(format!("sspassword={password}"));
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    std::fs::create_dir_all(root.join("Config"))?;
+    slot_store::atomic_write(&root.join(SS_CONF), out.as_bytes())
 }
 
 /// The `jeuInfos` call ES-DE makes: the CRC, size and file name together, so ScreenScraper can
@@ -322,7 +390,6 @@ pub struct ScrapeView {
 pub struct Scraper {
     jobs: Sender<Vec<Cart>>,
     view: Arc<Mutex<ScrapeView>>,
-    pub screenscraper: bool,
 }
 
 impl Scraper {
@@ -331,18 +398,13 @@ impl Scraper {
         let view = Arc::new(Mutex::new(ScrapeView::default()));
         let shared = view.clone();
         let root = root.to_path_buf();
-        let screenscraper = read_ss_conf(&root).is_some();
         let spawned = std::thread::Builder::new()
             .name("slot-scraper".into())
             .spawn(move || work(fetch, root, rx, shared));
         if let Err(e) = spawned {
             eprintln!("slot: scraper: {e}");
         }
-        Scraper {
-            jobs,
-            view,
-            screenscraper,
-        }
+        Scraper { jobs, view }
     }
 
     /// The scraper for this build: the internet on the device, pretend art anywhere else.
@@ -373,8 +435,9 @@ fn work(
     let set =
         |f: &mut dyn FnMut(&mut ScrapeView)| f(&mut view.lock().unwrap_or_else(|e| e.into_inner()));
     let mut dats: HashMap<&'static str, Dat> = HashMap::new();
-    let login = read_ss_conf(&root);
     while let Ok(carts) = jobs.recv() {
+        // Read afresh each time, so a login typed in since is used.
+        let login = read_ss_conf(&root);
         let total = carts.len();
         set(&mut |v| {
             v.running = true;
@@ -700,13 +763,65 @@ game (
     }
 
     #[test]
+    fn a_built_in_developer_id_serves_when_the_card_has_none() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(read_ss_conf_with(d.path(), None), None);
+        let login = read_ss_conf_with(d.path(), Some(("unslot", "secret"))).unwrap();
+        assert_eq!((login.devid.as_str(), login.ssid), ("unslot", None));
+        std::fs::create_dir_all(d.path().join("Config")).unwrap();
+        std::fs::write(d.path().join(SS_CONF), "devid=mine\ndevpassword=p\n").unwrap();
+        let login = read_ss_conf_with(d.path(), Some(("unslot", "secret"))).unwrap();
+        assert_eq!(
+            login.devid, "mine",
+            "the card's own developer id did not win"
+        );
+    }
+
+    #[test]
+    fn a_login_saved_on_the_device_keeps_the_rest_of_the_file() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("Config")).unwrap();
+        std::fs::write(
+            d.path().join(SS_CONF),
+            "# mine\ndevid=d\ndevpassword=p\nssid=old\nsspassword=x\n",
+        )
+        .unwrap();
+        save_ss_login(d.path(), "me", "pa=ss word").unwrap();
+        let login = read_ss_conf(d.path()).unwrap();
+        assert_eq!(login.devid, "d");
+        assert_eq!(login.ssid.as_deref(), Some("me"));
+        assert_eq!(login.sspassword.as_deref(), Some("pa=ss word"));
+        assert_eq!(ss_state(d.path()), SsState::On(Some("me".into())));
+        save_ss_login(d.path(), "", "").unwrap();
+        assert_eq!(
+            ss_state(d.path()),
+            SsState::On(None),
+            "signing out kept the login"
+        );
+        let text = std::fs::read_to_string(d.path().join(SS_CONF)).unwrap();
+        assert!(
+            text.contains("# mine") && text.contains("devid=d"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_login_with_no_developer_id_says_so() {
+        let d = tempfile::tempdir().unwrap();
+        save_ss_login(d.path(), "me", "pw").unwrap();
+        if built_dev().is_none() {
+            assert_eq!(ss_state(d.path()), SsState::NoDevId("me".into()));
+        }
+    }
+
+    #[test]
     fn screenscraper_stays_off_without_a_developer_id() {
         let d = tempfile::tempdir().unwrap();
-        assert_eq!(read_ss_conf(d.path()), None);
+        assert_eq!(read_ss_conf_with(d.path(), None), None);
         std::fs::create_dir_all(d.path().join("Config")).unwrap();
         std::fs::write(d.path().join(SS_CONF), "# mine\nssid=me\nsspassword=pw\n").unwrap();
         assert_eq!(
-            read_ss_conf(d.path()),
+            read_ss_conf_with(d.path(), None),
             None,
             "a player login alone is not enough"
         );

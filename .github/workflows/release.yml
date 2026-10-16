@@ -27,6 +27,10 @@ jobs:
           curl -fsSL https://taskfile.dev/install.sh | sh -s -- -b /usr/local/bin
 
       - name: Build the tree
+        env:
+          # unslot's ScreenScraper developer id, built in when the repository has these secrets.
+          UNSLOT_SS_DEVID: ${{ secrets.UNSLOT_SS_DEVID }}
+          UNSLOT_SS_DEVPASSWORD: ${{ secrets.UNSLOT_SS_DEVPASSWORD }}
         run: task dist:device OUT="unslot-${GITHUB_REF_NAME}" VERSION="${GITHUB_REF_NAME}"
 
       - name: Check what is about to ship

@@ -7,14 +7,15 @@ use slot_input::{InputSource, Millis};
 use slot_power::{Platform, Power};
 use slot_store::{format_stamp, BezelPick, Platform as Console};
 use slot_ui::{
-    badge_face, bezel_face, chip_face, chip_shadow_face, core_button_legends, date_time_text,
-    default_game_bezel_face, footer_ink, game_bezel_face, hhmm, hint_face, icon_face,
+    badge_face, bezel_face, chip_face, chip_shadow_face, core_button_legends, date_time_text_as,
+    default_game_bezel_face, footer_ink, game_bezel_face, hint_face, icon_face,
     link_button_legends, menu_face, mould_shadow, photo_face, quick_caret_face, quick_label_face,
     quick_legend_faces, quick_pointer_face, quick_value_face, rebuild_count_face,
     rebuild_title_face, set_clock_hint_face, slot_back, slot_back_light, slot_front,
-    slot_front_light, socket_face, sticker_face, title_face, toast_face, wallpaper_face, word_ink,
-    CartFace, GbShell, Icon, LinkBadge, Mould, PowerChoice, QuickMenuFaces, QuickRow, QuickValue,
-    RebuildScreen, StickerFields, Toast, UndoFace, ALERT_PX, BOLT_PX, HUD_ICON_PX, HUD_INK, LEGEND,
+    slot_front_light, socket_face, sticker_face, time_text, title_face, toast_face, wallpaper_face,
+    word_ink, CartFace, GbShell, Icon, LinkBadge, Mould, PowerChoice, QuickMenuFaces, QuickRow,
+    QuickValue, RebuildScreen, StickerFields, Toast, UndoFace, ALERT_PX, BOLT_PX, HUD_ICON_PX,
+    HUD_INK, LEGEND,
 };
 
 use crate::app::{App, LinkRow, Phase};
@@ -917,7 +918,7 @@ fn sync_clock(app: &mut App, compositor: &mut Compositor, clocks: &mut Clocks) {
             app.set_clock_faces(line, hint);
         }
     }
-    let shown = hhmm(app.wall_secs());
+    let shown = time_text(app.wall_secs(), app.clock_12h());
     if shown != clocks.shown {
         let face = word_ink(&shown, clocks.ink);
         clocks.shown = shown;
@@ -1066,7 +1067,7 @@ fn sync_quick_clock(app: &mut App, compositor: &mut Compositor, state: &mut Quic
     if app.quick_menu().is_none() {
         return;
     }
-    let text = date_time_text(app.wall_secs());
+    let text = date_time_text_as(app.wall_secs(), app.clock_12h());
     if text == state.shown {
         return;
     }

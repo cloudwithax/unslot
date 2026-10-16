@@ -29,3 +29,20 @@ fn the_clock_is_24_hour_and_shows_no_seconds() {
         "not 24 hour, or showing seconds"
     );
 }
+
+#[test]
+fn a_12_hour_clock_reads_am_and_pm_with_twelve_for_noon_and_midnight() {
+    use slot_ui::{date_time_text_as, time_text};
+    let at = |h: i64, m: i64| h * 3600 + m * 60;
+    assert_eq!(time_text(at(19, 5), false), "19:05");
+    assert_eq!(time_text(at(19, 5), true), "7:05 PM");
+    assert_eq!(time_text(at(0, 30), true), "12:30 AM", "midnight is twelve");
+    assert_eq!(
+        time_text(at(12, 0), true),
+        "12:00 PM",
+        "noon is twelve, after midday"
+    );
+    assert_eq!(time_text(at(9, 41), true), "9:41 AM");
+    assert_eq!(date_time_text_as(at(13, 0), true), "JAN 1 1:00 PM");
+    assert_eq!(date_time_text_as(at(13, 0), false), "JAN 1 13:00");
+}

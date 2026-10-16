@@ -56,7 +56,10 @@ pub use cart::{
     GBC_LABEL_W, GBC_LABEL_X, GBC_LABEL_Y, GB_CART_H, GB_CART_W, GB_LABEL_H, GB_LABEL_W,
     GB_LABEL_X, GB_LABEL_Y, LABEL_H, LABEL_W, LABEL_WELL, LABEL_X, LABEL_Y,
 };
-pub use clock::{clock_label, date_time_text, hhmm, set_clock_hint_face, ClockPicker, Field};
+pub use clock::{
+    clock_label, date_time_text, date_time_text_as, hhmm, set_clock_hint_face, time_text,
+    ClockPicker, Field,
+};
 pub use draw::{Canvas, Draw, Layout, TexId, OUT_H, OUT_W};
 pub use footer::{draw_corners, draw_footer, Printed, FOOTER_Y};
 pub use hud::{

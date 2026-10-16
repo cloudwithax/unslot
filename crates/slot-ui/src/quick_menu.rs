@@ -15,6 +15,8 @@ pub enum QuickRow {
     Screen,
     Rumble,
     DateTime,
+    /// The clock's hours: 24 or 12.
+    Clock,
     About,
     Game,
     EjectSave,
@@ -59,12 +61,13 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 37] = [
+const GENERIC: [QuickRow; 38] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
     QuickRow::Rumble,
     QuickRow::DateTime,
+    QuickRow::Clock,
     QuickRow::About,
     QuickRow::Game,
     QuickRow::EjectSave,
@@ -161,13 +164,14 @@ impl QuickRow {
         QuickRow::GameArt,
     ];
 
-    pub const GENERAL: [QuickRow; 6] = [
+    pub const GENERAL: [QuickRow; 7] = [
         QuickRow::Wallpaper,
         QuickRow::WallpaperTint,
         QuickRow::Theme,
         QuickRow::Recents,
         QuickRow::ShowTitles,
         QuickRow::DateTime,
+        QuickRow::Clock,
     ];
 
     pub const GAME: [QuickRow; 8] = [
@@ -262,6 +266,7 @@ impl QuickRow {
             QuickRow::Wallpaper
             | QuickRow::WallpaperTint
             | QuickRow::DateTime
+            | QuickRow::Clock
             | QuickRow::Theme
             | QuickRow::Recents
             | QuickRow::ShowTitles => QuickRow::GENERAL.to_vec(),
@@ -346,6 +351,7 @@ impl QuickRow {
             QuickRow::Screen => "Screen",
             QuickRow::Rumble => "Rumble",
             QuickRow::DateTime => "Date & Time",
+            QuickRow::Clock => "Clock",
             QuickRow::About => "About",
             QuickRow::Game => "Gameplay",
             QuickRow::EjectSave => "Auto Save on Eject",
@@ -442,10 +448,12 @@ pub enum QuickValue {
     Disc3,
     Disc4,
     Disc5,
+    Hours24,
+    Hours12,
 }
 
 impl QuickValue {
-    pub const ALL: [QuickValue; 23] = [
+    pub const ALL: [QuickValue; 25] = [
         QuickValue::Speed2,
         QuickValue::Speed3,
         QuickValue::Speed4,
@@ -469,6 +477,8 @@ impl QuickValue {
         QuickValue::Disc3,
         QuickValue::Disc4,
         QuickValue::Disc5,
+        QuickValue::Hours24,
+        QuickValue::Hours12,
     ];
 
     pub fn index(self) -> usize {
@@ -500,6 +510,8 @@ impl QuickValue {
             QuickValue::Disc3 => "Disc 3",
             QuickValue::Disc4 => "Disc 4",
             QuickValue::Disc5 => "Disc 5",
+            QuickValue::Hours24 => "24-Hour",
+            QuickValue::Hours12 => "12-Hour",
         }
     }
 

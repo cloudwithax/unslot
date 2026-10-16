@@ -72,7 +72,7 @@ unslot runs on BaseOS, so it needs BaseOS on the card in TF1 first.
 | `BIOS` | BIOS files. |
 | `Wallpapers` | Your own wallpapers, PNG or JPG. |
 | `Config/wireguard` | WireGuard tunnels, as wg-quick `.conf` files. |
-| `Config/screenscraper.conf` | Optional: a ScreenScraper developer id (`devid=`, `devpassword=`) and your own login (`ssid=`, `sspassword=`), which Game Art then asks first. |
+| `Config/screenscraper.conf` | Your ScreenScraper login (`ssid=`, `sspassword=`), which you can also enter from Game Art's ScreenScraper row, and optionally a developer ID (`devid=`, `devpassword=`) to use in place of the one built into the release. With both, Game Art asks ScreenScraper first. |
 | `System` | unslot itself. Updates replace it whole. |
 
 ## A look around
