@@ -5,6 +5,8 @@ vars:
   GPSP_HOST: vendor/gpsp_libretro.dylib
   MGBA_COMMIT: e31759b24e7a4e3899285ff720d7b573ac328ae7
   GPSP_COMMIT: 7b2dd37394e2822110cacef321e9bb291a305b77
+  # The cores past the Game Boy family, fetched prebuilt from the libretro buildbot.
+  FETCHED: fceumm snes9x genesis_plus_gx mednafen_pce_fast race mednafen_wswan handy pcsx_rearmed
   SLOT_IN_PROCESS: >-
     --test bios --test core --test core_options --test e2e --test emu --test gb_palette_recolour --test gpsp
     --test link_ui --test mgba_gb_link --test mgba_link --test render_colour_correction
@@ -256,6 +258,38 @@ tasks:
       - cp vendor/gpsp_libretro.so.meta vendor/gpsp-src.meta
       - 'echo "built vendor/gpsp_libretro.so from vendor/gpsp-src.tar.gz @ {{.GPSP_COMMIT}}"'
 
+  core:fetch:
+    desc: >-
+      Fetch the aarch64 linux builds of the cores slot does not build itself from the libretro
+      buildbot, and note where, when and at what hash each came in vendor/cores.manifest
+    status:
+      - test -f vendor/cores.manifest
+      - for c in {{.FETCHED}}; do test -f "vendor/${c}_libretro.so" || exit 1; done
+    cmds:
+      - |
+        set -euo pipefail
+        mkdir -p vendor
+        tmp="$(mktemp -d)"
+        trap 'rm -rf "$tmp"' EXIT
+        : > "$tmp/manifest"
+        for c in {{.FETCHED}}; do
+          url="https://buildbot.libretro.com/nightly/linux/aarch64/latest/${c}_libretro.so.zip"
+          curl -fsSL -o "$tmp/$c.zip" "$url"
+          unzip -o -q "$tmp/$c.zip" -d "$tmp"
+          file "$tmp/${c}_libretro.so" | grep -q aarch64
+          mv "$tmp/${c}_libretro.so" vendor/
+          sum="$(sha256sum "vendor/${c}_libretro.so" | cut -d' ' -f1)"
+          echo "$c $sum $(date -u +%Y-%m-%d) $url" >> "$tmp/manifest"
+        done
+        mv "$tmp/manifest" vendor/cores.manifest
+        echo "fetched {{.FETCHED}}"
+
+  core:fetch:update:
+    desc: Re-fetch the buildbot cores even if every one is already in vendor/
+    cmds:
+      - rm -f vendor/cores.manifest
+      - task: core:fetch
+
   core:gpsp:update:
     desc: Refetch gpSP's source archive and rebuild the core from it, even if the set is current
     cmds:
@@ -308,7 +342,7 @@ tasks:
 
   dist:device:
     desc: Build the SD2 tree for an H700 device, OUT defaults to ./dist-device
-    deps: [core:device, core:gpsp, build:device]
+    deps: [core:device, core:gpsp, core:fetch, build:device]
     vars:
       OUT: '{{.OUT | default "dist-device"}}'
     cmds:
@@ -322,7 +356,9 @@ tasks:
       - file vendor/gpsp_libretro.so | grep -q aarch64
       - cp vendor/mgba_libretro.so {{.OUT}}/System/
       - cp vendor/gpsp_libretro.so {{.OUT}}/System/
+      - for c in {{.FETCHED}}; do cp "vendor/${c}_libretro.so" {{.OUT}}/System/; done
       - cp -r licenses {{.OUT}}/System/licenses
+      - cp vendor/cores.manifest {{.OUT}}/System/licenses/cores.manifest
       - |
         set -euo pipefail
         sha="$(cat vendor/gpsp-src.sha)"
@@ -342,7 +378,7 @@ tasks:
 
   deploy:device:
     desc: Build and push onto a device over adb, then restart it. SD defaults to /mnt/sdcard
-    deps: [core:device, core:gpsp, build:device]
+    deps: [core:device, core:gpsp, core:fetch, build:device]
     vars:
       SD: '{{.SD | default "/mnt/sdcard"}}'
     cmds:
@@ -353,6 +389,7 @@ tasks:
       - for f in card/System/*; do adb push "$f" '{{.SD}}/System/'; done
       - adb push vendor/mgba_libretro.so '{{.SD}}/System/mgba_libretro.so'
       - adb push vendor/gpsp_libretro.so '{{.SD}}/System/gpsp_libretro.so'
+      - for c in {{.FETCHED}}; do adb push "vendor/${c}_libretro.so" '{{.SD}}/System/'; done
       - adb push licenses '{{.SD}}/System/'
       - |
         set -euo pipefail
