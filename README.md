@@ -40,6 +40,11 @@ Services, under Network, turns on SSH and SFTP as `root` (BaseOS's password unti
 there), sharing the card over SMB, Tailscale (signed in by scanning a code) and WireGuard. A
 WireGuard tunnel is a wg-quick `.conf` in `Config/wireguard`.
 
+To move a card from slot to unslot, or update unslot, copy a release's `MinUI.zip` to the root of
+the card and restart. BaseOS installs it before the frontend starts, replacing `System/` and
+keeping games, saves and settings; if the new one never starts, the old one comes back after
+three tries. Updates, under Network, downloads unslot's and BaseOS's own updates the same way.
+
 > [!IMPORTANT]
 > ROMs must be unzipped. slot does not read `.zip` or `.7z` files.
 

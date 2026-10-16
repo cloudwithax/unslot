@@ -10,6 +10,7 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::json;
 use crate::wireguard::{self, Tunnel};
 
 /// How often the services are looked in on: whether BaseOS's late start brought SSH back, and
@@ -306,59 +307,10 @@ fn look_in(
 /// `status --json` is the device's own, ahead of its peers'.
 pub fn parse_ts(json: &str) -> TsStatus {
     TsStatus {
-        state: json_string(json, "BackendState").unwrap_or_default(),
-        auth_url: json_string(json, "AuthURL").filter(|u| !u.is_empty()),
-        ips: json_strings(json, "TailscaleIPs"),
+        state: json::string(json, "BackendState").unwrap_or_default(),
+        auth_url: json::string(json, "AuthURL").filter(|u| !u.is_empty()),
+        ips: json::strings(json, "TailscaleIPs"),
     }
-}
-
-/// Where the value of the first `"key":` starts.
-fn json_value<'a>(json: &'a str, key: &str) -> Option<&'a str> {
-    let at = json.find(&format!("\"{key}\""))? + key.len() + 2;
-    json[at..]
-        .trim_start()
-        .strip_prefix(':')
-        .map(str::trim_start)
-}
-
-/// A JSON string at the start of `text`, unescaped, and what follows it.
-fn json_str(text: &str) -> Option<(String, &str)> {
-    let mut chars = text.strip_prefix('"')?.char_indices();
-    let mut out = String::new();
-    while let Some((i, c)) = chars.next() {
-        match c {
-            '"' => return Some((out, &text[i + 2..])),
-            '\\' => match chars.next()?.1 {
-                'n' => out.push('\n'),
-                't' => out.push('\t'),
-                'u' => {
-                    let hex: String = (0..4)
-                        .filter_map(|_| chars.next().map(|(_, c)| c))
-                        .collect();
-                    out.push(char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?);
-                }
-                other => out.push(other),
-            },
-            c => out.push(c),
-        }
-    }
-    None
-}
-
-fn json_string(json: &str, key: &str) -> Option<String> {
-    json_str(json_value(json, key)?).map(|(s, _)| s)
-}
-
-fn json_strings(json: &str, key: &str) -> Vec<String> {
-    let Some(mut rest) = json_value(json, key).and_then(|v| v.strip_prefix('[')) else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    while let Some((s, after)) = json_str(rest.trim_start()) {
-        out.push(s);
-        rest = after.trim_start().trim_start_matches(',');
-    }
-    out
 }
 
 /// The device's name on the network, as avahi announces it.
@@ -658,14 +610,6 @@ mod tests {
         assert!(parse_ts(r#"{"BackendState":"Stopped"}"#).wants_up());
         assert!(parse_ts(r#"{"BackendState":"NeedsLogin","AuthURL":""}"#).wants_up());
         assert!(!parse_ts(r#"{"BackendState":"Running"}"#).wants_up());
-    }
-
-    #[test]
-    fn json_strings_are_unescaped() {
-        assert_eq!(
-            json_string(r#"{"AuthURL":"https://x/a?b=1&c=2"}"#, "AuthURL").unwrap(),
-            "https://x/a?b=1&c=2"
-        );
     }
 
     const FAST: Duration = Duration::from_millis(20);

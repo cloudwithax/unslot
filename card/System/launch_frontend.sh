@@ -19,6 +19,25 @@ log() {
 	echo "$(date '+%F %T') $*" >> "$LOGS/slot-session.log" 2>/dev/null
 }
 
+# After an update pack's installer swaps System, the new one has three starts to draw a frame,
+# which slot marks by clearing the trial; on the fourth the replaced one goes back, as BaseOS
+# does with its own updates.
+UPD="$SD/.unslot-update"
+if [ -f "$UPD/trial" ] && [ -d "$UPD/System.old" ]; then
+	n="$(cat "$UPD/trial" 2>/dev/null)"
+	case "$n" in '' | *[!0-9]*) n=0 ;; esac
+	n=$((n + 1))
+	if [ "$n" -gt "${AGS_UPDATE_TRIES:-3}" ]; then
+		echo "$(date '+%F %T') the update never started; putting the old System back" >> "$LOGS/update.log"
+		rm -rf "$UPD/System.failed"
+		mv "$SYS" "$UPD/System.failed" && mv "$UPD/System.old" "$SYS" && rm -rf "$UPD/System.failed"
+		rm -f "$UPD/trial"
+	else
+		echo "$n" > "$UPD/trial"
+	fi
+	sync
+fi
+
 pid="$(cat "$RUN/slot-led.pid" 2>/dev/null)"
 if [ -z "$pid" ] || [ ! -d "/proc/$pid" ]; then
 	sh "$SYS/led.sh" once

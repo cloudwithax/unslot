@@ -27,13 +27,14 @@ jobs:
           curl -fsSL https://taskfile.dev/install.sh | sh -s -- -b /usr/local/bin
 
       - name: Build the tree
-        run: task dist:device OUT="slot-${GITHUB_REF_NAME}"
+        run: task dist:device OUT="slot-${GITHUB_REF_NAME}" VERSION="${GITHUB_REF_NAME}"
 
       - name: Check what is about to ship
         run: |
           set -eu
           out="slot-${GITHUB_REF_NAME}"
           file "$out/System/slot" | grep -q aarch64
+          test "$(cat "$out/System/version")" = "$GITHUB_REF_NAME"
           file "$out/System/mgba_libretro.so" | grep -q aarch64
           file "$out/System/gpsp_libretro.so" | grep -q aarch64
           for c in fceumm snes9x genesis_plus_gx mednafen_pce_fast race mednafen_wswan handy pcsx_rearmed; do
@@ -64,12 +65,18 @@ jobs:
           out="slot-${GITHUB_REF_NAME}"
           zip="$out-h700.zip"
           zip -qry "$zip" "$out"
+          # The same System folder as an update pack, which BaseOS installs from a card's root.
+          sh tools/update/pack.sh "$out" MinUI.zip
+          sha256sum "$zip" MinUI.zip > SHA256SUMS
           echo "zip=$zip" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.package.outputs.zip }}
-          path: ${{ steps.package.outputs.zip }}
+          name: release-files
+          path: |
+            ${{ steps.package.outputs.zip }}
+            MinUI.zip
+            SHA256SUMS
           if-no-files-found: error
 
   publish:
@@ -82,7 +89,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: ${{ needs.build.outputs.zip }}
+          name: release-files
 
       - name: Create the release
         env:
@@ -93,7 +100,9 @@ jobs:
           cat > notes.md <<NOTES
           Unzip and copy the contents of \`slot-${GITHUB_REF_NAME}/\` onto SD2.
 
+          Already running slot or unslot? Copy \`MinUI.zip\` to the root of that card and restart with the power connected. BaseOS installs it before the frontend starts, replacing \`System/\` and keeping your games, saves and settings. unslot can also download it itself, from Settings, Network, Updates.
+
           Emulation by mGBA (MPL-2.0) and gpSP (GPL-2.0). Their licences, patches and gpSP's source are in \`System/licenses/\`.
           NOTES
-          gh release create "$GITHUB_REF_NAME" "$ZIP" --repo "$GITHUB_REPOSITORY" \
+          gh release create "$GITHUB_REF_NAME" "$ZIP" MinUI.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" --notes-file notes.md

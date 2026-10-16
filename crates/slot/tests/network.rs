@@ -434,3 +434,61 @@ fn the_vpn_steps_through_the_cards_tunnels_and_back_to_off() {
     assert_eq!(detail(&a, "VPN"), "Off");
     assert_eq!(read_slot_state(d.path()).vpn, None);
 }
+
+/// Opens the updates page under Network, which looks for releases as it opens.
+fn on_updates(d: &tempfile::TempDir) -> App {
+    let set = SlotState {
+        clock_set: true,
+        ..SlotState::default()
+    };
+    write_slot_state(d.path(), &set).expect("write slot.state");
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    a.apply(Action::QuickMenu);
+    for _ in 0..QuickRow::MAIN.len() {
+        if a.quick_menu() == Some(QuickRow::Network) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    press(&mut a, Btn::A);
+    for _ in 0..QuickRow::NETWORK.len() {
+        if a.quick_menu() == Some(QuickRow::Updates) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    assert_eq!(a.quick_menu(), Some(QuickRow::Updates), "no Updates row");
+    press(&mut a, Btn::A);
+    assert!(
+        matches!(a.phase(), Phase::Updates { .. }),
+        "{:?}",
+        a.phase()
+    );
+    a
+}
+
+#[test]
+fn updates_offer_the_newer_releases_and_a_downloaded_one_restarts_to_install() {
+    use slot::update::SimUpdates;
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    std::fs::write(d.path().join("System/version"), "v2.0.0\n").unwrap();
+    let mut a = on_updates(&d);
+    let get = |v: &str| format!("Get {v}");
+    until(&mut a, |a| {
+        detail(a, "unslot") == get(SimUpdates::UNSLOT)
+            && detail(a, "BaseOS") == get(SimUpdates::BASEOS)
+    });
+    assert_eq!(list(&a).status, "unslot v2.0.0   BaseOS 1.4.0");
+    press(&mut a, Btn::A);
+    until(&mut a, |a| detail(a, "unslot") == "Restart");
+    assert!(
+        d.path().join(slot::update::PACK).exists(),
+        "the pack is not where BaseOS looks"
+    );
+    assert_eq!(
+        list(&a).status,
+        "Restart to install, with the power connected"
+    );
+    press(&mut a, Btn::A);
+    assert!(a.restarting(), "A on a downloaded update did not restart");
+}

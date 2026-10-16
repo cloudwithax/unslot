@@ -99,6 +99,7 @@ tasks:
       - sh card/test-slotwifi.sh
       - sh card/test-slotbt.sh
       - sh card/test-slotservices.sh
+      - sh card/test-update.sh
 
   core:
     desc: >-
@@ -373,6 +374,12 @@ tasks:
       - cp -r licenses {{.OUT}}/System/licenses
       - cp vendor/cores.manifest {{.OUT}}/System/licenses/cores.manifest
       - cp -R vendor/services {{.OUT}}/System/services
+      - |
+        set -eu
+        # The release this tree is, which the updater compares with the latest.
+        v='{{.VERSION | default ""}}'
+        [ -n "$v" ] || v="$(git describe --tags --always --dirty 2>/dev/null || echo unknown)"
+        echo "$v" > "{{.OUT}}/System/version"
       - mv {{.OUT}}/System/services/services.manifest {{.OUT}}/System/licenses/services.manifest
       - |
         set -euo pipefail
@@ -390,6 +397,20 @@ tasks:
           cp "$p" "{{.OUT}}/System/licenses/mgba-$(basename "$p")"
         done
       - 'echo "device tree ready at {{.OUT}}, copy its contents to SD2"'
+
+  dist:update:
+    desc: >-
+      Build the update pack PACK (default ./MinUI.zip) from a fresh device tree. At the root of a
+      card running slot or unslot, BaseOS installs it at the next start, replacing System/ only
+    vars:
+      OUT: '{{.OUT | default "dist-device"}}'
+      PACK: '{{.PACK | default "MinUI.zip"}}'
+    cmds:
+      - task: dist:device
+        vars:
+          OUT: '{{.OUT}}'
+          VERSION: '{{.VERSION | default ""}}'
+      - sh tools/update/pack.sh {{.OUT}} {{.PACK}}
 
   deploy:device:
     desc: Build and push onto a device over adb, then restart it. SD defaults to /mnt/sdcard

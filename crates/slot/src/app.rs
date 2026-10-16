@@ -30,6 +30,7 @@ use crate::link_screen::LinkSprites;
 use crate::link_start::{link_port, LinkFail, LinkProgress, LinkStarter, LinkStep};
 use crate::persist::{self, Snapshot};
 use crate::services::{Services, ServicesView, Tailnet, Wanted};
+use crate::update::{Part, Stage, Track, Updates, UpdatesView};
 use crate::video_mode::{self, VideoMode};
 use crate::wifi::{Busy, Network, Security, Wifi, WifiView};
 
@@ -282,6 +283,10 @@ pub enum Phase {
     },
     /// The code to scan to sign the device in to Tailscale.
     TailscaleLogin,
+    /// unslot's and BaseOS's releases, and whether this device is behind them.
+    Updates {
+        cursor: usize,
+    },
     /// Typing for the network or services page, which it goes back to at `cursor`.
     Keyboard {
         keys: Keyboard,
@@ -491,6 +496,8 @@ pub struct App {
     bt_view: BtView,
     services: Option<Services>,
     services_view: ServicesView,
+    updates: Option<Updates>,
+    updates_view: UpdatesView,
     page_face: Option<(TexId, u32, u32)>,
 }
 
@@ -661,6 +668,8 @@ impl App {
             bt_view: BtView::default(),
             services: None,
             services_view: ServicesView::default(),
+            updates: None,
+            updates_view: UpdatesView::default(),
             page_face: None,
         }
     }
@@ -688,6 +697,7 @@ impl App {
         let services = Services::for_card(root);
         services.want(app.wanted());
         app.services = Some(services);
+        app.updates = Some(Updates::for_card(root));
         app.restock_recents();
         app.restock_favorites();
         if let Some((at, i)) = app.remembered_seat() {
@@ -798,7 +808,8 @@ impl App {
             Phase::QuickMenu { .. }
             | Phase::Networks { .. }
             | Phase::Devices { .. }
-            | Phase::Services { .. } => vertical,
+            | Phase::Services { .. }
+            | Phase::Updates { .. } => vertical,
             Phase::Shelf => vertical && self.core_picker.is_none(),
             Phase::Polaroids { .. } => !vertical,
             Phase::Playing { .. } => vertical && self.in_game_menu.is_some(),
@@ -1051,7 +1062,7 @@ impl App {
             | QuickRow::Bezel => None,
             QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
             QuickRow::Bluetooth => Some(QuickValue::flag(self.state.bluetooth)),
-            QuickRow::BtDevices | QuickRow::Services => None,
+            QuickRow::BtDevices | QuickRow::Services | QuickRow::Updates => None,
         }
     }
 
@@ -2048,6 +2059,7 @@ impl App {
             Phase::Devices { cursor } => self.devices_input(cursor, action),
             Phase::Services { cursor, .. } => self.services_input(cursor, action),
             Phase::TailscaleLogin => self.tailscale_login_input(action),
+            Phase::Updates { cursor } => self.updates_input(cursor, action),
             Phase::Keyboard { .. } => self.keyboard_input(action),
             _ => {}
         }
@@ -2220,6 +2232,110 @@ impl App {
             cursor: cursor.min(rows.len() - 1),
             rows,
             hints: hints.into(),
+        }
+    }
+
+    fn with_updates(&self, f: impl FnOnce(&Updates)) {
+        if let Some(updates) = &self.updates {
+            f(updates);
+        }
+    }
+
+    pub fn updates_view(&self) -> &UpdatesView {
+        &self.updates_view
+    }
+
+    fn updates_input(&mut self, cursor: usize, action: Action) {
+        let parts = self.updates_view.parts();
+        let n = parts.len();
+        let cursor = cursor.min(n - 1);
+        let cursor = match action {
+            Action::GbaDown(Btn::Up) => (cursor + n - 1) % n,
+            Action::GbaDown(Btn::Down) => (cursor + 1) % n,
+            Action::GbaDown(Btn::Y) => {
+                self.with_updates(Updates::check);
+                cursor
+            }
+            Action::GbaDown(Btn::A) => {
+                let part = parts[cursor];
+                match self.updates_view.track(part).map(|t| &t.stage) {
+                    Some(Stage::Available(_)) => self.with_updates(|u| u.download(part)),
+                    // BaseOS puts what was downloaded in as the device starts again.
+                    Some(Stage::Ready(_)) => self.begin_restart(),
+                    Some(Stage::Checking | Stage::Downloading(..)) => {}
+                    _ => self.with_updates(Updates::check),
+                }
+                cursor
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::Updates,
+                };
+                return;
+            }
+            _ => return,
+        };
+        self.phase = Phase::Updates { cursor };
+    }
+
+    fn updates_page(&self, cursor: usize) -> ListPage {
+        let v = &self.updates_view;
+        let detail = |t: &Track| match &t.stage {
+            Stage::Unchecked => t.current.clone().unwrap_or_else(|| "Unknown".into()),
+            Stage::Checking => "Checking".into(),
+            Stage::UpToDate => "Up to date".into(),
+            Stage::Available(version) => format!("Get {version}"),
+            Stage::Downloading(_, pct) => format!("{pct}%"),
+            Stage::Ready(_) => "Restart".into(),
+        };
+        let parts = v.parts();
+        let rows: Vec<ListRow> = parts
+            .iter()
+            .filter_map(|p| v.track(*p).map(|t| (p, t)))
+            .map(|(p, t)| ListRow {
+                label: p.name().into(),
+                detail: detail(t),
+                bars: None,
+            })
+            .collect();
+        let stages: Vec<(Part, &Stage)> = parts
+            .iter()
+            .filter_map(|p| v.track(*p).map(|t| (*p, &t.stage)))
+            .collect();
+        let downloading = stages.iter().find_map(|(p, s)| match s {
+            Stage::Downloading(version, _) => {
+                Some(format!("Downloading {} {version}...", p.name()))
+            }
+            _ => None,
+        });
+        let status = match () {
+            _ if downloading.is_some() => downloading.unwrap_or_default(),
+            _ if v.error.is_some() => v.error.clone().unwrap_or_default(),
+            _ if stages.iter().any(|(_, s)| matches!(s, Stage::Ready(_))) => {
+                "Restart to install, with the power connected".into()
+            }
+            _ if stages.iter().any(|(_, s)| **s == Stage::Checking) => {
+                "Checking for updates...".into()
+            }
+            _ => parts
+                .iter()
+                .filter_map(|p| {
+                    let t = v.track(*p)?;
+                    Some(format!(
+                        "{} {}",
+                        p.name(),
+                        t.current.as_deref().unwrap_or("(own build)")
+                    ))
+                })
+                .collect::<Vec<_>>()
+                .join("   "),
+        };
+        ListPage {
+            title: "Updates".into(),
+            status,
+            cursor: cursor.min(rows.len().saturating_sub(1)),
+            rows,
+            hints: "A update   Y check again   B back".into(),
         }
     }
 
@@ -2512,6 +2628,7 @@ impl App {
             Phase::Services { cursor, note } => Some(PageModel::List(
                 self.services_page(*cursor, note.as_deref()),
             )),
+            Phase::Updates { cursor } => Some(PageModel::List(self.updates_page(*cursor))),
             Phase::TailscaleLogin => match &self.services_view.tailnet {
                 Tailnet::SignIn(url) => Some(PageModel::Qr(QrPage {
                     title: "Tailscale".into(),
@@ -2673,6 +2790,12 @@ impl App {
                 self.phase = Phase::Services {
                     cursor: 0,
                     note: None,
+                }
+            }
+            QuickRow::Updates => {
+                self.phase = Phase::Updates { cursor: 0 };
+                if self.updates_view.unslot.stage == Stage::Unchecked {
+                    self.with_updates(Updates::check);
                 }
             }
             QuickRow::BtDevices => {
@@ -2851,6 +2974,7 @@ impl App {
             | QuickRow::Bluetooth
             | QuickRow::BtDevices
             | QuickRow::Services
+            | QuickRow::Updates
             | QuickRow::Bezel => return,
         }
         self.persist();
@@ -3319,6 +3443,9 @@ impl App {
             }
             self.bt_view = view;
         }
+        if let Some(updates) = &self.updates {
+            self.updates_view = updates.view();
+        }
         if let Some(services) = &self.services {
             self.services_view = services.view();
             // The code goes once it has been used, or when there is no longer one to show.
@@ -3729,6 +3856,7 @@ impl App {
             | Phase::Devices { .. }
             | Phase::Services { .. }
             | Phase::TailscaleLogin
+            | Phase::Updates { .. }
             | Phase::Keyboard { .. } => {
                 slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
                 if let Some((tex, w, h)) = self.page_face {

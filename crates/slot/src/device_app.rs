@@ -179,6 +179,7 @@ pub fn run() {
         if !drawn {
             drawn = true;
             slot::boot_time::mark("first frame");
+            slot::update::confirm(&root);
             trace_first_frame();
         }
         if let Some(left) = MIN_FRAME.checked_sub(began.elapsed()) {

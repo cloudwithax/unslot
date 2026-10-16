@@ -62,4 +62,31 @@ head -c 1000 /dev/zero | tr '\0' 'x' > "$TMP/card/Logs/slot-session.log"
 launch
 [ ! -e "$TMP/card/Logs/slot-session.log.1" ] || fail "a small session log rotated"
 
+# An update on trial counts its starts, and the System it replaced goes back after three.
+setup
+mkdir -p "$TMP/card/.unslot-update/System.old"
+echo old > "$TMP/card/.unslot-update/System.old/slot"
+echo new > "$TMP/card/System/slot"
+echo 0 > "$TMP/card/.unslot-update/trial"
+launch
+[ "$(cat "$TMP/card/.unslot-update/trial")" = 1 ] || fail "a start on trial was not counted"
+launch
+launch
+[ "$(cat "$TMP/card/System/slot")" = new ] || fail "the update was put back before its third start"
+launch
+[ "$(cat "$TMP/card/System/slot")" = old ] || fail "an update that never started was kept"
+[ ! -e "$TMP/card/.unslot-update/trial" ] || fail "the trial outlived the rollback"
+[ ! -e "$TMP/card/.unslot-update/System.failed" ] || fail "the failed System was left on the card"
+grep -q "putting the old System back" "$TMP/card/Logs/update.log" || fail "the rollback was not logged"
+
+# A confirmed update, with no trial left, is started as it is.
+setup
+mkdir -p "$TMP/card/.unslot-update"
+echo new > "$TMP/card/System/slot"
+launch
+launch
+launch
+launch
+[ "$(cat "$TMP/card/System/slot")" = new ] || fail "a System with no trial was rolled back"
+
 echo "launch: all passed"
