@@ -1395,6 +1395,10 @@ impl App {
         self.video_mode = mode;
     }
 
+    pub fn video_mode(&self) -> VideoMode {
+        self.video_mode
+    }
+
     pub fn source_rect(&self) -> [f32; 4] {
         video_mode::source_rect(self.platform, self.video_mode)
     }

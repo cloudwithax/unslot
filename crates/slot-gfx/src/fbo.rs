@@ -132,8 +132,12 @@ impl Compositor {
         Ok(())
     }
 
-    pub fn upload_game(&mut self, xrgb8888: &[u8]) {
-        self.game.upload(xrgb8888);
+    pub fn upload_game(&mut self, xrgb8888: &[u8], size: (u32, u32)) {
+        self.game.upload(xrgb8888, size);
+    }
+
+    pub fn set_game_aspect(&mut self, aspect: Option<f32>) {
+        self.game.set_aspect(aspect);
     }
 
     pub fn draw_game(&mut self) {

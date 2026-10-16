@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use libloading::Library;
 
-use crate::core::{AvInfo, ButtonMask, CoreError, RetroCore, GBA_H, GBA_W};
+use crate::core::{AvInfo, ButtonMask, CoreError, RetroCore, Sticks, GBA_H, GBA_W};
 use crate::ffi::*;
 use crate::link::Link;
 use crate::rumble::Rumble;
@@ -18,15 +18,31 @@ static LIVE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum PixelFormat {
+    Rgb1555,
     Xrgb8888,
     Rgb565,
 }
 
+/// Where the host keeps the core's picture.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Canvas {
+    /// Every frame is centred in a buffer of this size, the way the Game Boy family is drawn.
+    Fixed(u32, u32),
+    /// The buffer takes whatever size each frame comes in at.
+    Native,
+}
+
 struct Host {
     video: Vec<u8>,
+    size: (u32, u32),
+    canvas: Canvas,
+    aspect: f32,
+    timing: AvInfo,
     format: PixelFormat,
     audio: Vec<i16>,
     inputs: [u16; 2],
+    sticks: [Sticks; 2],
+    disk: Option<DiskControl>,
     system_dir: CString,
     save_dir: CString,
     rumble: Rumble,
@@ -87,6 +103,7 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
                 return false;
             }
             let want = match *(data as *const c_uint) {
+                PIXEL_FORMAT_0RGB1555 => PixelFormat::Rgb1555,
                 PIXEL_FORMAT_XRGB8888 => PixelFormat::Xrgb8888,
                 PIXEL_FORMAT_RGB565 => PixelFormat::Rgb565,
                 _ => return false,
@@ -210,7 +227,77 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             })
             .is_some()
         }
+        SET_GEOMETRY => {
+            if data.is_null() {
+                return false;
+            }
+            let geometry = *(data as *const GameGeometry);
+            with_host(|h| h.aspect = aspect_of(&geometry)).is_some()
+        }
+        SET_SYSTEM_AV_INFO => {
+            if data.is_null() {
+                return false;
+            }
+            let av = *(data as *const SystemAvInfo);
+            with_host(|h| {
+                h.aspect = aspect_of(&av.geometry);
+                h.timing = AvInfo {
+                    fps: av.timing.fps,
+                    sample_rate: av.timing.sample_rate,
+                };
+            })
+            .is_some()
+        }
+        GET_INPUT_BITMASKS => true,
+        GET_DISK_CONTROL_INTERFACE_VERSION => {
+            if data.is_null() {
+                return false;
+            }
+            *(data as *mut c_uint) = 1;
+            true
+        }
+        SET_DISK_CONTROL_INTERFACE => {
+            if data.is_null() {
+                return false;
+            }
+            let b = *(data as *const DiskControlBasic);
+            let disk = DiskControl {
+                set_eject_state: b.set_eject_state,
+                get_eject_state: b.get_eject_state,
+                get_image_index: b.get_image_index,
+                set_image_index: b.set_image_index,
+                get_num_images: b.get_num_images,
+                replace_image_index: b.replace_image_index,
+                add_image_index: b.add_image_index,
+                ..DiskControl::default()
+            };
+            with_host(|h| h.disk = Some(disk)).is_some()
+        }
+        SET_DISK_CONTROL_EXT_INTERFACE => {
+            if data.is_null() {
+                return false;
+            }
+            let disk = *(data as *const DiskControl);
+            with_host(|h| h.disk = Some(disk)).is_some()
+        }
         _ => false,
+    }
+}
+
+/// Opens the tray, changes the disc and closes it again, the order cores expect. None when the
+/// core left out a call this needs.
+unsafe fn swap_disk(d: &DiskControl, index: u32) -> Option<bool> {
+    let (eject, set) = (d.set_eject_state?, d.set_image_index?);
+    Some(eject(true) && set(index) && eject(false))
+}
+
+fn aspect_of(g: &GameGeometry) -> f32 {
+    if g.aspect_ratio > 0.0 {
+        g.aspect_ratio
+    } else if g.base_height > 0 {
+        g.base_width as f32 / g.base_height as f32
+    } else {
+        GBA_W as f32 / GBA_H as f32
     }
 }
 
@@ -314,40 +401,62 @@ unsafe extern "C" fn video_refresh(
     height: c_uint,
     pitch: usize,
 ) {
-    if data.is_null() {
+    if data.is_null() || width == 0 || height == 0 {
         return;
     }
     with_host(|h| {
-        let cols = width.min(GBA_W) as usize;
-        let rows = height.min(GBA_H) as usize;
-        let ox = (GBA_W as usize - cols) / 2;
-        let oy = (GBA_H as usize - rows) / 2;
-        if cols != GBA_W as usize || rows != GBA_H as usize {
-            h.video.fill(0);
-        }
+        let (cw, cols, rows, ox, oy) = match h.canvas {
+            Canvas::Fixed(cw, ch) => {
+                let cols = width.min(cw) as usize;
+                let rows = height.min(ch) as usize;
+                if cols != cw as usize || rows != ch as usize {
+                    h.video.fill(0);
+                }
+                let (ox, oy) = ((cw as usize - cols) / 2, (ch as usize - rows) / 2);
+                (cw as usize, cols, rows, ox, oy)
+            }
+            Canvas::Native => {
+                if h.size != (width, height) {
+                    h.size = (width, height);
+                    h.video.resize((width * height * 4) as usize, 0);
+                }
+                (width as usize, width as usize, height as usize, 0, 0)
+            }
+        };
         for y in 0..rows {
             let src = (data as *const u8).add(y * pitch);
-            let row = ((y + oy) * GBA_W as usize + ox) * 4;
-            match h.format {
-                PixelFormat::Xrgb8888 => {
-                    ptr::copy_nonoverlapping(src, h.video.as_mut_ptr().add(row), cols * 4);
-                }
-                PixelFormat::Rgb565 => {
-                    for x in 0..cols {
-                        let p = ptr::read_unaligned((src as *const u16).add(x));
-                        let r = ((p >> 11) & 0x1f) as u8;
-                        let g = ((p >> 5) & 0x3f) as u8;
-                        let b = (p & 0x1f) as u8;
-                        let o = row + x * 4;
-                        h.video[o] = (b << 3) | (b >> 2);
-                        h.video[o + 1] = (g << 2) | (g >> 4);
-                        h.video[o + 2] = (r << 3) | (r >> 2);
-                        h.video[o + 3] = 0;
-                    }
-                }
-            }
+            let at = ((y + oy) * cw + ox) * 4;
+            convert_row(h.format, src, &mut h.video[at..at + cols * 4]);
         }
     });
+}
+
+unsafe fn convert_row(format: PixelFormat, src: *const u8, dst: &mut [u8]) {
+    let expand5 = |v: u16| ((v << 3) | (v >> 2)) as u8;
+    match format {
+        PixelFormat::Xrgb8888 => {
+            ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), dst.len());
+        }
+        PixelFormat::Rgb565 => {
+            for (x, px) in dst.chunks_exact_mut(4).enumerate() {
+                let p = ptr::read_unaligned((src as *const u16).add(x));
+                let g = (p >> 5) & 0x3f;
+                px[0] = expand5(p & 0x1f);
+                px[1] = ((g << 2) | (g >> 4)) as u8;
+                px[2] = expand5((p >> 11) & 0x1f);
+                px[3] = 0;
+            }
+        }
+        PixelFormat::Rgb1555 => {
+            for (x, px) in dst.chunks_exact_mut(4).enumerate() {
+                let p = ptr::read_unaligned((src as *const u16).add(x));
+                px[0] = expand5(p & 0x1f);
+                px[1] = expand5((p >> 5) & 0x1f);
+                px[2] = expand5((p >> 10) & 0x1f);
+                px[3] = 0;
+            }
+        }
+    }
 }
 
 unsafe extern "C" fn audio_sample(left: i16, right: i16) {
@@ -366,17 +475,27 @@ unsafe extern "C" fn audio_batch(data: *const i16, frames: usize) -> usize {
 
 unsafe extern "C" fn input_poll() {}
 
-unsafe extern "C" fn input_state(port: c_uint, device: c_uint, _index: c_uint, id: c_uint) -> i16 {
-    if device != DEVICE_JOYPAD {
-        return 0;
-    }
+unsafe extern "C" fn input_state(port: c_uint, device: c_uint, index: c_uint, id: c_uint) -> i16 {
+    // The low byte is the base device; the rest names a subclass the core may have made of it.
+    let device = device & 0xff;
     with_host(|h| {
         let Some(&input) = h.inputs.get(port as usize) else {
             return 0;
         };
-        match id {
-            JOYPAD_MASK => input as i16,
-            _ if id < 16 => ((input >> id) & 1) as i16,
+        match (device, index) {
+            (DEVICE_JOYPAD, _) => match id {
+                JOYPAD_MASK => input as i16,
+                _ if id < 16 => ((input >> id) & 1) as i16,
+                _ => 0,
+            },
+            (DEVICE_ANALOG, DEVICE_INDEX_ANALOG_BUTTON) if id < 16 => {
+                if (input >> id) & 1 == 1 {
+                    i16::MAX
+                } else {
+                    0
+                }
+            }
+            (DEVICE_ANALOG, 0 | 1) if id < 2 => h.sticks[port as usize][(index * 2 + id) as usize],
             _ => 0,
         }
     })
@@ -388,10 +507,18 @@ pub struct LibretroCore {
     host: Box<Host>,
     rom: Vec<u8>,
     rom_path: Option<CString>,
-    av: AvInfo,
+    need_fullpath: bool,
+    extensions: Vec<String>,
     loaded: bool,
     state_size: Option<usize>,
     _lib: Library,
+}
+
+unsafe fn c_str<'a>(p: *const c_char) -> Option<&'a str> {
+    if p.is_null() {
+        return None;
+    }
+    std::ffi::CStr::from_ptr(p).to_str().ok()
 }
 
 fn cdir(path: &Path) -> Result<CString, CoreError> {
@@ -423,6 +550,26 @@ impl LibretroCore {
 
     pub fn asked_for_rumble(&self) -> bool {
         self.host.asked_for_rumble
+    }
+
+    /// Fixed keeps the Game Boy family's centred 240x160 picture; Native hands frames on at
+    /// whatever size the core draws them.
+    pub fn set_canvas(&mut self, canvas: Canvas) {
+        self.host.canvas = canvas;
+        if let Canvas::Fixed(w, h) = canvas {
+            self.host.size = (w, h);
+            self.host.video = vec![0; (w * h * 4) as usize];
+        }
+    }
+
+    /// The file extensions the core says it opens, lower case and without the dot.
+    pub fn valid_extensions(&self) -> &[String] {
+        &self.extensions
+    }
+
+    /// Whether the core opens the game from its path itself, so the host must not read it.
+    pub fn needs_fullpath(&self) -> bool {
+        self.need_fullpath
     }
 
     pub fn set_option(&mut self, key: &str, value: &str) {
@@ -469,11 +616,31 @@ impl LibretroCore {
         if version != API_VERSION {
             return Err(CoreError::Unsupported(format!("libretro api {version}")));
         }
+        let mut info = SystemInfo::default();
+        unsafe { (api.get_system_info)(&mut info) };
+        let extensions = unsafe { c_str(info.valid_extensions) }
+            .map(|list| {
+                list.split('|')
+                    .filter(|e| !e.is_empty())
+                    .map(|e| e.to_ascii_lowercase())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let need_fullpath = info.need_fullpath;
         let mut host = Box::new(Host {
             video: vec![0; VIDEO_BYTES],
-            format: PixelFormat::Xrgb8888,
+            size: (GBA_W, GBA_H),
+            canvas: Canvas::Fixed(GBA_W, GBA_H),
+            aspect: GBA_W as f32 / GBA_H as f32,
+            timing: AvInfo {
+                fps: 0.0,
+                sample_rate: 0.0,
+            },
+            format: PixelFormat::Rgb1555,
             audio: Vec::new(),
             inputs: [0; 2],
+            sticks: [[0; 4]; 2],
+            disk: None,
             system_dir: cdir(system_dir)?,
             save_dir: cdir(save_dir)?,
             rumble: Rumble::default(),
@@ -501,10 +668,8 @@ impl LibretroCore {
             host,
             rom: Vec::new(),
             rom_path: None,
-            av: AvInfo {
-                fps: 0.0,
-                sample_rate: 0.0,
-            },
+            need_fullpath,
+            extensions,
             loaded: false,
             state_size: None,
             _lib: lib,
@@ -527,6 +692,12 @@ impl LibretroCore {
             unsafe { (self.api.serialize)(buf.as_mut_ptr() as *mut c_void, size) }
         };
         ok.then_some(buf)
+    }
+
+    fn with_disk<R>(&mut self, f: impl FnOnce(&DiskControl) -> Option<R>) -> Option<R> {
+        let disk = self.host.disk?;
+        let _a = Active::bind(&mut self.host);
+        f(&disk)
     }
 
     fn memory(&self, id: c_uint) -> Option<&[u8]> {
@@ -567,14 +738,20 @@ impl RetroCore for LibretroCore {
     fn load(&mut self, rom: &Path) -> Result<(), CoreError> {
         self.unload();
         self.state_size = None;
-        self.rom = std::fs::read(rom)?;
+        self.rom = match self.need_fullpath {
+            true => Vec::new(),
+            false => std::fs::read(rom)?,
+        };
         self.rom_path = Some(
             CString::new(rom.as_os_str().as_encoded_bytes())
                 .map_err(|_| CoreError::Load("rom path contains a nul".into()))?,
         );
         let info = GameInfo {
             path: self.rom_path.as_ref().map_or(ptr::null(), |p| p.as_ptr()),
-            data: self.rom.as_ptr() as *const c_void,
+            data: match self.need_fullpath {
+                true => ptr::null(),
+                false => self.rom.as_ptr() as *const c_void,
+            },
             size: self.rom.len(),
             meta: ptr::null(),
         };
@@ -590,10 +767,11 @@ impl RetroCore for LibretroCore {
         self.loaded = true;
         let mut av = SystemAvInfo::default();
         unsafe { (self.api.get_system_av_info)(&mut av) };
-        self.av = AvInfo {
+        self.host.timing = AvInfo {
             fps: av.timing.fps,
             sample_rate: av.timing.sample_rate,
         };
+        self.host.aspect = aspect_of(&av.geometry);
         unsafe { (self.api.set_controller_port_device)(0, DEVICE_JOYPAD) };
         Ok(())
     }
@@ -618,6 +796,47 @@ impl RetroCore for LibretroCore {
 
     fn video_xrgb8888(&self) -> &[u8] {
         &self.host.video
+    }
+
+    fn video_size(&self) -> (u32, u32) {
+        self.host.size
+    }
+
+    fn display_aspect(&self) -> Option<f32> {
+        (self.host.canvas == Canvas::Native).then_some(self.host.aspect)
+    }
+
+    fn set_sticks(&mut self, port: usize, sticks: Sticks) {
+        if let Some(slot) = self.host.sticks.get_mut(port) {
+            *slot = sticks;
+        }
+    }
+
+    fn disk_count(&self) -> u32 {
+        let Some(count) = self.host.disk.and_then(|d| d.get_num_images) else {
+            return 0;
+        };
+        unsafe { count() }
+    }
+
+    fn disk_index(&self) -> u32 {
+        let Some(index) = self.host.disk.and_then(|d| d.get_image_index) else {
+            return 0;
+        };
+        unsafe { index() }
+    }
+
+    fn set_disk(&mut self, index: u32) -> Result<(), CoreError> {
+        let swapped = self.with_disk(|d| unsafe { swap_disk(d, index) });
+        match swapped {
+            Some(true) => Ok(()),
+            Some(false) => Err(CoreError::Unsupported(format!(
+                "the core refused disk {index}"
+            ))),
+            None => Err(CoreError::Unsupported(
+                "the core has no disk control".into(),
+            )),
+        }
     }
 
     fn take_audio(&mut self) -> Vec<i16> {
@@ -672,7 +891,7 @@ impl RetroCore for LibretroCore {
     }
 
     fn av_info(&self) -> AvInfo {
-        self.av
+        self.host.timing
     }
 
     fn rumble(&self) -> Rumble {
@@ -709,9 +928,18 @@ mod tests {
     fn host_with(options: HashMap<String, CString>, options_dirty: bool) -> Box<Host> {
         Box::new(Host {
             video: vec![0; VIDEO_BYTES],
+            size: (GBA_W, GBA_H),
+            canvas: Canvas::Fixed(GBA_W, GBA_H),
+            aspect: 1.5,
+            timing: AvInfo {
+                fps: 0.0,
+                sample_rate: 0.0,
+            },
             format: PixelFormat::Xrgb8888,
             audio: Vec::new(),
             inputs: [0; 2],
+            sticks: [[0; 4]; 2],
+            disk: None,
             system_dir: CString::new(".").unwrap(),
             save_dir: CString::new(".").unwrap(),
             rumble: Rumble::default(),
@@ -1713,5 +1941,286 @@ mod tests {
             &[100u8, 50, 100 ^ 50],
             "the picture was blanked or moved where a duplicate should have kept it"
         );
+    }
+
+    #[test]
+    fn a_native_canvas_takes_each_frame_at_its_own_size() {
+        let mut host = host_with(HashMap::new(), false);
+        host.canvas = Canvas::Native;
+        let _active = Active::bind(&mut host);
+        let frame = gradient(256, 224);
+        unsafe { video_refresh(frame.as_ptr() as *const c_void, 256, 224, 256 * 4) };
+
+        let (size, video) = unsafe { with_host(|h| (h.size, h.video.clone())) }.unwrap();
+        assert_eq!(size, (256, 224));
+        assert_eq!(
+            video, frame,
+            "the picture was moved or cropped on a native canvas"
+        );
+    }
+
+    #[test]
+    fn a_native_canvas_follows_a_resolution_change() {
+        let mut host = host_with(HashMap::new(), false);
+        host.canvas = Canvas::Native;
+        let _active = Active::bind(&mut host);
+        let low = gradient(320, 240);
+        let high = gradient(640, 480);
+        unsafe {
+            video_refresh(low.as_ptr() as *const c_void, 320, 240, 320 * 4);
+            video_refresh(high.as_ptr() as *const c_void, 640, 480, 640 * 4);
+        }
+
+        let (size, video) = unsafe { with_host(|h| (h.size, h.video.clone())) }.unwrap();
+        assert_eq!(size, (640, 480));
+        assert_eq!(video, high);
+    }
+
+    #[test]
+    fn a_native_canvas_reads_rows_by_the_pitch_not_the_width() {
+        let mut host = host_with(HashMap::new(), false);
+        host.canvas = Canvas::Native;
+        let _active = Active::bind(&mut host);
+        // Two rows of two pixels, each row padded out to four pixels of pitch.
+        let mut frame = [0u8; 4 * 4 * 2];
+        frame[..8].copy_from_slice(&[1, 2, 3, 0, 4, 5, 6, 0]);
+        frame[16..24].copy_from_slice(&[7, 8, 9, 0, 10, 11, 12, 0]);
+        unsafe { video_refresh(frame.as_ptr() as *const c_void, 2, 2, 16) };
+
+        let video = unsafe { with_host(|h| h.video.clone()) }.unwrap();
+        assert_eq!(video, [1, 2, 3, 0, 4, 5, 6, 0, 7, 8, 9, 0, 10, 11, 12, 0]);
+    }
+
+    #[test]
+    fn rgb1555_comes_out_as_xrgb8888() {
+        let mut host = host_with(HashMap::new(), false);
+        host.format = PixelFormat::Rgb1555;
+        host.canvas = Canvas::Native;
+        let _active = Active::bind(&mut host);
+        // Pure red, pure green, pure blue, white.
+        let px: [u16; 4] = [0x7c00, 0x03e0, 0x001f, 0x7fff];
+        unsafe { video_refresh(px.as_ptr() as *const c_void, 4, 1, 8) };
+
+        let video = unsafe { with_host(|h| h.video.clone()) }.unwrap();
+        assert_eq!(
+            video,
+            [0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0],
+            "0RGB1555 did not come out as XRGB8888 in BGRA byte order"
+        );
+    }
+
+    #[test]
+    fn set_pixel_format_accepts_0rgb1555() {
+        let mut host = host_with(HashMap::new(), false);
+        let _active = Active::bind(&mut host);
+        let mut want = PIXEL_FORMAT_0RGB1555;
+        let ok = unsafe { environment(SET_PIXEL_FORMAT, &mut want as *mut c_uint as *mut c_void) };
+        assert!(ok);
+        assert!(unsafe { with_host(|h| h.format == PixelFormat::Rgb1555) }.unwrap());
+    }
+
+    #[test]
+    fn set_geometry_updates_the_aspect() {
+        let mut host = host_with(HashMap::new(), false);
+        let _active = Active::bind(&mut host);
+        let mut g = GameGeometry {
+            base_width: 256,
+            base_height: 224,
+            max_width: 512,
+            max_height: 448,
+            aspect_ratio: 4.0 / 3.0,
+        };
+        let ok = unsafe { environment(SET_GEOMETRY, &mut g as *mut GameGeometry as *mut c_void) };
+        assert!(ok);
+        assert_eq!(unsafe { with_host(|h| h.aspect) }.unwrap(), 4.0 / 3.0);
+    }
+
+    #[test]
+    fn an_unset_aspect_falls_back_to_the_base_size() {
+        let g = GameGeometry {
+            base_width: 320,
+            base_height: 240,
+            ..GameGeometry::default()
+        };
+        assert_eq!(aspect_of(&g), 320.0 / 240.0);
+    }
+
+    #[test]
+    fn set_system_av_info_updates_timing_and_aspect() {
+        let mut host = host_with(HashMap::new(), false);
+        let _active = Active::bind(&mut host);
+        let mut av = SystemAvInfo {
+            geometry: GameGeometry {
+                base_width: 320,
+                base_height: 240,
+                aspect_ratio: 0.0,
+                ..GameGeometry::default()
+            },
+            timing: SystemTiming {
+                fps: 50.0,
+                sample_rate: 44_100.0,
+            },
+        };
+        let ok = unsafe {
+            environment(
+                SET_SYSTEM_AV_INFO,
+                &mut av as *mut SystemAvInfo as *mut c_void,
+            )
+        };
+        assert!(ok);
+        let (timing, aspect) = unsafe { with_host(|h| (h.timing, h.aspect)) }.unwrap();
+        assert_eq!(
+            timing,
+            AvInfo {
+                fps: 50.0,
+                sample_rate: 44_100.0
+            }
+        );
+        assert_eq!(aspect, 4.0 / 3.0);
+    }
+
+    #[test]
+    fn input_state_reads_each_stick_axis_for_its_port() {
+        let mut host = host_with(HashMap::new(), false);
+        host.sticks = [[100, -200, 300, -400], [1, 2, 3, 4]];
+        let _active = Active::bind(&mut host);
+
+        let axis = |port, index, id| unsafe { input_state(port, DEVICE_ANALOG, index, id) };
+        assert_eq!(axis(0, 0, 0), 100, "left x");
+        assert_eq!(axis(0, 0, 1), -200, "left y");
+        assert_eq!(axis(0, 1, 0), 300, "right x");
+        assert_eq!(axis(0, 1, 1), -400, "right y");
+        assert_eq!(axis(1, 1, 1), 4, "port 1 read port 0's sticks");
+        assert_eq!(axis(0, 0, 2), 0, "an axis past y must read as rest");
+    }
+
+    #[test]
+    fn input_state_reads_a_held_button_as_full_analog_pressure() {
+        let mut host = host_with(HashMap::new(), false);
+        host.inputs = [ButtonMask::R2, 0];
+        let _active = Active::bind(&mut host);
+
+        let press = |id| unsafe { input_state(0, DEVICE_ANALOG, DEVICE_INDEX_ANALOG_BUTTON, id) };
+        assert_eq!(press(13), i16::MAX, "R2 is held");
+        assert_eq!(press(12), 0, "L2 is not");
+    }
+
+    #[test]
+    fn input_state_ignores_a_joypad_subclass() {
+        let mut host = host_with(HashMap::new(), false);
+        host.inputs = [ButtonMask::A, 0];
+        let _active = Active::bind(&mut host);
+        let subclassed = DEVICE_JOYPAD | (1 << 8);
+        assert_eq!(unsafe { input_state(0, subclassed, 0, 8) }, 1);
+    }
+
+    #[test]
+    fn get_input_bitmasks_says_yes() {
+        let mut host = host_with(HashMap::new(), false);
+        let _active = Active::bind(&mut host);
+        assert!(unsafe { environment(GET_INPUT_BITMASKS, ptr::null_mut()) });
+    }
+
+    thread_local! {
+        static TEST_DISK_CALLS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    unsafe extern "C" fn test_eject(open: bool) -> bool {
+        TEST_DISK_CALLS.with(|c| c.borrow_mut().push(format!("eject {open}")));
+        true
+    }
+
+    unsafe extern "C" fn test_set_index(index: c_uint) -> bool {
+        TEST_DISK_CALLS.with(|c| c.borrow_mut().push(format!("index {index}")));
+        index < 3
+    }
+
+    unsafe extern "C" fn test_count() -> c_uint {
+        3
+    }
+
+    #[test]
+    fn the_basic_disk_interface_is_kept_without_reading_past_it() {
+        let mut host = host_with(HashMap::new(), false);
+        let mut basic = DiskControlBasic {
+            set_eject_state: Some(test_eject),
+            get_eject_state: None,
+            get_image_index: None,
+            set_image_index: Some(test_set_index),
+            get_num_images: Some(test_count),
+            replace_image_index: None,
+            add_image_index: None,
+        };
+        let ok = {
+            let _active = Active::bind(&mut host);
+            unsafe {
+                environment(
+                    SET_DISK_CONTROL_INTERFACE,
+                    &mut basic as *mut DiskControlBasic as *mut c_void,
+                )
+            }
+        };
+        assert!(ok);
+        let disk = host.disk.expect("the interface was not stored");
+        assert!(disk.get_num_images.is_some());
+        assert!(
+            disk.get_image_label.is_none(),
+            "the ext-only fields must stay empty for the basic interface"
+        );
+    }
+
+    #[test]
+    fn get_disk_control_interface_version_offers_the_ext_interface() {
+        let mut host = host_with(HashMap::new(), false);
+        let _active = Active::bind(&mut host);
+        let mut version: c_uint = 0;
+        let ok = unsafe {
+            environment(
+                GET_DISK_CONTROL_INTERFACE_VERSION,
+                &mut version as *mut c_uint as *mut c_void,
+            )
+        };
+        assert!(ok);
+        assert_eq!(version, 1);
+    }
+
+    #[test]
+    fn swapping_a_disk_opens_the_tray_changes_it_and_closes_it() {
+        TEST_DISK_CALLS.with(|c| c.borrow_mut().clear());
+        let disk = DiskControl {
+            set_eject_state: Some(test_eject),
+            set_image_index: Some(test_set_index),
+            ..DiskControl::default()
+        };
+        assert_eq!(unsafe { swap_disk(&disk, 1) }, Some(true));
+        TEST_DISK_CALLS.with(|c| {
+            assert_eq!(
+                c.borrow().as_slice(),
+                ["eject true", "index 1", "eject false"]
+            );
+        });
+    }
+
+    #[test]
+    fn a_refused_disk_leaves_the_tray_open() {
+        TEST_DISK_CALLS.with(|c| c.borrow_mut().clear());
+        let disk = DiskControl {
+            set_eject_state: Some(test_eject),
+            set_image_index: Some(test_set_index),
+            ..DiskControl::default()
+        };
+        assert_eq!(unsafe { swap_disk(&disk, 7) }, Some(false));
+        TEST_DISK_CALLS.with(|c| {
+            assert_eq!(c.borrow().as_slice(), ["eject true", "index 7"]);
+        });
+    }
+
+    #[test]
+    fn swapping_needs_both_the_tray_and_the_index() {
+        let disk = DiskControl {
+            set_image_index: Some(test_set_index),
+            ..DiskControl::default()
+        };
+        assert_eq!(unsafe { swap_disk(&disk, 0) }, None);
     }
 }

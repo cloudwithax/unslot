@@ -2,6 +2,27 @@ use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use slot_retro::{GBA_H, GBA_W};
+
+/// The size of a published picture, and how wide it should look against its height. The
+/// aspect is None for the Game Boy family, whose 240x160 canvas the frontend places itself.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Shape {
+    pub width: u32,
+    pub height: u32,
+    pub aspect: Option<f32>,
+}
+
+impl Default for Shape {
+    fn default() -> Self {
+        Shape {
+            width: GBA_W,
+            height: GBA_H,
+            aspect: None,
+        }
+    }
+}
+
 pub struct Frames {
     inner: Mutex<Inner>,
     size: usize,
@@ -9,7 +30,7 @@ pub struct Frames {
 }
 
 struct Inner {
-    ready: Option<Vec<u8>>,
+    ready: Option<(Vec<u8>, Shape)>,
     spare: Vec<Vec<u8>>,
     allocated: usize,
 }
@@ -38,19 +59,20 @@ impl Frames {
         }
     }
 
-    pub fn publish(&self, buf: Vec<u8>) {
+    pub fn publish(&self, buf: Vec<u8>, shape: Shape) {
         let mut i = self.lock();
-        if let Some(dropped) = i.ready.replace(buf) {
+        if let Some((dropped, _)) = i.ready.replace((buf, shape)) {
             i.spare.push(dropped);
         }
     }
 
     pub fn latest(self: &Arc<Self>) -> Option<FrameRef> {
-        let buf = self.lock().ready.take()?;
+        let (buf, shape) = self.lock().ready.take()?;
         self.taken.fetch_add(1, Ordering::Relaxed);
         Some(FrameRef {
             frames: self.clone(),
             buf,
+            shape,
         })
     }
 
@@ -78,6 +100,7 @@ impl Frames {
 pub struct FrameRef {
     frames: Arc<Frames>,
     buf: Vec<u8>,
+    pub shape: Shape,
 }
 
 impl Deref for FrameRef {

@@ -1,7 +1,5 @@
-use slot_retro::{GBA_H, GBA_W};
-
-pub fn png(xrgb8888: &[u8]) -> Option<Vec<u8>> {
-    let n = (GBA_W * GBA_H) as usize;
+pub fn png(xrgb8888: &[u8], (w, h): (u32, u32)) -> Option<Vec<u8>> {
+    let n = (w * h) as usize;
     if xrgb8888.len() < n * 4 {
         return None;
     }
@@ -11,7 +9,7 @@ pub fn png(xrgb8888: &[u8]) -> Option<Vec<u8>> {
     }
 
     let mut out = Vec::new();
-    let mut enc = png::Encoder::new(&mut out, GBA_W, GBA_H);
+    let mut enc = png::Encoder::new(&mut out, w, h);
     enc.set_color(png::ColorType::Rgb);
     enc.set_depth(png::BitDepth::Eight);
     let mut writer = enc.write_header().ok()?;

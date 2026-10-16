@@ -1,10 +1,10 @@
-use slot::frames::Frames;
+use slot::frames::{Frames, Shape};
 
 fn publish(frames: &Frames, value: u8, size: usize) {
     let mut buf = frames.take_write();
     buf.clear();
     buf.resize(size, value);
-    frames.publish(buf);
+    frames.publish(buf, Shape::default());
 }
 
 #[test]

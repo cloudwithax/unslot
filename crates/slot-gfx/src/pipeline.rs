@@ -13,6 +13,12 @@ pub const WHOLE_TEXTURE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 pub struct GamePass {
     prog: gl::types::GLuint,
     game: gl::types::GLuint,
+    /// The size the game texture was made at, which follows the frames uploaded into it.
+    texels: (u32, u32),
+    u_src: gl::types::GLint,
+    /// How wide the picture should look against its height, or None to fill the screen rect
+    /// the way the Game Boy family's 240x160 canvas does.
+    aspect: Option<f32>,
     u_rect: gl::types::GLint,
     u_bright: gl::types::GLint,
     u_uv: gl::types::GLint,
@@ -46,15 +52,11 @@ impl GamePass {
             crate::gl::gray_format(),
             Some(&[255]),
         );
-        let (u_rect, u_bright, u_uv, u_mode, u_paper_size, u_pic, u_fbo, u_origin);
+        let (u_rect, u_bright, u_uv, u_mode, u_paper_size, u_pic, u_fbo, u_origin, u_src);
         unsafe {
             gl::UseProgram(prog);
             gl::Uniform1i(crate::gl::uniform_location(prog, "u_game"), 0);
-            gl::Uniform2f(
-                crate::gl::uniform_location(prog, "u_src"),
-                SRC_W as f32,
-                SRC_H as f32,
-            );
+            u_src = crate::gl::uniform_location(prog, "u_src");
             gl::Uniform2f(
                 crate::gl::uniform_location(prog, "u_target"),
                 OUT_W as f32,
@@ -73,6 +75,9 @@ impl GamePass {
         Ok(GamePass {
             prog,
             game,
+            texels: (SRC_W, SRC_H),
+            u_src,
+            aspect: None,
             u_rect,
             u_bright,
             u_uv,
@@ -108,10 +113,18 @@ impl GamePass {
 
     fn placed(&self) -> (f32, f32, f32, f32) {
         let foot = self.bottom;
-        match self.fills {
+        let rect = match self.fills {
             true => (0.0, 0.0, OUT_W as f32, OUT_H as f32 - foot),
             false => screen_rect_above(self.power, foot),
+        };
+        match self.aspect {
+            Some(aspect) => fit_aspect(rect, aspect),
+            None => rect,
         }
+    }
+
+    pub fn set_aspect(&mut self, aspect: Option<f32>) {
+        self.aspect = aspect.filter(|a| a.is_finite() && *a > 0.0);
     }
 
     pub fn set_fills_frame(&mut self, on: bool) {
@@ -152,9 +165,15 @@ impl GamePass {
         self.src = rect;
     }
 
-    pub fn upload(&mut self, xrgb8888: &[u8]) {
-        if xrgb8888.len() < (SRC_W * SRC_H * 4) as usize {
+    pub fn upload(&mut self, xrgb8888: &[u8], (w, h): (u32, u32)) {
+        if w == 0 || h == 0 || xrgb8888.len() < (w * h * 4) as usize {
             return;
+        }
+        if self.texels != (w, h) {
+            let game = crate::gl::texture(w, h, gl::NEAREST, gl::CLAMP_TO_EDGE, gl::BGRA, None);
+            unsafe { gl::DeleteTextures(1, &self.game) };
+            self.game = game;
+            self.texels = (w, h);
         }
         unsafe {
             gl::BindTexture(gl::TEXTURE_2D, self.game);
@@ -164,8 +183,8 @@ impl GamePass {
                 0,
                 0,
                 0,
-                SRC_W as i32,
-                SRC_H as i32,
+                w as i32,
+                h as i32,
                 gl::BGRA,
                 gl::UNSIGNED_BYTE,
                 xrgb8888.as_ptr() as *const std::ffi::c_void,
@@ -175,7 +194,7 @@ impl GamePass {
 
     pub fn draw(&self, quad: &Quad) {
         let src = match self.effect {
-            ScreenEffect::Grid => whole_scale_source(self.src, self.fbo_scale),
+            ScreenEffect::Grid => whole_scale_source(self.src, self.fbo_scale, self.texels),
             _ => self.src,
         };
         self.draw_source(self.game, quad, src);
@@ -200,6 +219,7 @@ impl GamePass {
         }
         unsafe {
             gl::UseProgram(self.prog);
+            gl::Uniform2f(self.u_src, self.texels.0 as f32, self.texels.1 as f32);
             gl::Uniform4f(self.u_rect, x, y, w, h);
             gl::Uniform4f(self.u_uv, src[0], src[1], src[2], src[3]);
             gl::Uniform1f(self.u_bright, bright);
@@ -223,10 +243,24 @@ impl GamePass {
     }
 }
 
-fn whole_scale_source(src: [f32; 4], fbo: [f32; 2]) -> [f32; 4] {
-    let (x, w) = whole_scale(src[0], src[2], SRC_W as f32, OUT_W as f32 * fbo[0]);
-    let (y, h) = whole_scale(src[1], src[3], SRC_H as f32, OUT_H as f32 * fbo[1]);
+fn whole_scale_source(src: [f32; 4], fbo: [f32; 2], texels: (u32, u32)) -> [f32; 4] {
+    let (x, w) = whole_scale(src[0], src[2], texels.0 as f32, OUT_W as f32 * fbo[0]);
+    let (y, h) = whole_scale(src[1], src[3], texels.1 as f32, OUT_H as f32 * fbo[1]);
     [x, y, w, h]
+}
+
+/// The largest rect of `aspect` centred in `rect`, as (x, y, w, h).
+pub fn fit_aspect((x, y, w, h): (f32, f32, f32, f32), aspect: f32) -> (f32, f32, f32, f32) {
+    if h <= 0.0 || w <= 0.0 {
+        return (x, y, w, h);
+    }
+    if w / h > aspect {
+        let fitted = h * aspect;
+        (x + (w - fitted) / 2.0, y, fitted, h)
+    } else {
+        let fitted = w / aspect;
+        (x, y + (h - fitted) / 2.0, w, fitted)
+    }
 }
 
 fn whole_scale(at: f32, len: f32, texels: f32, out: f32) -> (f32, f32) {
@@ -247,5 +281,35 @@ impl Drop for GamePass {
             gl::DeleteTextures(1, &self.paper);
             gl::DeleteProgram(self.prog);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_four_by_three_picture_is_pillarboxed_on_the_three_by_two_screen() {
+        let (x, y, w, h) = fit_aspect((0.0, 0.0, 720.0, 480.0), 4.0 / 3.0);
+        assert_eq!((x, y, w, h), (40.0, 0.0, 640.0, 480.0));
+    }
+
+    #[test]
+    fn a_wide_picture_is_letterboxed() {
+        let (x, y, w, h) = fit_aspect((0.0, 0.0, 720.0, 480.0), 2.0);
+        assert_eq!((x, y, w, h), (0.0, 60.0, 720.0, 360.0));
+    }
+
+    #[test]
+    fn a_matching_aspect_fills_the_rect() {
+        assert_eq!(
+            fit_aspect((10.0, 20.0, 720.0, 480.0), 1.5),
+            (10.0, 20.0, 720.0, 480.0)
+        );
+    }
+
+    #[test]
+    fn a_collapsed_rect_is_left_alone() {
+        assert_eq!(fit_aspect((5.0, 5.0, 0.0, 0.0), 1.5), (5.0, 5.0, 0.0, 0.0));
     }
 }

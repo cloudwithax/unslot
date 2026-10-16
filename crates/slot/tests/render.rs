@@ -51,7 +51,7 @@ fn a_mock_frame_keeps_its_colours_through_the_game_pass() {
     let src = mock_frame(7);
 
     c.begin_frame(slot_gfx::Layout::Framed);
-    c.upload_game(&src);
+    c.upload_game(&src, (SRC_W, SRC_H));
     c.draw_game();
     let frame = c.read_frame();
 
@@ -85,7 +85,7 @@ fn a_saved_frame_arrives_intact_on_its_screenshot() {
     let d = tempfile::tempdir().expect("tempdir");
     let ring = StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Mock");
     let stamp = "2026-08-09_14-32-05";
-    ring.push(b"state", &thumb::png(&src).expect("encode"), stamp)
+    ring.push(b"state", &thumb::png(&src, (SRC_W, SRC_H)).expect("encode"), stamp)
         .expect("push");
     let entries = ring.list().expect("list");
 
@@ -120,7 +120,7 @@ fn the_switcher_magnifies_its_screenshot_without_resampling_it() {
     let ring = StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Mock");
     ring.push(
         b"state",
-        &thumb::png(&src).expect("encode"),
+        &thumb::png(&src, (SRC_W, SRC_H)).expect("encode"),
         "2026-08-09_14-32-05",
     )
     .expect("push");

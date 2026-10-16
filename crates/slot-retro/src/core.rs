@@ -23,6 +23,10 @@ impl ButtonMask {
     pub const X: u16 = 1 << 9;
     pub const L: u16 = 1 << 10;
     pub const R: u16 = 1 << 11;
+    pub const L2: u16 = 1 << 12;
+    pub const R2: u16 = 1 << 13;
+    pub const L3: u16 = 1 << 14;
+    pub const R3: u16 = 1 << 15;
 
     pub fn without_turbo(self) -> ButtonMask {
         ButtonMask(self.0 & !(Self::X | Self::Y))
@@ -42,7 +46,11 @@ impl ButtonMask {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+/// One port's sticks as libretro reads them: left x, left y, right x, right y, each
+/// -0x8000..=0x7fff with up and left negative.
+pub type Sticks = [i16; 4];
+
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct AvInfo {
     pub fps: f64,
     pub sample_rate: f64,
@@ -84,6 +92,27 @@ pub trait RetroCore: Send {
     fn set_option(&mut self, _key: &str, _value: &str) {}
     fn set_frame_skip(&mut self, _skip: bool) {}
     fn video_xrgb8888(&self) -> &[u8];
+    /// The width and height of what `video_xrgb8888` holds.
+    fn video_size(&self) -> (u32, u32) {
+        (GBA_W, GBA_H)
+    }
+    /// How wide the picture should look against its height, or None when it is drawn into the
+    /// Game Boy's fixed 240x160 canvas and the frontend places it by the platform's own rules.
+    fn display_aspect(&self) -> Option<f32> {
+        None
+    }
+    fn set_sticks(&mut self, _port: usize, _sticks: Sticks) {}
+    fn disk_count(&self) -> u32 {
+        0
+    }
+    fn disk_index(&self) -> u32 {
+        0
+    }
+    fn set_disk(&mut self, _index: u32) -> Result<(), CoreError> {
+        Err(CoreError::Unsupported(
+            "the core has no disk control".into(),
+        ))
+    }
     fn take_audio(&mut self) -> Vec<i16>;
     fn serialize(&mut self) -> Result<Vec<u8>, CoreError>;
     fn unserialize(&mut self, data: &[u8]) -> Result<(), CoreError>;

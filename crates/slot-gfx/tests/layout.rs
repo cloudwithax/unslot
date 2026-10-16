@@ -33,7 +33,7 @@ fn framed_frame(c: &mut Compositor) -> Vec<u8> {
     c.set_screen_power(1.0);
     let badge = c.create_texture(2, 2, &[200, 40, 40, 255].repeat(4));
     c.begin_frame(Layout::Framed);
-    c.upload_game(&pattern());
+    c.upload_game(&pattern(), (SRC_W, SRC_H));
     c.draw_list(&[
         Draw::Game,
         Draw::Rect {
@@ -177,7 +177,7 @@ fn game_only(c: &mut Compositor, layout: Layout) -> Vec<u8> {
     c.set_screen_effect(ScreenEffect::Lcd3x);
     c.set_screen_power(1.0);
     c.begin_frame(layout);
-    c.upload_game(&pattern());
+    c.upload_game(&pattern(), (SRC_W, SRC_H));
     c.draw_list(&[Draw::Game]);
     c.read_frame()
 }

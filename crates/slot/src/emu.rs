@@ -7,19 +7,24 @@ use std::time::{Duration, Instant};
 
 use crate::cable::{self, Cable};
 use slot_retro::{
-    ButtonMask, CoreError, Link, LinkChannel, RetroCore, Rumble, GBA_H, GBA_W, NETPACKET_RELIABLE,
+    AvInfo, ButtonMask, CoreError, Link, LinkChannel, RetroCore, Rumble, Sticks, GBA_H, GBA_W,
+    NETPACKET_RELIABLE,
 };
 use slot_store::RUN_AHEAD_MAX;
 
 use crate::audio::Ring;
 use crate::drc::{drc_ratio, drc_target};
-use crate::frames::{FrameRef, Frames};
+use crate::frames::{FrameRef, Frames, Shape};
 use crate::link_state;
 use crate::persist::Snapshot;
 use crate::resample::Resampler;
 use crate::rewind::{RewindThread, REWIND_BYTES};
 
 const PRESENT: Duration = Duration::from_nanos(16_666_667);
+
+/// How far a core's rate may sit from the panel's 60 Hz and still run one frame a present,
+/// leaving the audio resampler to soak up the difference.
+const NEAR_PANEL_HZ: f64 = 2.0;
 
 pub const FAST_STEPS: u32 = 6;
 
@@ -86,6 +91,7 @@ enum Cmd {
 
 struct Shared {
     input: AtomicU16,
+    sticks: AtomicU64,
     speed: AtomicU8,
     observed: AtomicU8,
     state: AtomicU8,
@@ -154,6 +160,7 @@ impl EmuHandle {
         let frames = Frames::new((GBA_W * GBA_H * 4) as usize);
         let shared = Arc::new(Shared {
             input: AtomicU16::new(0),
+            sticks: AtomicU64::new(0),
             speed: AtomicU8::new(Speed::Paused as u8),
             observed: AtomicU8::new(Speed::Paused as u8),
             state: AtomicU8::new(CoreState::Loading as u8),
@@ -300,6 +307,12 @@ impl EmuHandle {
 
     pub fn input(&self) -> ButtonMask {
         ButtonMask(self.shared.input.load(Ordering::Relaxed))
+    }
+
+    pub fn set_sticks(&self, sticks: Sticks) {
+        self.shared
+            .sticks
+            .store(pack_sticks(sticks), Ordering::Relaxed);
     }
 
     pub fn latest_frame(&self) -> Option<FrameRef> {
@@ -537,16 +550,13 @@ impl Worker {
                 self.shared.resume_refused.store(true, Ordering::Release);
             }
         }
-        let av = core.av_info();
+        let mut av = core.av_info();
         let device_hz = match ring.sample_rate() {
             0 => av.sample_rate,
             hz => hz as f64,
         };
-        let core_hz = match av.fps {
-            fps if fps > 0.0 => av.sample_rate / (fps * PRESENT.as_secs_f64()),
-            _ => av.sample_rate,
-        };
-        let mut resampler = Resampler::new(core_hz, device_hz);
+        let mut period = frame_period(av.fps);
+        let mut resampler = Resampler::new(core_hz(av, period), device_hz);
         ring.clear_faults();
         self.shared
             .state
@@ -634,6 +644,7 @@ impl Worker {
                 gated = gate;
             }
             let lock = self.shared.driven.load(Ordering::Relaxed)
+                && period == PRESENT
                 && speed == Speed::Normal
                 && !rewinding
                 && transport.is_none();
@@ -652,6 +663,7 @@ impl Worker {
                 };
             let input = ButtonMask(self.shared.input.load(Ordering::Relaxed));
             crate::latency::emu_frame(input.0);
+            core.set_sticks(0, unpack_sticks(self.shared.sticks.load(Ordering::Relaxed)));
             let mut span = 1u32;
             let ceiling = match speed {
                 Speed::Paused => 0,
@@ -666,7 +678,7 @@ impl Worker {
                     }
                     core.set_frame_skip(false);
                     core.run_frame(ButtonMask(0));
-                    self.publish(core.video_xrgb8888());
+                    self.publish(core.video_xrgb8888(), shape_of(core.as_ref()));
                 }
                 self.shared
                     .rewind_fill
@@ -678,7 +690,7 @@ impl Worker {
                     span = cost.span(one, ceiling);
                 }
                 let ceiling = ceiling * span;
-                let budget = one + PRESENT * (span - 1);
+                let budget = one + period * (span - 1);
                 let began = Instant::now();
                 let mut ran = 0u32;
                 let (mut skipped, mut drawn) = (None::<Duration>, Duration::ZERO);
@@ -794,11 +806,19 @@ impl Worker {
                     }
                 }
                 flush_outbound(&mut transport, &link);
-                self.publish(if shown {
-                    &runahead.video
-                } else {
-                    core.video_xrgb8888()
-                });
+                match shown {
+                    true => self.publish(&runahead.video, runahead.shape),
+                    false => self.publish(core.video_xrgb8888(), shape_of(core.as_ref())),
+                }
+                if core.av_info() != av {
+                    av = core.av_info();
+                    period = frame_period(av.fps);
+                    resampler = Resampler::new(core_hz(av, period), device_hz);
+                    eprintln!(
+                        "slot: emu: the core now runs at {:.3} fps, {:.0} Hz",
+                        av.fps, av.sample_rate
+                    );
+                }
                 self.frame_done(served);
 
                 since_snapshot += 1;
@@ -887,7 +907,7 @@ impl Worker {
                 continue;
             }
             ticked = false;
-            deadline += PRESENT * span;
+            deadline += period * span;
             let now = Instant::now();
             match deadline.checked_duration_since(now) {
                 Some(wait) => std::thread::sleep(wait),
@@ -931,7 +951,7 @@ impl Worker {
                     core.run_frame(ButtonMask(0));
                     core.set_frame_skip(false);
                     core.run_frame(ButtonMask(0));
-                    self.publish(core.video_xrgb8888());
+                    self.publish(core.video_xrgb8888(), shape_of(core));
                     let _ = core.take_audio();
                     if let Err(e) = core.unserialize(&state) {
                         eprintln!("slot: refresh: {e}");
@@ -943,7 +963,7 @@ impl Worker {
                 let _ = reply.send(core.save_ram());
             }
             Cmd::Thumb(reply) => {
-                let _ = reply.send(crate::thumb::png(core.video_xrgb8888()));
+                let _ = reply.send(crate::thumb::png(core.video_xrgb8888(), core.video_size()));
             }
             Cmd::BeginLink(client_id, t) => {
                 self.shared.link_lost.store(false, Ordering::Relaxed);
@@ -1034,11 +1054,11 @@ impl Worker {
         }
     }
 
-    fn publish(&self, video: &[u8]) {
+    fn publish(&self, video: &[u8], shape: Shape) {
         let mut buf = self.frames.take_write();
         buf.clear();
         buf.extend_from_slice(video);
-        self.frames.publish(buf);
+        self.frames.publish(buf, shape);
         self.shared.published.fetch_add(1, Ordering::Relaxed);
         crate::latency::published();
     }
@@ -1055,6 +1075,42 @@ fn flush_outbound(transport: &mut Option<Box<dyn LinkChannel>>, link: &Link) {
     while let Some(packet) = link.take_outbound() {
         t.send(NETPACKET_RELIABLE, &packet);
     }
+}
+
+fn shape_of(core: &dyn RetroCore) -> Shape {
+    let (width, height) = core.video_size();
+    Shape {
+        width,
+        height,
+        aspect: core.display_aspect(),
+    }
+}
+
+/// How long one emulated frame lasts. A core near the panel's rate runs at exactly the panel's
+/// rate so it can lock to its ticks; the rest, 50 Hz PAL or the 75 Hz WonderSwan, keep their own.
+fn frame_period(fps: f64) -> Duration {
+    if fps <= 0.0 || (fps - 60.0).abs() <= NEAR_PANEL_HZ {
+        return PRESENT;
+    }
+    Duration::from_secs_f64(1.0 / fps)
+}
+
+/// The rate the core's audio has to be read at for it to last exactly one period a frame.
+fn core_hz(av: AvInfo, period: Duration) -> f64 {
+    match av.fps {
+        fps if fps > 0.0 => av.sample_rate / (fps * period.as_secs_f64()),
+        _ => av.sample_rate,
+    }
+}
+
+fn pack_sticks(sticks: Sticks) -> u64 {
+    sticks.iter().enumerate().fold(0, |packed, (i, &axis)| {
+        packed | (u64::from(axis as u16) << (i * 16))
+    })
+}
+
+fn unpack_sticks(packed: u64) -> Sticks {
+    std::array::from_fn(|i| (packed >> (i * 16)) as u16 as i16)
 }
 
 fn blend(estimate: Duration, measured: Duration) -> Duration {
@@ -1130,6 +1186,7 @@ impl FrameCost {
 struct RunAhead {
     state: Vec<u8>,
     video: Vec<u8>,
+    shape: Shape,
     audio: Vec<i16>,
     refused: bool,
 }
@@ -1152,6 +1209,7 @@ impl RunAhead {
         self.audio = core.take_audio();
         self.video.clear();
         self.video.extend_from_slice(core.video_xrgb8888());
+        self.shape = shape_of(core);
         core.unserialize(&self.state)
     }
 }
@@ -1206,6 +1264,59 @@ mod tests {
     use slot_retro::{LoopbackLink, MockCore};
 
     const PANEL: Duration = Duration::from_micros(16_760);
+
+    #[test]
+    fn a_core_near_sixty_hertz_runs_at_the_panels_rate() {
+        for fps in [59.7275, 60.0988, 59.922, 59.94, 60.25] {
+            assert_eq!(
+                frame_period(fps),
+                PRESENT,
+                "{fps} fps did not lock to the panel"
+            );
+        }
+        assert_eq!(
+            frame_period(0.0),
+            PRESENT,
+            "an unknown rate must not stall the loop"
+        );
+    }
+
+    #[test]
+    fn a_pal_or_75_hz_core_keeps_its_own_clock() {
+        assert_eq!(frame_period(50.0), Duration::from_millis(20));
+        let wonderswan = frame_period(75.47);
+        assert!((wonderswan.as_secs_f64() - 1.0 / 75.47).abs() < 1e-9);
+    }
+
+    #[test]
+    fn audio_is_stretched_only_for_a_core_run_at_the_panels_rate() {
+        let gba = AvInfo {
+            fps: 59.7275,
+            sample_rate: 32_768.0,
+        };
+        let stretched = core_hz(gba, frame_period(gba.fps));
+        assert!(
+            (stretched - 32_768.0 * (1.0 / 59.7275) / PRESENT.as_secs_f64()).abs() < 1e-6,
+            "a 59.73 fps core run at 60 must have its audio read that much faster"
+        );
+
+        let pal = AvInfo {
+            fps: 50.0,
+            sample_rate: 44_100.0,
+        };
+        assert!((core_hz(pal, frame_period(pal.fps)) - 44_100.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sticks_survive_the_trip_through_one_atomic() {
+        for sticks in [
+            [0; 4],
+            [i16::MIN, i16::MAX, -1, 1],
+            [123, -4567, 32_000, -32_000],
+        ] {
+            assert_eq!(unpack_sticks(pack_sticks(sticks)), sticks);
+        }
+    }
 
     fn frames_in(cost: &FrameCost, budget: Duration, ceiling: u32) -> u32 {
         cost.frames(budget, ceiling)

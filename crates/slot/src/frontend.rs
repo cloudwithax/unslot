@@ -61,6 +61,9 @@ pub struct Frontend {
     link_shot: Option<TexId>,
     link_shot_size: (u32, u32),
     link_shot_shown: bool,
+    /// The aspect of the last game frame drawn at its own size, or None for the Game Boy
+    /// family's fixed canvas.
+    game_aspect: Option<f32>,
 }
 
 #[derive(Default)]
@@ -183,6 +186,7 @@ impl Frontend {
             link_shot: None,
             link_shot_size: (0, 0),
             link_shot_shown: false,
+            game_aspect: None,
         }
     }
 
@@ -517,9 +521,17 @@ impl Frontend {
             return;
         }
         if let Some(frame) = self.session.frame() {
-            compositor.upload_game(&frame);
+            compositor.upload_game(&frame, (frame.shape.width, frame.shape.height));
+            self.game_aspect = frame.shape.aspect;
             crate::latency::taken();
         }
+        if self.game_aspect.is_some() {
+            // A frame at its own size is all picture, so none of the Game Boy canvas rules apply.
+            compositor.set_picture(slot_gfx::WHOLE_TEXTURE);
+            compositor.set_game_source_rect(slot_gfx::WHOLE_TEXTURE);
+        }
+        let stretched = self.session.app().video_mode() == crate::video_mode::VideoMode::Stretch;
+        compositor.set_game_aspect(self.game_aspect.filter(|_| !stretched));
         self.cart_faces.sync(self.session.app_mut(), compositor);
         sync_clock(self.session.app_mut(), compositor, &mut self.clocks);
         sync_about(self.session.app_mut(), compositor, &mut self.about);

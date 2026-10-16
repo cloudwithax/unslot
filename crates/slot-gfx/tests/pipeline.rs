@@ -84,7 +84,7 @@ fn game_pass_multiplies_every_output_cell_by_the_lcd3x_mask() {
     };
     let grey = vec![0x80u8; (SRC_W * SRC_H * 4) as usize];
     c.begin_frame(slot_gfx::Layout::Framed);
-    c.upload_game(&grey);
+    c.upload_game(&grey, (SRC_W, SRC_H));
     c.draw_game();
     let frame = c.read_frame();
 
@@ -110,7 +110,7 @@ fn the_game_frame_keeps_its_orientation_from_upload_to_readback() {
     let mut src = vec![0u8; (SRC_W * SRC_H * 4) as usize];
     src[0..3].copy_from_slice(&[255, 255, 255]);
     c.begin_frame(slot_gfx::Layout::Framed);
-    c.upload_game(&src);
+    c.upload_game(&src, (SRC_W, SRC_H));
     c.draw_game();
     let frame = c.read_frame();
 
@@ -145,7 +145,7 @@ fn the_picture_strikes_as_a_band_at_the_centre_before_it_fills_the_frame() {
     let peak = |c: &mut Compositor, t: f32| {
         c.set_screen_power(t);
         c.begin_frame(slot_gfx::Layout::Framed);
-        c.upload_game(&grey);
+        c.upload_game(&grey, (SRC_W, SRC_H));
         c.draw_game();
         let frame = c.read_frame();
         let brightest = frame.chunks_exact(4).map(|p| p[0]).max().unwrap_or(0);
@@ -188,7 +188,7 @@ fn the_game_marker_draws_the_picture_where_it_sits_in_the_list() {
     c.set_screen_power(1.0);
 
     c.begin_frame(slot_gfx::Layout::Framed);
-    c.upload_game(&white);
+    c.upload_game(&white, (SRC_W, SRC_H));
     c.draw_list(&[full([1.0, 0.0, 0.0, 1.0]), Draw::Game]);
     let under = c.read_frame();
     let blue = under.chunks_exact(4).map(|p| p[2]).max().unwrap_or(0);
@@ -258,7 +258,7 @@ fn a_still_is_not_cropped_by_the_picture_mode() {
     let framed = |c: &mut Compositor, rect: [f32; 4]| {
         c.set_game_source_rect(rect);
         c.begin_frame(slot_gfx::Layout::Framed);
-        c.upload_game(&src);
+        c.upload_game(&src, (SRC_W, SRC_H));
         c.draw_list(&[Draw::Shot { tex }]);
         let still = c.read_frame();
         c.begin_frame(slot_gfx::Layout::Framed);
@@ -428,7 +428,7 @@ fn the_default_source_rect_draws_exactly_as_before() {
     c.set_screen_power(1.0);
 
     c.begin_frame(slot_gfx::Layout::Framed);
-    c.upload_game(&src);
+    c.upload_game(&src, (SRC_W, SRC_H));
     c.draw_game();
     let default = c.read_frame();
 
@@ -451,7 +451,7 @@ fn the_default_source_rect_draws_exactly_as_before() {
 
     c.set_game_source_rect(WHOLE);
     c.begin_frame(slot_gfx::Layout::Framed);
-    c.upload_game(&src);
+    c.upload_game(&src, (SRC_W, SRC_H));
     c.draw_game();
     assert!(
         c.read_frame() == default,
@@ -477,7 +477,7 @@ fn fullscreen_puts_the_pictures_corners_in_the_panels_corners() {
 
     c.set_game_source_rect(WHOLE);
     c.begin_frame(slot_gfx::Layout::Framed);
-    c.upload_game(&src);
+    c.upload_game(&src, (SRC_W, SRC_H));
     c.draw_game();
     let actual = c.read_frame();
     let got = px(&actual, 0, 0);
@@ -490,7 +490,7 @@ fn fullscreen_puts_the_pictures_corners_in_the_panels_corners() {
 
     c.set_game_source_rect(GB_RECT);
     c.begin_frame(slot_gfx::Layout::Framed);
-    c.upload_game(&src);
+    c.upload_game(&src, (SRC_W, SRC_H));
     c.draw_game();
     let full = c.read_frame();
 
@@ -531,13 +531,13 @@ fn the_mask_follows_the_game_pixels_in_both_modes() {
 
     c.set_game_source_rect(WHOLE);
     c.begin_frame(slot_gfx::Layout::Framed);
-    c.upload_game(&src);
+    c.upload_game(&src, (SRC_W, SRC_H));
     c.draw_game();
     let actual = c.read_frame();
 
     c.set_game_source_rect(GB_RECT);
     c.begin_frame(slot_gfx::Layout::Framed);
-    c.upload_game(&src);
+    c.upload_game(&src, (SRC_W, SRC_H));
     c.draw_game();
     let full = c.read_frame();
 
@@ -574,7 +574,7 @@ fn grid_frame(c: &mut Compositor, window: (u32, u32)) -> (Vec<u8>, usize, usize)
     c.set_screen_effect(ScreenEffect::Grid);
     c.set_screen_power(1.0);
     c.begin_frame(slot_gfx::Layout::Framed);
-    c.upload_game(&flat_shot([0xc0, 0xc0, 0xc0]));
+    c.upload_game(&flat_shot([0xc0, 0xc0, 0xc0]), (SRC_W, SRC_H));
     c.draw_game();
     let (w, h) = canvas_size(window);
     (c.read_frame(), w as usize, h as usize)
@@ -706,7 +706,10 @@ fn stretched_gb_grid(c: &mut Compositor, window: (u32, u32)) -> (Vec<u8>, usize,
     c.set_screen_effect(ScreenEffect::Grid);
     c.set_screen_power(1.0);
     c.begin_frame(slot_gfx::Layout::Framed);
-    c.upload_game(&gb_shaped(|_, _| [0xc0, 0xc0, 0xc0], [0, 0, 0]));
+    c.upload_game(
+        &gb_shaped(|_, _| [0xc0, 0xc0, 0xc0], [0, 0, 0]),
+        (SRC_W, SRC_H),
+    );
     c.draw_game();
     let (w, h) = canvas_size(window);
     (c.read_frame(), w as usize, h as usize)
@@ -749,7 +752,7 @@ fn simpletex_shows_a_grey_paper_as_grey() {
     c.set_screen_effect(ScreenEffect::Simpletex);
     c.set_screen_power(1.0);
     c.begin_frame(slot_gfx::Layout::Framed);
-    c.upload_game(&flat_shot([0xff, 0xff, 0xff]));
+    c.upload_game(&flat_shot([0xff, 0xff, 0xff]), (SRC_W, SRC_H));
     c.draw_game();
     let got = px(&c.read_frame(), OUT_W as usize / 2, OUT_H as usize / 2);
     assert!(
@@ -767,7 +770,7 @@ fn the_dot_shader_keeps_a_white_screen_a_little_over_half_lit() {
     c.set_screen_effect(ScreenEffect::Dot);
     c.set_screen_power(1.0);
     c.begin_frame(slot_gfx::Layout::Framed);
-    c.upload_game(&flat_shot([0xff, 0xff, 0xff]));
+    c.upload_game(&flat_shot([0xff, 0xff, 0xff]), (SRC_W, SRC_H));
     c.draw_game();
     let frame = c.read_frame();
     let (x0, y0) = (OUT_W as usize / 2 / 3 * 3, OUT_H as usize / 2 / 3 * 3);
