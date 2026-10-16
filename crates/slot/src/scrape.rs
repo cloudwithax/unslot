@@ -23,7 +23,7 @@ pub const CACHE: &str = "System/Cache/Scraper";
 pub const SS_CONF: &str = "Config/screenscraper.conf";
 const DATS: &str = "https://raw.githubusercontent.com/libretro/libretro-database/master/metadat";
 const THUMBS: &str = "https://thumbnails.libretro.com";
-const SS_API: &str = "https://api.screenscraper.fr/api2/jeuInfos.php";
+const SS_API: &str = "https://www.screenscraper.fr/api2/jeuInfos.php";
 /// Bigger than any cartridge; a disc is matched by name instead of read whole.
 const CRC_MAX: u64 = 64 << 20;
 /// How many names a game is looked for under before it is given up on.
