@@ -1,6 +1,6 @@
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr, CString};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -23,6 +23,33 @@ const PERIOD_FRAMES: usize = 512;
 const RELEASE_AFTER: Duration = Duration::from_secs(3);
 
 const DEVICES: [&str; 4] = ["plug:default", "default", "plughw:0,0", "hw:0,0"];
+
+/// A device to try before the built-in ones: Bluetooth headphones, while they are connected.
+static ROUTE: Mutex<Option<String>> = Mutex::new(None);
+/// Bumped each time the route changes, so the output thread knows to reopen.
+static ROUTE_CHANGES: AtomicU64 = AtomicU64::new(0);
+
+/// Sends the sound to `device` first, or back to the built-in output with None. The output
+/// thread lets go of what it has and opens the new one with the next sound it plays.
+pub fn set_route(device: Option<String>) {
+    let mut route = ROUTE.lock().unwrap_or_else(|e| e.into_inner());
+    if *route != device {
+        eprintln!(
+            "slot: audio route {}",
+            device.as_deref().unwrap_or("built in")
+        );
+        *route = device;
+        ROUTE_CHANGES.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+fn devices() -> Vec<String> {
+    let route = ROUTE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    route
+        .into_iter()
+        .chain(DEVICES.iter().map(|d| d.to_string()))
+        .collect()
+}
 
 type PcmOpen = unsafe extern "C" fn(*mut *mut c_void, *const c_char, c_int, c_int) -> c_int;
 type PcmSetParams =
@@ -81,8 +108,8 @@ impl Alsa {
 
     fn open_pcm(&self, rate: u32) -> Result<*mut c_void, AudioError> {
         let mut last = AudioError::NoDevice;
-        for name in DEVICES {
-            let Ok(cname) = CString::new(name) else {
+        for name in devices() {
+            let Ok(cname) = CString::new(name.as_str()) else {
                 continue;
             };
             let mut pcm: *mut c_void = std::ptr::null_mut();
@@ -197,6 +224,7 @@ struct Playback {
     pcm: Option<*mut c_void>,
     rate: u32,
     failing: bool,
+    route: u64,
 }
 
 fn play(ring: &Arc<Ring>, sample_rate: u32) -> Result<Playback, AudioError> {
@@ -214,6 +242,7 @@ fn play(ring: &Arc<Ring>, sample_rate: u32) -> Result<Playback, AudioError> {
         pcm,
         rate: sample_rate,
         failing: pcm.is_none(),
+        route: ROUTE_CHANGES.load(Ordering::Relaxed),
     })
 }
 
@@ -225,6 +254,11 @@ impl Playback {
         let mut pace = Pacer::new(span);
         while !stop.load(Ordering::Relaxed) {
             ring.fill(&mut buf);
+            let route = ROUTE_CHANGES.load(Ordering::Relaxed);
+            if route != self.route {
+                self.route = route;
+                self.release();
+            }
             let hold = silence.hear(&buf, span);
             match (self.pcm, hold) {
                 (Some(_), false) => {

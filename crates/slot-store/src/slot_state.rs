@@ -222,6 +222,8 @@ pub struct SlotState {
     pub show_titles: bool,
     /// Whether the Wi-Fi is meant to be on, so it comes back on at boot.
     pub wifi: bool,
+    /// Whether Bluetooth is meant to be on, likewise.
+    pub bluetooth: bool,
     pub recents: Vec<Recent>,
     pub favorites: Vec<Recent>,
     pub shelf: Option<String>,
@@ -360,6 +362,7 @@ impl Default for SlotState {
             show_recents: false,
             show_titles: false,
             wifi: false,
+            bluetooth: false,
             recents: Vec::new(),
             favorites: Vec::new(),
             shelf: None,
@@ -452,6 +455,7 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     text.push_str(&format!("show_recents={}\n", s.show_recents as u8));
     text.push_str(&format!("show_titles={}\n", s.show_titles as u8));
     text.push_str(&format!("wifi={}\n", s.wifi as u8));
+    text.push_str(&format!("bluetooth={}\n", s.bluetooth as u8));
     text.push_str(&format!("shelf={}\n", s.shelf.as_deref().unwrap_or("")));
     text.push_str(&format!(
         "shelf_cart={}\n",
@@ -496,6 +500,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut show_recents = None;
     let mut show_titles = None;
     let mut wifi = None;
+    let mut bluetooth = None;
     let mut shelf = None;
     let mut shelf_cart = None;
     for line in text.lines().filter(|l| !l.is_empty()) {
@@ -540,6 +545,7 @@ fn parse(text: &str) -> Option<SlotState> {
             "show_recents" => show_recents = flag(value),
             "show_titles" => show_titles = flag(value),
             "wifi" => wifi = flag(value),
+            "bluetooth" => bluetooth = flag(value),
             "shelf" => shelf = Some(value.to_string()).filter(|v| !v.is_empty()),
             "shelf_cart" => shelf_cart = recent_value(value),
             _ => {}
@@ -590,6 +596,7 @@ fn parse(text: &str) -> Option<SlotState> {
         show_recents: show_recents.unwrap_or(fallback.show_recents),
         show_titles: show_titles.unwrap_or(fallback.show_titles),
         wifi: wifi.unwrap_or(fallback.wifi),
+        bluetooth: bluetooth.unwrap_or(fallback.bluetooth),
         recents: Vec::new(),
         favorites: Vec::new(),
         shelf,

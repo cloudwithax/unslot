@@ -212,3 +212,92 @@ fn the_pretend_radio_takes_the_password_it_says_it_does() {
         "the sim password is no valid WPA length"
     );
 }
+
+/// Opens the settings' Network page, turns Bluetooth on and opens its device list.
+fn on_device_list() -> (tempfile::TempDir, App) {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    let set = SlotState {
+        clock_set: true,
+        ..SlotState::default()
+    };
+    write_slot_state(d.path(), &set).expect("write slot.state");
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    a.apply(Action::QuickMenu);
+    for _ in 0..QuickRow::MAIN.len() {
+        if a.quick_menu() == Some(QuickRow::Network) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    press(&mut a, Btn::A);
+    for _ in 0..QuickRow::NETWORK.len() {
+        if a.quick_menu() == Some(QuickRow::Bluetooth) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    assert_eq!(
+        a.quick_menu(),
+        Some(QuickRow::Bluetooth),
+        "no Bluetooth row"
+    );
+    assert!(a.hidden_rows().contains(&QuickRow::BtDevices));
+    press(&mut a, Btn::Right);
+    assert!(
+        read_slot_state(d.path()).bluetooth,
+        "turning Bluetooth on was not saved"
+    );
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::A);
+    assert!(
+        matches!(a.phase(), Phase::Devices { .. }),
+        "{:?}",
+        a.phase()
+    );
+    until(&mut a, |a| a.bt_view().devices.len() == 3);
+    (d, a)
+}
+
+#[test]
+fn bluetooth_searches_when_nothing_is_paired_and_pairs_headphones_with_a() {
+    let (_d, mut a) = on_device_list();
+    let at = list(&a)
+        .rows
+        .iter()
+        .position(|r| r.label == "WH-1000XM4")
+        .expect("the headphones were not found");
+    assert_eq!(list(&a).rows[at].detail, "Headphones");
+    go_to_row(&mut a, at);
+    press(&mut a, Btn::A);
+    until(&mut a, |a| a.bt_view().audio().is_some());
+    let page = list(&a);
+    assert_eq!(
+        page.rows[0].label, "WH-1000XM4",
+        "the connected device is not first"
+    );
+    assert_eq!(page.rows[0].detail, "Connected");
+    assert_eq!(page.status, "1 device connected");
+}
+
+#[test]
+fn a_device_that_will_not_pair_says_so() {
+    let (_d, mut a) = on_device_list();
+    let at = list(&a)
+        .rows
+        .iter()
+        .position(|r| r.label == "Stubborn")
+        .expect("listed");
+    go_to_row(&mut a, at);
+    press(&mut a, Btn::A);
+    until(&mut a, |a| a.bt_view().error.is_some());
+    assert_eq!(list(&a).status, "Could not connect to Stubborn");
+}
+
+#[test]
+fn x_forgets_a_paired_device() {
+    let (_d, mut a) = on_device_list();
+    press(&mut a, Btn::A);
+    until(&mut a, |a| a.bt_view().devices.iter().any(|d| d.paired));
+    press(&mut a, Btn::X);
+    until(&mut a, |a| !a.bt_view().devices.iter().any(|d| d.paired));
+}

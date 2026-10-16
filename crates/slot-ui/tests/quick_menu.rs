@@ -179,6 +179,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::PlayGameplay,
             QuickRow::Network,
             QuickRow::WifiNetworks,
+            QuickRow::BtDevices,
         ]
         .into_iter()
         .chain(Platform::ALL.map(QuickRow::ScreenOf))

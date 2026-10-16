@@ -7,6 +7,7 @@ use slot_retro::Sticks;
 
 use super::evdev::{has_bit, Ev, EV_ABS};
 
+pub const ABS_X: u16 = 0x00;
 pub const ABS_Y: u16 = 0x01;
 pub const ABS_Z: u16 = 0x02;
 pub const ABS_RX: u16 = 0x03;
@@ -20,11 +21,15 @@ const DEADZONE: f32 = 0.07;
 /// The axes that carry left x, left y, right x and right y on a node, from its `abs` capability
 /// bitmap, or None for a node with no sticks.
 ///
-/// Anbernic's stock kernel puts them on Z, RX, RY and RZ. A stickless board advertises RX, RY
-/// and RZ too, which never move, but never Z. muOS's device tree moves the left stick to Y and Z
-/// and has no RX, so that layout is told apart by it.
+/// A gamepad, a Bluetooth one say, puts its sticks on X, Y, RX and RY, with the triggers on Z
+/// and RZ. Anbernic's stock kernel has no X or Y and puts them on Z, RX, RY and RZ instead. A
+/// stickless board advertises RX, RY and RZ too, which never move, but never Z. muOS's device
+/// tree moves the left stick to Y and Z and has no X or RX, so that layout is told apart by them.
 pub fn layout(abs: &str) -> Option<[u16; 4]> {
     let has = |code| has_bit(abs, code);
+    if has(ABS_X) && has(ABS_Y) {
+        return Some([ABS_X, ABS_Y, ABS_RX, ABS_RY]);
+    }
     if has(ABS_Z) && has(ABS_RX) && has(ABS_RY) && has(ABS_RZ) {
         return Some([ABS_Z, ABS_RX, ABS_RY, ABS_RZ]);
     }
@@ -140,6 +145,12 @@ mod tests {
     fn the_stock_layout_is_read_off_a_stick_models_bitmap() {
         // An RG34XXSP: Z, RX, RY, RZ and the hat.
         assert_eq!(layout("3003c"), Some([ABS_Z, ABS_RX, ABS_RY, ABS_RZ]));
+    }
+
+    #[test]
+    fn a_gamepads_sticks_are_x_y_rx_and_ry_not_its_triggers() {
+        // X, Y, Z, RX, RY, RZ and the hat: an Xbox or 8BitDo pad.
+        assert_eq!(layout("3003f"), Some([ABS_X, ABS_Y, ABS_RX, ABS_RY]));
     }
 
     #[test]

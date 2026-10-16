@@ -43,6 +43,8 @@ pub enum QuickRow {
     Network,
     Wifi,
     WifiNetworks,
+    Bluetooth,
+    BtDevices,
     /// A platform's own page under Screen, and the rows on it.
     ScreenOf(Platform),
     ShaderOf(Platform),
@@ -51,7 +53,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 32] = [
+const GENERIC: [QuickRow; 34] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -84,6 +86,8 @@ const GENERIC: [QuickRow; 32] = [
     QuickRow::Network,
     QuickRow::Wifi,
     QuickRow::WifiNetworks,
+    QuickRow::Bluetooth,
+    QuickRow::BtDevices,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -138,7 +142,12 @@ impl QuickRow {
         QuickRow::About,
     ];
 
-    pub const NETWORK: [QuickRow; 2] = [QuickRow::Wifi, QuickRow::WifiNetworks];
+    pub const NETWORK: [QuickRow; 4] = [
+        QuickRow::Wifi,
+        QuickRow::WifiNetworks,
+        QuickRow::Bluetooth,
+        QuickRow::BtDevices,
+    ];
 
     pub const GENERAL: [QuickRow; 6] = [
         QuickRow::Wallpaper,
@@ -248,7 +257,9 @@ impl QuickRow {
                 QuickRow::PLAY.to_vec()
             }
             QuickRow::PlayScreen | QuickRow::PlayGameplay => QuickRow::SETTINGS.to_vec(),
-            QuickRow::Wifi | QuickRow::WifiNetworks => QuickRow::NETWORK.to_vec(),
+            QuickRow::Wifi | QuickRow::WifiNetworks | QuickRow::Bluetooth | QuickRow::BtDevices => {
+                QuickRow::NETWORK.to_vec()
+            }
             QuickRow::Shader | QuickRow::ColourCorrection | QuickRow::Palette | QuickRow::Bezel => {
                 QuickRow::PLAY_SCREEN.to_vec()
             }
@@ -347,6 +358,8 @@ impl QuickRow {
             QuickRow::Network => "Network",
             QuickRow::Wifi => "Wi-Fi",
             QuickRow::WifiNetworks => "Networks",
+            QuickRow::Bluetooth => "Bluetooth",
+            QuickRow::BtDevices => "Devices",
         }
     }
 
@@ -367,6 +380,7 @@ impl QuickRow {
                 | QuickRow::ScreenOf(_)
                 | QuickRow::Network
                 | QuickRow::WifiNetworks
+                | QuickRow::BtDevices
         )
     }
 

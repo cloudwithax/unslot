@@ -2,6 +2,7 @@ pub mod app;
 pub mod audio;
 pub mod baseos;
 pub mod bezel;
+pub mod bluetooth;
 pub mod boot_time;
 pub mod bootlogo;
 pub mod build_info;

@@ -22,6 +22,7 @@ use slot_ui::{
 };
 
 use crate::audio::Sfx;
+use crate::bluetooth::{Bluetooth, BtBusy, BtView};
 use crate::core_picker::{Chip, CorePicker, Outcome, Press};
 use crate::link_kind::{link_carried, link_kind, serial_option, LinkKind};
 use crate::link_radio::{radio_jobs, LinkRole, RadioJob, RadioJobs};
@@ -269,6 +270,10 @@ pub enum Phase {
         cursor: usize,
         note: Option<String>,
     },
+    /// The Bluetooth devices paired or nearby.
+    Devices {
+        cursor: usize,
+    },
     /// Typing for the network page, which it goes back to at `cursor`.
     Keyboard {
         keys: Keyboard,
@@ -449,6 +454,8 @@ pub struct App {
     state_writer: crate::state_writer::StateWriter,
     wifi: Option<Wifi>,
     wifi_view: WifiView,
+    bluetooth: Option<Bluetooth>,
+    bt_view: BtView,
     page_face: Option<(TexId, u32, u32)>,
 }
 
@@ -615,6 +622,8 @@ impl App {
             powering_off: false,
             wifi: None,
             wifi_view: WifiView::default(),
+            bluetooth: None,
+            bt_view: BtView::default(),
             page_face: None,
         }
     }
@@ -632,6 +641,13 @@ impl App {
             wifi.turn_on();
         }
         app.wifi = Some(wifi);
+        if crate::bluetooth::present() {
+            let bluetooth = Bluetooth::for_card(root);
+            if app.state.bluetooth {
+                bluetooth.turn_on();
+            }
+            app.bluetooth = Some(bluetooth);
+        }
         app.restock_recents();
         app.restock_favorites();
         if let Some((at, i)) = app.remembered_seat() {
@@ -739,7 +755,7 @@ impl App {
         }
         match self.phase {
             Phase::SetClock { .. } | Phase::Keyboard { .. } => true,
-            Phase::QuickMenu { .. } | Phase::Networks { .. } => vertical,
+            Phase::QuickMenu { .. } | Phase::Networks { .. } | Phase::Devices { .. } => vertical,
             Phase::Shelf => vertical && self.core_picker.is_none(),
             Phase::Polaroids { .. } => !vertical,
             Phase::Playing { .. } => vertical && self.in_game_menu.is_some(),
@@ -991,6 +1007,8 @@ impl App {
             | QuickRow::WifiNetworks
             | QuickRow::Bezel => None,
             QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
+            QuickRow::Bluetooth => Some(QuickValue::flag(self.state.bluetooth)),
+            QuickRow::BtDevices => None,
         }
     }
 
@@ -1179,6 +1197,11 @@ impl App {
         let mut hidden = vec![QuickRow::Disc];
         if !self.state.wifi {
             hidden.push(QuickRow::WifiNetworks);
+        }
+        match self.bluetooth.is_some() {
+            true if !self.state.bluetooth => hidden.push(QuickRow::BtDevices),
+            true => {}
+            false => hidden.extend([QuickRow::Bluetooth, QuickRow::BtDevices]),
         }
         if !own {
             hidden.push(QuickRow::WallpaperTint);
@@ -1979,8 +2002,100 @@ impl App {
             Phase::About if action == Action::GbaDown(Btn::X) => self.begin_restart(),
             Phase::QuickMenu { row } => self.quick_menu_input(row, action),
             Phase::Networks { cursor, .. } => self.networks_input(cursor, action),
+            Phase::Devices { cursor } => self.devices_input(cursor, action),
             Phase::Keyboard { .. } => self.keyboard_input(action),
             _ => {}
+        }
+    }
+
+    fn with_bluetooth(&self, f: impl FnOnce(&Bluetooth)) {
+        if let Some(bluetooth) = &self.bluetooth {
+            f(bluetooth);
+        }
+    }
+
+    pub fn bt_view(&self) -> &BtView {
+        &self.bt_view
+    }
+
+    fn devices_input(&mut self, cursor: usize, action: Action) {
+        let devices = self.bt_view.devices.clone();
+        let n = devices.len().max(1);
+        let cursor = cursor.min(n - 1);
+        let picked = devices.get(cursor);
+        let cursor = match action {
+            Action::GbaDown(Btn::Up) => (cursor + n - 1) % n,
+            Action::GbaDown(Btn::Down) => (cursor + 1) % n,
+            Action::GbaDown(Btn::Y) => {
+                self.with_bluetooth(Bluetooth::search);
+                cursor
+            }
+            Action::GbaDown(Btn::X) => {
+                if let Some(d) = picked.filter(|d| d.paired) {
+                    self.with_bluetooth(|b| b.forget(&d.mac));
+                }
+                cursor
+            }
+            Action::GbaDown(Btn::A) => {
+                match picked {
+                    Some(d) if d.connected => self.with_bluetooth(|b| b.disconnect(&d.mac)),
+                    Some(d) if d.paired => self.with_bluetooth(|b| b.connect(&d.mac)),
+                    Some(d) => self.with_bluetooth(|b| b.pair(&d.mac)),
+                    None => self.with_bluetooth(Bluetooth::search),
+                }
+                cursor
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::BtDevices,
+                };
+                return;
+            }
+            _ => return,
+        };
+        self.phase = Phase::Devices { cursor };
+    }
+
+    fn devices_page(&self, cursor: usize) -> ListPage {
+        let v = &self.bt_view;
+        let rows: Vec<ListRow> = v
+            .devices
+            .iter()
+            .map(|d| ListRow {
+                label: d.name.clone(),
+                detail: match (d.connected, d.paired) {
+                    (true, _) => "Connected".into(),
+                    (false, true) => "Paired".into(),
+                    (false, false) => match d.kind {
+                        crate::bluetooth::Kind::Controller => "Controller".into(),
+                        crate::bluetooth::Kind::Audio => "Headphones".into(),
+                        crate::bluetooth::Kind::Other => String::new(),
+                    },
+                },
+                bars: None,
+            })
+            .collect();
+        let status = match (&v.busy, &v.error) {
+            (BtBusy::Starting, _) => "Turning Bluetooth on...".to_string(),
+            (BtBusy::Searching, _) => "Looking for devices...".to_string(),
+            (BtBusy::Pairing(name), _) => format!("Pairing {name}..."),
+            (BtBusy::Connecting(name), _) => format!("Connecting {name}..."),
+            (BtBusy::Idle, Some(error)) => error.clone(),
+            (BtBusy::Idle, None) if rows.is_empty() => {
+                "Put a device in pairing mode, then press Y to search".to_string()
+            }
+            (BtBusy::Idle, None) => match v.devices.iter().filter(|d| d.connected).count() {
+                0 => "Nothing connected".to_string(),
+                1 => "1 device connected".to_string(),
+                n => format!("{n} devices connected"),
+            },
+        };
+        ListPage {
+            title: "Bluetooth".into(),
+            status,
+            cursor: cursor.min(rows.len().saturating_sub(1)),
+            rows,
+            hints: "A connect   X forget   Y search   B back".into(),
         }
     }
 
@@ -2153,6 +2268,7 @@ impl App {
                 self.networks_page(*cursor, note.as_deref()),
             )),
             Phase::Keyboard { keys, .. } => Some(PageModel::Keys(keys.clone())),
+            Phase::Devices { cursor } => Some(PageModel::List(self.devices_page(*cursor))),
             _ => None,
         }
     }
@@ -2301,6 +2417,13 @@ impl App {
                 self.phase = clock_screen(self.utc_secs(), self.state.utc_offset_min, true);
             }
             QuickRow::About => self.phase = Phase::About,
+            QuickRow::BtDevices => {
+                self.phase = Phase::Devices { cursor: 0 };
+                // Open on what is paired; a search only when there is nothing yet.
+                if !self.bt_view.devices.iter().any(|d| d.paired) {
+                    self.with_bluetooth(Bluetooth::search);
+                }
+            }
             QuickRow::WifiNetworks => {
                 self.phase = Phase::Networks {
                     cursor: 0,
@@ -2345,12 +2468,22 @@ impl App {
             | QuickRow::Palette
             | QuickRow::BezelOf(_)
             | QuickRow::Wifi
+            | QuickRow::Bluetooth
             | QuickRow::Bezel => {}
         }
     }
 
     fn change_setting(&mut self, row: QuickRow, right: bool) {
         let row = self.playing_row(row);
+        if row == QuickRow::Bluetooth {
+            self.state.bluetooth = !self.state.bluetooth;
+            match self.state.bluetooth {
+                true => self.with_bluetooth(Bluetooth::turn_on),
+                false => self.with_bluetooth(Bluetooth::turn_off),
+            }
+            self.persist();
+            return;
+        }
         if row == QuickRow::Wifi {
             self.state.wifi = !self.state.wifi;
             match self.state.wifi {
@@ -2457,6 +2590,8 @@ impl App {
             | QuickRow::Network
             | QuickRow::Wifi
             | QuickRow::WifiNetworks
+            | QuickRow::Bluetooth
+            | QuickRow::BtDevices
             | QuickRow::Bezel => return,
         }
         self.persist();
@@ -2915,6 +3050,16 @@ impl App {
         if let Some(wifi) = &self.wifi {
             self.wifi_view = wifi.view();
         }
+        if let Some(bluetooth) = &self.bluetooth {
+            let view = bluetooth.view();
+            // Sound goes to connected headphones, and back to the speaker when they go.
+            if view.audio().map(|d| &d.mac) != self.bt_view.audio().map(|d| &d.mac) {
+                crate::audio::set_route(
+                    view.audio().map(|d| crate::bluetooth::alsa_device(&d.mac)),
+                );
+            }
+            self.bt_view = view;
+        }
         self.play_hold();
         self.repeat_held_dir();
         let offer = self.undo_label();
@@ -3309,7 +3454,7 @@ impl App {
                 self.draw_menu_footer(out);
                 return;
             }
-            Phase::Networks { .. } | Phase::Keyboard { .. } => {
+            Phase::Networks { .. } | Phase::Devices { .. } | Phase::Keyboard { .. } => {
                 slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
                 if let Some((tex, w, h)) = self.page_face {
                     let canvas = self.canvas();

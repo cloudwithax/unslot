@@ -1,8 +1,9 @@
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use slot_input::{Btn, InputSource, Millis, RawEvent};
 use slot_retro::Sticks;
@@ -30,62 +31,105 @@ pub struct DeviceInput {
 
 impl DeviceInput {
     pub fn open(root: &Path) -> Self {
-        DeviceInput::open_in(Path::new(DEV), Path::new(SYS), root, trace::enabled())
+        DeviceInput::open_in_watching(Path::new(DEV), Path::new(SYS), root, trace::enabled(), true)
     }
 
     pub fn open_in(dev: &Path, sys: &Path, root: &Path, trace: bool) -> Self {
-        let trace = trace.then(|| Trace::start(root, dev, sys)).flatten();
-        let target = crate::baseos::var("BASEOS_TARGET");
-        DeviceInput::open_traced(
-            dev,
-            sys,
-            menu_dpad_display(target.as_deref()),
-            right_stick(target.as_deref()),
-            trace,
-        )
+        DeviceInput::open_in_watching(dev, sys, root, trace, false)
     }
 
-    fn open_traced(
-        dev: &Path,
-        sys: &Path,
-        menu_dpad_display: bool,
-        right_stick: bool,
-        trace: Option<Arc<Trace>>,
-    ) -> Self {
-        let pending: Arc<Mutex<Vec<RawEvent>>> = Arc::new(Mutex::new(Vec::new()));
-        let sticks: Arc<Mutex<Sticks>> = Arc::new(Mutex::new([0; 4]));
-        for node in pick_devices(dev, sys) {
+    /// With `watch`, nodes that turn up later, a Bluetooth pad say, are opened as they appear.
+    fn open_in_watching(dev: &Path, sys: &Path, root: &Path, trace: bool, watch: bool) -> Self {
+        let trace = trace.then(|| Trace::start(root, dev, sys)).flatten();
+        let target = crate::baseos::var("BASEOS_TARGET");
+        let readers = Readers {
+            dev: dev.to_path_buf(),
+            sys: sys.to_path_buf(),
+            pending: Arc::new(Mutex::new(Vec::new())),
+            sticks: Arc::new(Mutex::new([0; 4])),
+            open: Arc::new(Mutex::new(HashSet::new())),
+            right_stick: right_stick(target.as_deref()),
+            trace,
+        };
+        readers.open_new();
+        if watch {
+            let watcher = readers.clone();
+            let spawned = std::thread::Builder::new()
+                .name("slot-input-watch".into())
+                .spawn(move || loop {
+                    std::thread::sleep(WATCH_EVERY);
+                    watcher.open_new();
+                });
+            if let Err(e) = spawned {
+                eprintln!("slot: input: watch: {e}");
+            }
+        }
+        DeviceInput {
+            pending: readers.pending,
+            sticks: readers.sticks,
+            hall: find_hall(Path::new(PSY)),
+            lid_shut: None,
+            next_lid_poll: 0,
+            menu_dpad_display: menu_dpad_display(target.as_deref()),
+        }
+    }
+}
+
+/// How often the input nodes are looked over for one that has just turned up.
+const WATCH_EVERY: Duration = Duration::from_secs(2);
+
+/// What every node's reader thread shares, and which nodes have one.
+#[derive(Clone)]
+struct Readers {
+    dev: PathBuf,
+    sys: PathBuf,
+    pending: Arc<Mutex<Vec<RawEvent>>>,
+    sticks: Arc<Mutex<Sticks>>,
+    open: Arc<Mutex<HashSet<PathBuf>>>,
+    right_stick: bool,
+    trace: Option<Arc<Trace>>,
+}
+
+impl Readers {
+    /// Starts a reader on each wanted node that has none yet.
+    fn open_new(&self) {
+        for node in pick_devices(&self.dev, &self.sys) {
+            if !self
+                .open
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(node.clone())
+            {
+                continue;
+            }
             eprintln!(
                 "slot: input {} ({})",
                 node.display(),
-                device_name(sys, &node)
+                device_name(&self.sys, &node)
             );
-            quicken_poll(sys, &node);
-            let axes = stick_axes(sys, &node);
+            quicken_poll(&self.sys, &node);
+            let axes = stick_axes(&self.sys, &node);
             if let Some(axes) = axes {
                 eprintln!("slot: input {}: sticks on {axes:?}", node.display());
             }
-            let queue = pending.clone();
-            let out = sticks.clone();
+            let shared = self.clone();
             let name = node.display().to_string();
-            let trace = trace.clone();
             let spawned = std::thread::Builder::new()
                 .name(format!("slot-input-{name}"))
                 .spawn(move || {
-                    let sticks = axes.map(|axes| (axes, right_stick, out));
-                    read_node(&node, &queue, sticks, trace.as_deref())
+                    let sticks = axes.map(|axes| (axes, shared.right_stick, shared.sticks.clone()));
+                    read_node(&node, &shared.pending, sticks, shared.trace.as_deref());
+                    // The node went away, a pad switched off say; it is opened afresh if it
+                    // comes back.
+                    shared
+                        .open
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&node);
                 });
             if let Err(e) = spawned {
                 eprintln!("slot: input {name}: {e}");
             }
-        }
-        DeviceInput {
-            pending,
-            sticks,
-            hall: find_hall(Path::new(PSY)),
-            lid_shut: None,
-            next_lid_poll: 0,
-            menu_dpad_display,
         }
     }
 }
@@ -318,6 +362,61 @@ fn menu_dpad_display(target: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn node(sys: &Path, dev: &Path, name: &str, events: &[u8]) {
+        let caps = sys.join(name).join("device/capabilities");
+        std::fs::create_dir_all(&caps).unwrap();
+        std::fs::write(
+            caps.join("key"),
+            "1000000000000 0 0 0 0
+",
+        )
+        .unwrap();
+        std::fs::write(
+            sys.join(name).join("device/name"),
+            "pad
+",
+        )
+        .unwrap();
+        std::fs::write(dev.join(name), events).unwrap();
+    }
+
+    fn press_a() -> Vec<u8> {
+        let mut ev = vec![0u8; EVENT_BYTES];
+        ev[16..18].copy_from_slice(&EV_KEY.to_le_bytes());
+        ev[18..20].copy_from_slice(&0x130u16.to_le_bytes());
+        ev[20..24].copy_from_slice(&1i32.to_le_bytes());
+        ev
+    }
+
+    #[test]
+    fn a_pad_that_turns_up_later_is_read_once_it_does() {
+        let d = tempfile::tempdir().unwrap();
+        let (dev, sys) = (d.path().join("dev"), d.path().join("sys"));
+        std::fs::create_dir_all(&dev).unwrap();
+        node(&sys, &dev, "event1", &[]);
+        let readers = Readers {
+            dev: dev.clone(),
+            sys: sys.clone(),
+            pending: Arc::new(Mutex::new(Vec::new())),
+            sticks: Arc::new(Mutex::new([0; 4])),
+            open: Arc::new(Mutex::new(HashSet::new())),
+            right_stick: true,
+            trace: None,
+        };
+        readers.open_new();
+        node(&sys, &dev, "event5", &press_a());
+        readers.open_new();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while readers.pending.lock().unwrap().is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            readers.pending.lock().unwrap().as_slice(),
+            [RawEvent::Down(Btn::A)],
+            "the pad that turned up later was never read"
+        );
+    }
 
     #[test]
     fn only_the_one_stick_rg40xx_v_leaves_its_right_stick_at_rest() {

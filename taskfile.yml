@@ -97,6 +97,7 @@ tasks:
       - sh card/test-coresave.sh
       - sh card/test-launch.sh
       - sh card/test-slotwifi.sh
+      - sh card/test-slotbt.sh
 
   core:
     desc: >-
