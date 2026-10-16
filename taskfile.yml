@@ -398,6 +398,20 @@ tasks:
         done
       - 'echo "device tree ready at {{.OUT}}, copy its contents to SD2"'
 
+  image:device:
+    desc: >-
+      Build a card image to flash to TF1: BaseOS for TARGET (default rg34xxsp) with unslot already
+      on its BASEOS partition, into OUT (default unslot-TARGET.img.zip). Needs a Linux host
+    vars:
+      TARGET: '{{.TARGET | default "rg34xxsp"}}'
+      OUT: '{{.OUT | default (print "unslot-" .TARGET ".img.zip")}}'
+    cmds:
+      - task: dist:device
+        vars:
+          OUT: dist-device
+          VERSION: '{{.VERSION | default ""}}'
+      - sh tools/image/build.sh {{.TARGET}} dist-device {{.OUT}}
+
   dist:update:
     desc: >-
       Build the update pack PACK (default ./MinUI.zip) from a fresh device tree. At the root of a

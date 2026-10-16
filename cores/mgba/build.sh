@@ -33,7 +33,10 @@ build() {
 		if command -v apt-get >/dev/null 2>&1; then
 			sed -i '/bullseye-security/d' /etc/apt/sources.list
 			apt-get -o Acquire::Check-Valid-Until=false update -qq
-			apt-get install -y -qq --no-install-recommends cmake >/dev/null
+			# Under QEMU, as on an x86 host building for arm64, libc-bin's ldconfig trigger
+			# segfaults after cmake itself is in; that is no reason to stop.
+			apt-get install -y -qq --no-install-recommends cmake >/dev/null ||
+				command -v cmake >/dev/null 2>&1 || exit 1
 		else
 			echo "building mGBA needs cmake: brew install cmake" >&2
 			exit 1
