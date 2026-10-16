@@ -9,9 +9,12 @@ The first unslot, forked from slot 1.7.0.
 - Analog sticks on the models that have them.
 - Services: SSH, card sharing over SMB, Tailscale and WireGuard.
 - Updates over the air for unslot and BaseOS. A release's `MinUI.zip` also turns a slot card into an unslot one.
-- Game Art: labels found online, by CRC and file name.
+- Game Art: labels found online, by CRC and file name. It keeps going while you play, and each label shows on the shelf as soon as it is found.
 - Twelve bundled wallpapers, and JPG wallpapers of your own.
 - Wi-Fi and Bluetooth in the shelf footer, and the unslot name and logo throughout.
+- Moulded plastic grain and softer light on the new systems' carts, cards and discs.
+- Every page's buttons are shown with their icons and say what they will do for the row you are on.
+- Menu sounds recorded from real buttons and switches, and haptics for a cart going home, a setting changed or something refused. Each can be turned off in Settings → General.
 
 ## slot
 

@@ -17,6 +17,10 @@ pub enum QuickRow {
     DateTime,
     /// The clock's hours: 24 or 12.
     Clock,
+    /// Whether the menus click and clack.
+    MenuSounds,
+    /// Whether the menus nudge the rumble motor.
+    Haptics,
     About,
     Game,
     EjectSave,
@@ -61,7 +65,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 38] = [
+const GENERIC: [QuickRow; 40] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -100,6 +104,8 @@ const GENERIC: [QuickRow; 38] = [
     QuickRow::Services,
     QuickRow::Updates,
     QuickRow::GameArt,
+    QuickRow::MenuSounds,
+    QuickRow::Haptics,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -164,7 +170,7 @@ impl QuickRow {
         QuickRow::GameArt,
     ];
 
-    pub const GENERAL: [QuickRow; 7] = [
+    pub const GENERAL: [QuickRow; 9] = [
         QuickRow::Wallpaper,
         QuickRow::WallpaperTint,
         QuickRow::Theme,
@@ -172,6 +178,8 @@ impl QuickRow {
         QuickRow::ShowTitles,
         QuickRow::DateTime,
         QuickRow::Clock,
+        QuickRow::MenuSounds,
+        QuickRow::Haptics,
     ];
 
     pub const GAME: [QuickRow; 8] = [
@@ -267,6 +275,8 @@ impl QuickRow {
             | QuickRow::WallpaperTint
             | QuickRow::DateTime
             | QuickRow::Clock
+            | QuickRow::MenuSounds
+            | QuickRow::Haptics
             | QuickRow::Theme
             | QuickRow::Recents
             | QuickRow::ShowTitles => QuickRow::GENERAL.to_vec(),
@@ -352,6 +362,8 @@ impl QuickRow {
             QuickRow::Rumble => "Rumble",
             QuickRow::DateTime => "Date & Time",
             QuickRow::Clock => "Clock",
+            QuickRow::MenuSounds => "Menu Sounds",
+            QuickRow::Haptics => "Haptics",
             QuickRow::About => "About",
             QuickRow::Game => "Gameplay",
             QuickRow::EjectSave => "Auto Save on Eject",

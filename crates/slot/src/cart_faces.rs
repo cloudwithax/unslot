@@ -66,6 +66,7 @@ impl CartFaces {
             self.requeue(app, &wants);
             self.asked = wants;
         }
+        self.rebuild(app);
         let mut waiting: Vec<Key> = self
             .asked
             .iter()
@@ -93,6 +94,28 @@ impl CartFaces {
                 continue;
             }
             if let Some(cart) = app.face_cart(w.shelf, w.index) {
+                queue.jobs.push_back((key, cart.clone()));
+                self.pending.insert(key);
+            }
+        }
+        wake.notify_all();
+    }
+
+    /// Queues the carts that have been given a label since their face was built. Nothing waits
+    /// on these: the old face is drawn until the new one is placed over it.
+    fn rebuild(&mut self, app: &mut App) {
+        let relabelled = app.take_relabelled();
+        if relabelled.is_empty() {
+            return;
+        }
+        let (lock, wake) = &*self.queue;
+        let mut queue = lock.lock().unwrap_or_else(|e| e.into_inner());
+        for key in relabelled {
+            if self.pending.contains(&key) {
+                // Queued, but maybe with the cart as it was: build it from the cart as it is.
+                queue.jobs.retain(|(k, _)| *k != key);
+            }
+            if let Some(cart) = app.face_cart(key.0, key.1) {
                 queue.jobs.push_back((key, cart.clone()));
                 self.pending.insert(key);
             }

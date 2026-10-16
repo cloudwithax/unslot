@@ -2,7 +2,7 @@
 //! into one picture, like the lists.
 
 use crate::list_page::{LIST_H, LIST_W};
-use crate::page::{label_into, DIM, INK};
+use crate::page::{label_into, legends_into, Legend, DIM, INK};
 use crate::plate::UndoFace;
 
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -11,7 +11,7 @@ pub struct QrPage {
     pub status: String,
     /// What the code holds, written under it too for anyone without a camera.
     pub url: String,
-    pub hints: String,
+    pub legends: Vec<Legend>,
 }
 
 const TITLE_H: u32 = 32;
@@ -20,7 +20,7 @@ const STATUS_H: u32 = 26;
 const CODE_Y: u32 = 66;
 const CODE_MAX: u32 = 290;
 const URL_H: u32 = 30;
-const HINTS_H: u32 = 30;
+const HINTS_H: u32 = 40;
 /// The light margin a reader needs round the code, in modules.
 const QUIET: u32 = 3;
 const PAPER: [u8; 4] = [0xff, 0xff, 0xff, 0xff];
@@ -76,14 +76,12 @@ impl QrPage {
             16.0,
             false,
         );
-        label_into(
+        legends_into(
             &mut rgba,
             LIST_W,
             (0, LIST_H - HINTS_H, LIST_W, HINTS_H),
-            &self.hints,
-            DIM,
-            15.0,
-            false,
+            &self.legends,
+            INK,
         );
         UndoFace {
             rgba,

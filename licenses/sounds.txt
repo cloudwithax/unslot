@@ -1,0 +1,62 @@
+The menu sounds unslot plays, in crates/slot/assets/ui_*.pcm.
+
+Every one is a recording of a real object, cut from a Freesound upload released under CC0. None is
+synthesised. Each was made the same way from the source's high-quality preview (128 kbps MP3):
+decoded to 48 kHz mono, high-passed at 80 Hz (2nd-order Butterworth, zero phase) to take out rumble
+and DC, cut to one take starting 1.5 ms before its transient, faded in over 1 ms and out over the
+last 40% of its length, then levelled so the loudest 30 ms sits at the level noted below (never
+past -4 dBFS at the peak), and written as headerless signed 16-bit little-endian PCM.
+
+Sound credits
+=============
+
+Each entry: file, what it is, title, credit, licence, source page, the take used.
+CC0 items need no credit. The credit is listed anyway as a courtesy.
+
+ui_move.pcm
+  Use:     the cursor stepping through a list (kept quiet: loudest 30 ms at -28.5 dBFS)
+  Title:   gamepad controller buttons triggers bumpers joysticks.wav
+  Credit:  5ro4 (Alva Majo)
+  Licence: Creative Commons 0 (CC0 1.0), https://creativecommons.org/publicdomain/zero/1.0/
+  Source:  https://freesound.org/people/5ro4/sounds/611108/
+  Take:    a light press on an Xbox 360 pad at 11.661 s, 55 ms
+
+ui_open.pcm
+  Use:     opening or confirming (-20.5 dBFS)
+  Title:   gamepad controller buttons triggers bumpers joysticks.wav
+  Credit:  5ro4 (Alva Majo)
+  Licence: Creative Commons 0 (CC0 1.0), https://creativecommons.org/publicdomain/zero/1.0/
+  Source:  https://freesound.org/people/5ro4/sounds/611108/
+  Take:    a face-button press at 8.599 s, 110 ms
+
+ui_back.pcm
+  Use:     going back or closing (softer: -22.5 dBFS)
+  Title:   Tape Deck Buttons and Switches (Sony CFD-9 Radio/Cassette Player)
+  Credit:  Nekkowe
+  Licence: Creative Commons 0 (CC0 1.0), https://creativecommons.org/publicdomain/zero/1.0/
+  Source:  https://freesound.org/people/Nekkowe/sounds/403247/
+  Take:    a soft button press at 5.315 s, 110 ms
+
+ui_toggle.pcm
+  Use:     a setting switched (-20.5 dBFS, held to -4 dBFS peak)
+  Title:   Light switch on off.wav
+  Credit:  greatsoundstube
+  Licence: Creative Commons 0 (CC0 1.0), https://creativecommons.org/publicdomain/zero/1.0/
+  Source:  https://freesound.org/people/greatsoundstube/sounds/631534/
+  Take:    a plastic light switch flicked, from 0.547 s, 145 ms
+
+ui_shelf.pcm
+  Use:     moving to another shelf or page (-20.5 dBFS)
+  Title:   Tape Deck Buttons and Switches (Sony CFD-9 Radio/Cassette Player)
+  Credit:  Nekkowe
+  Licence: Creative Commons 0 (CC0 1.0), https://creativecommons.org/publicdomain/zero/1.0/
+  Source:  https://freesound.org/people/Nekkowe/sounds/403247/
+  Take:    a hard tape-deck key press at 2.864 s, 190 ms
+
+ui_error.pcm
+  Use:     something that can't be done (-20.5 dBFS)
+  Title:   Door Locked
+  Credit:  BenjaminNelan
+  Licence: Creative Commons 0 (CC0 1.0), https://creativecommons.org/publicdomain/zero/1.0/
+  Source:  https://freesound.org/people/BenjaminNelan/sounds/321087/
+  Take:    the dull thunk of a locked door handle at 0.260 s, 190 ms

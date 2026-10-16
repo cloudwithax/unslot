@@ -5,7 +5,8 @@
 //! symbols, Start is done, Select shows or hides a password, and Menu gives up. B never throws
 //! the text away: the projects that made it cancel moved it off for that reason.
 
-use crate::page::{label_into, over, rounded, DIM, INK, LIT, LIT_INK};
+use crate::bitmaps::ButtonLegend;
+use crate::page::{label_into, legends_into, over, rounded, Legend, DIM, INK, LIT, LIT_INK};
 use crate::plate::UndoFace;
 use crate::text;
 
@@ -300,21 +301,23 @@ impl Keyboard {
                 );
             }
         }
-        let show = match self.secret {
-            true => "  SELECT show",
-            false => "",
-        };
-        let hints = format!(
-            "A type   B delete   Y space   X shift   L1/R1 symbols{show}   START done   MENU cancel"
-        );
-        label_into(
+        let mut legends = vec![
+            Legend::new(ButtonLegend::B, "Delete"),
+            Legend::new(ButtonLegend::Y, "Space"),
+            Legend::new(ButtonLegend::X, "Shift"),
+            Legend::pair(ButtonLegend::L1, ButtonLegend::R1, "Symbols"),
+        ];
+        if self.secret {
+            legends.push(Legend::new(ButtonLegend::Select, "Show"));
+        }
+        legends.push(Legend::new(ButtonLegend::Start, "Done"));
+        legends.push(Legend::new(ButtonLegend::Menu, "Cancel"));
+        legends_into(
             &mut rgba,
             FACE_W,
             (0, FACE_H - HINTS_H, FACE_W, HINTS_H),
-            &hints,
-            DIM,
-            15.0,
-            false,
+            &legends,
+            INK,
         );
         UndoFace {
             rgba,
@@ -377,7 +380,7 @@ const KEY_H: u32 = 52;
 const GAP: u32 = 7;
 const RADIUS: u32 = 8;
 const KEY_PX: f32 = 22.0;
-const HINTS_H: u32 = 30;
+const HINTS_H: u32 = 40;
 
 const KEY: [u8; 4] = [0x2c, 0x2c, 0x32, 0xf0];
 const ARMED: [u8; 4] = [0x4a, 0x4a, 0x56, 0xf8];

@@ -1,7 +1,7 @@
 //! A page of rows slot fills at run time: the Wi-Fi networks in range, the Bluetooth devices
 //! nearby. Drawn whole into one picture each time it changes, like the keyboard.
 
-use crate::page::{label_into, label_left, rounded, DIM, INK, LIT, LIT_INK};
+use crate::page::{label_into, label_left, legends_into, rounded, Legend, DIM, INK, LIT, LIT_INK};
 use crate::plate::UndoFace;
 
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -20,7 +20,8 @@ pub struct ListPage {
     pub status: String,
     pub rows: Vec<ListRow>,
     pub cursor: usize,
-    pub hints: String,
+    /// What each button does here, for the row the cursor is on.
+    pub legends: Vec<Legend>,
 }
 
 pub const LIST_W: u32 = 680;
@@ -34,7 +35,7 @@ const STATUS_H: u32 = 26;
 const ROWS_Y: u32 = 70;
 const ROW_H: u32 = 46;
 const ROW_PAD: u32 = 18;
-const HINTS_H: u32 = 30;
+const HINTS_H: u32 = 40;
 const BARS_W: u32 = 34;
 const DETAIL_W: u32 = 150;
 
@@ -127,14 +128,12 @@ impl ListPage {
                 false,
             );
         }
-        label_into(
+        legends_into(
             &mut rgba,
             LIST_W,
             (0, LIST_H - HINTS_H, LIST_W, HINTS_H),
-            &self.hints,
-            DIM,
-            15.0,
-            false,
+            &self.legends,
+            INK,
         );
         UndoFace {
             rgba,

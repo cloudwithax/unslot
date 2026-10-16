@@ -14,11 +14,11 @@ use slot_store::{
 use slot_ui::{
     board_from, board_zoom, draw_empty_slot, draw_footer, draw_ground, draw_slot_name,
     draw_sticker, ease, footer_ink, grown, lid_at, lid_from, lift_of, on_board, repeat_gap,
-    shelf_cart_at, ClockPicker, Draw, FfState, Hud, HudKind, Icon, KeyInput, KeyOutcome, Keyboard,
-    LinkBadge, ListPage, ListRow, Millis, Mould, Placed, Polaroids, PowerChoice, QrPage, QuickMenu,
-    QuickMenuFaces, QuickRow, QuickValue, Refusal, Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H,
-    CHIP_U, CHIP_V, CHIP_W, HINT_EDGE, HOP_LIFT, MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W,
-    SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W, TURN_PAD,
+    shelf_cart_at, ButtonLegend, ClockPicker, Draw, FfState, Hud, HudKind, Icon, KeyInput,
+    KeyOutcome, Keyboard, Legend, LinkBadge, ListPage, ListRow, Millis, Mould, Placed, Polaroids,
+    PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow, QuickValue, Refusal, Shelf,
+    SlotChrome, TexId, Toast, CART_W, CHIP_H, CHIP_U, CHIP_V, CHIP_W, HINT_EDGE, HOP_LIFT, MOUTH_H,
+    REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W, TURN_PAD,
 };
 
 use crate::audio::Sfx;
@@ -442,6 +442,7 @@ pub struct App {
     video_mode: VideoMode,
     link: Option<LinkSession>,
     sfx: Option<Sfx>,
+    buzz: Option<Buzz>,
     polaroids: Option<Polaroids>,
     pending: Option<(PendingUndo, Millis)>,
     legend_faces: Vec<TexId>,
@@ -511,9 +512,38 @@ pub struct App {
     updates_view: UpdatesView,
     scraper: Option<Scraper>,
     scrape_view: ScrapeView,
+    /// How many of the scraper's new labels the shelves already show.
+    labelled: usize,
+    /// Carts given a label since their face was built, by shelf and index, for the face workers
+    /// to build again. The old face stays up until the new one is in.
+    relabelled: Vec<(usize, usize)>,
     /// Whether Game Art can ask ScreenScraper, read at boot and after a sign in.
     ss_state: SsState,
     page_face: Option<(TexId, u32, u32)>,
+}
+
+/// A nudge of the rumble motor for something done in the menus: on at `at`, for `ms`.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct Buzz {
+    pub at: Millis,
+    pub ms: Millis,
+}
+
+/// How long the motor runs for a setting changed, and for something refused. A shorter pulse
+/// does not get the motor turning.
+const BUZZ_TOGGLE_MS: Millis = 60;
+const BUZZ_REFUSE_MS: Millis = 150;
+/// For the cart going home and coming out.
+const BUZZ_SEAT_MS: Millis = 90;
+const BUZZ_EJECT_MS: Millis = 70;
+
+/// Where the player is, as the menu sounds hear it: how deep in the menus, which shelf, and
+/// what the cursor is on.
+#[derive(PartialEq, Eq, Debug)]
+struct Feel {
+    depth: usize,
+    shelf: usize,
+    spot: String,
 }
 
 const FACE_AHEAD: i32 = 8;
@@ -623,6 +653,7 @@ impl App {
             video_mode: VideoMode::default(),
             link: None,
             sfx: None,
+            buzz: None,
             polaroids: None,
             pending: None,
             legend_faces: Vec::new(),
@@ -688,6 +719,8 @@ impl App {
             updates_view: UpdatesView::default(),
             scraper: None,
             scrape_view: ScrapeView::default(),
+            labelled: 0,
+            relabelled: Vec::new(),
             ss_state: SsState::Off,
             page_face: None,
         }
@@ -1043,6 +1076,8 @@ impl App {
             QuickRow::Turbo => Some(QuickValue::flag(self.state.turbo)),
             QuickRow::Rewind => Some(QuickValue::flag(self.state.rewind)),
             QuickRow::RunAhead => QuickValue::frames(self.state.runahead),
+            QuickRow::MenuSounds => Some(QuickValue::flag(self.state.menu_sounds)),
+            QuickRow::Haptics => Some(QuickValue::flag(self.state.haptics)),
             QuickRow::Clock => Some(match self.state.clock_12h {
                 true => QuickValue::Hours12,
                 false => QuickValue::Hours24,
@@ -1530,6 +1565,44 @@ impl App {
         self.shelves.get_mut(shelf)?.1.set_interior(index, tex)
     }
 
+    /// The carts whose faces want building again, now they have a label.
+    pub fn take_relabelled(&mut self) -> Vec<(usize, usize)> {
+        std::mem::take(&mut self.relabelled)
+    }
+
+    /// Puts each label the scraper has made since last time on its cart, on every shelf the
+    /// game is on, so it shows without slot starting again.
+    fn show_scraped(&mut self) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let made = self
+            .scrape_view
+            .made
+            .get(self.labelled..)
+            .unwrap_or_default();
+        for (platform, stem) in made {
+            let label = root
+                .join("Labels")
+                .join(platform.dir_name())
+                .join(format!("{stem}.png"));
+            for (at, (_, shelf)) in self.shelves.iter_mut().enumerate() {
+                for i in 0..shelf.carts.len() {
+                    let cart = &mut shelf.carts[i];
+                    if cart.platform != *platform || cart.stem != *stem {
+                        continue;
+                    }
+                    cart.label = Some(label.clone());
+                    // A cart with no face yet gets one with the label when it comes into view.
+                    if shelf.face(i).is_some() {
+                        self.relabelled.push((at, i));
+                    }
+                }
+            }
+        }
+        self.labelled = self.scrape_view.made.len();
+    }
+
     pub fn shed_faces(&mut self) -> Vec<TexId> {
         let neighbours = self.neighbour_shelves();
         let mut shed = std::mem::take(&mut self.orphaned);
@@ -1993,6 +2066,119 @@ impl App {
     }
 
     pub fn apply(&mut self, action: Action) {
+        let before = (self.feel(), self.state.clone());
+        self.act(action);
+        self.answer(action, before);
+    }
+
+    /// Where the player is in the menus, or None while a cart goes in or out or the screen is
+    /// off, which have their own sounds or none. A game with no menu over it is the top.
+    fn feel(&self) -> Option<Feel> {
+        let hops = |row: QuickRow| {
+            std::iter::successors(row.parent(), |r| r.parent())
+                .take(8)
+                .count()
+        };
+        let (depth, spot) = match &self.phase {
+            Phase::Shelf => match &self.core_picker {
+                Some(picker) => (1, format!("{:?}", picker.seat())),
+                None => (0, self.shelf().index.to_string()),
+            },
+            Phase::QuickMenu { row } => (1 + hops(*row), format!("{row:?}")),
+            Phase::About => (2, String::new()),
+            Phase::SetClock { picker, .. } => (3, format!("{picker:?}")),
+            Phase::Networks { cursor, .. }
+            | Phase::Devices { cursor }
+            | Phase::Services { cursor, .. }
+            | Phase::Updates { cursor }
+            | Phase::GameArt { cursor, .. } => (3, cursor.to_string()),
+            Phase::Keyboard { keys, .. } => (4, format!("{keys:?}")),
+            Phase::TailscaleLogin => (4, String::new()),
+            Phase::Polaroids { .. } => (
+                1,
+                format!("{:?}", self.polaroids.as_ref().map(Polaroids::dots)),
+            ),
+            Phase::Playing { .. } => match (&self.game_menu, self.in_game_menu) {
+                (Some(menu), _) => (1, format!("{menu:?}")),
+                (None, Some(row)) => (1 + hops(row), format!("{row:?}")),
+                (None, None) => (0, String::new()),
+            },
+            Phase::Inserting { .. } | Phase::Ejecting { .. } | Phase::Doze { .. } => return None,
+        };
+        Some(Feel {
+            depth,
+            shelf: self.shelf_at,
+            spot,
+        })
+    }
+
+    /// The click for what `action` did: in a page, back out of one, along a list, to another
+    /// shelf, or a setting changed. A on a page of actions clicks whatever it starts.
+    fn answer(&mut self, action: Action, (before, state): (Option<Feel>, SlotState)) {
+        // Only the buttons that work the menus: not volume, the screen's light or the hotkeys.
+        let menu_button = matches!(
+            action,
+            Action::GbaDown(_)
+                | Action::ShelfLeft
+                | Action::ShelfRight
+                | Action::QuickMenu
+                | Action::GameMenu
+                | Action::Polaroids
+        );
+        let (true, Some(before), Some(after)) = (menu_button, before, self.feel()) else {
+            return;
+        };
+        // The game's own buttons.
+        if before.depth == 0 && after.depth == 0 && matches!(self.phase, Phase::Playing { .. }) {
+            return;
+        }
+        let on_page = matches!(
+            self.phase,
+            Phase::Networks { .. }
+                | Phase::Devices { .. }
+                | Phase::Services { .. }
+                | Phase::Updates { .. }
+                | Phase::GameArt { .. }
+        );
+        let sfx = match () {
+            _ if after.depth > before.depth => Sfx::Open,
+            _ if after.depth < before.depth => Sfx::Back,
+            _ if after.shelf != before.shelf => Sfx::Shelf,
+            _ if after.spot != before.spot => Sfx::Move,
+            _ if self.state != state => Sfx::Toggle,
+            _ if on_page && action == Action::GbaDown(Btn::A) => Sfx::Open,
+            _ => return,
+        };
+        self.cue(sfx);
+        if sfx == Sfx::Toggle {
+            self.buzz(BUZZ_TOGGLE_MS, 0);
+        }
+    }
+
+    /// Plays a menu sound, unless they are off or the cart is making its own.
+    fn cue(&mut self, sfx: Sfx) {
+        if !self.state.menu_sounds || self.sfx.is_some_and(Sfx::is_cart) {
+            return;
+        }
+        self.sfx = Some(sfx);
+    }
+
+    /// Runs the motor for `ms`, starting `after` from now, unless the menus are not to.
+    fn buzz(&mut self, ms: Millis, after: Millis) {
+        if !self.state.haptics {
+            return;
+        }
+        self.buzz = Some(Buzz {
+            at: self.now() + after,
+            ms,
+        });
+    }
+
+    pub fn take_buzz(&mut self) -> Option<Buzz> {
+        self.buzz.take()
+    }
+
+    fn act(&mut self, action: Action) {
         self.track_held_dir(action);
         match action {
             Action::LidClose => return self.doze(),
@@ -2273,19 +2459,29 @@ impl App {
             _ => address,
         };
         let row = ServiceRow::ALL[cursor.min(ServiceRow::ALL.len() - 1)];
-        let hints = match (row, &v.tailnet) {
-            (ServiceRow::Tailscale, Tailnet::SignIn(_)) if self.state.tailscale => {
-                "A sign in   B back"
-            }
-            (ServiceRow::Vpn, _) => "A next tunnel   B back",
-            _ => "A change   B back",
+        let turn = |on: bool| if on { "Turn Off" } else { "Turn On" };
+        let action = match row {
+            ServiceRow::Ssh => turn(self.state.ssh),
+            ServiceRow::Sharing => turn(self.state.samba),
+            ServiceRow::Tailscale => match &v.tailnet {
+                Tailnet::SignIn(_) if self.state.tailscale => "Sign In",
+                _ => turn(self.state.tailscale),
+            },
+            ServiceRow::Vpn => match self.state.vpn {
+                Some(_) => "Change Tunnel",
+                None => "Turn On",
+            },
+            ServiceRow::Password => match self.state.password {
+                Some(_) => "Change Password",
+                None => "Set Password",
+            },
         };
         ListPage {
             title: "Services".into(),
             status,
             cursor: cursor.min(rows.len() - 1),
             rows,
-            hints: hints.into(),
+            legends: with_action(Some(action)),
         }
     }
 
@@ -2375,12 +2571,6 @@ impl App {
                     (cursor, None)
                 }
             }
-            Action::GbaDown(Btn::Start)
-                if !self.scrape_view.made.is_empty() && !self.scrape_view.running =>
-            {
-                self.begin_restart();
-                (cursor, None)
-            }
             Action::GbaDown(Btn::B) | Action::QuickMenu => {
                 self.phase = Phase::QuickMenu {
                     row: QuickRow::GameArt,
@@ -2403,12 +2593,15 @@ impl App {
             let has = carts.iter().filter(|(_, has)| *has).count();
             format!("{has} of {}", carts.len())
         };
+        let platforms = self.art_platforms();
+        let missing =
+            |platform: Option<Platform>| self.art_carts(platform).iter().any(|(_, has)| !has);
         let rows: Vec<ListRow> = std::iter::once(ListRow {
             label: "All systems".into(),
             detail: count(None),
             bars: None,
         })
-        .chain(self.art_platforms().into_iter().map(|p| ListRow {
+        .chain(platforms.iter().map(|&p| ListRow {
             label: p.name().into(),
             detail: count(Some(p)),
             bars: None,
@@ -2434,7 +2627,7 @@ impl App {
             _ if note.is_some() => note.unwrap_or_default().to_string(),
             _ if v.error.is_some() => v.error.clone().unwrap_or_default(),
             _ if made > 0 => format!(
-                "{made} new label{}. Press START to restart and see them",
+                "Added {made} label{} to the shelves",
                 if made == 1 { "" } else { "s" }
             ),
             _ if v.missed > 0 => format!(
@@ -2450,17 +2643,25 @@ impl App {
                 SsState::Off => "Art from libretro-thumbnails".into(),
             },
         };
-        let hints = match (on_ss, made > 0 && !v.running) {
-            (true, _) => "A sign in   B back",
-            (false, true) => "A find missing art   START restart   B back",
-            (false, false) => "A find missing art   B back",
+        let action = match () {
+            _ if on_ss => Some(match self.ss_state {
+                SsState::Off | SsState::On(None) => "Sign In",
+                SsState::NoDevId(_) | SsState::On(Some(_)) => "Change Account",
+            }),
+            _ if v.running => None,
+            _ => missing(
+                cursor
+                    .checked_sub(1)
+                    .and_then(|i| platforms.get(i).copied()),
+            )
+            .then_some("Find Missing Art"),
         };
         ListPage {
             title: "Game Art".into(),
             status,
             cursor: cursor.min(rows.len() - 1),
             rows,
-            hints: hints.into(),
+            legends: with_action(action),
         }
     }
 
@@ -2513,9 +2714,9 @@ impl App {
             Stage::Unchecked => t.current.clone().unwrap_or_else(|| "Unknown".into()),
             Stage::Checking => "Checking".into(),
             Stage::UpToDate => "Up to date".into(),
-            Stage::Available(version) => format!("Get {version}"),
+            Stage::Available(version) => format!("{version} available"),
             Stage::Downloading(_, pct) => format!("{pct}%"),
-            Stage::Ready(_) => "Restart".into(),
+            Stage::Ready(_) => "Ready to install".into(),
         };
         let parts = v.parts();
         let rows: Vec<ListRow> = parts
@@ -2541,7 +2742,7 @@ impl App {
             _ if downloading.is_some() => downloading.unwrap_or_default(),
             _ if v.error.is_some() => v.error.clone().unwrap_or_default(),
             _ if stages.iter().any(|(_, s)| matches!(s, Stage::Ready(_))) => {
-                "Restart to install, with the power connected".into()
+                "Installs when the device restarts. Keep the power connected".into()
             }
             _ if stages.iter().any(|(_, s)| **s == Stage::Checking) => {
                 "Checking for updates...".into()
@@ -2559,12 +2760,28 @@ impl App {
                 .collect::<Vec<_>>()
                 .join("   "),
         };
+        let picked = parts
+            .get(cursor.min(parts.len().saturating_sub(1)))
+            .and_then(|p| v.track(*p));
+        let mut legends = vec![back_legend()];
+        match picked.map(|t| &t.stage) {
+            Some(Stage::Checking | Stage::Downloading(..)) => {}
+            Some(Stage::Available(version)) => {
+                legends.push(Legend::new(ButtonLegend::Y, "Check Again"));
+                legends.push(Legend::new(ButtonLegend::A, &format!("Download {version}")));
+            }
+            Some(Stage::Ready(_)) => {
+                legends.push(Legend::new(ButtonLegend::Y, "Check Again"));
+                legends.push(Legend::new(ButtonLegend::A, "Restart to Install"));
+            }
+            _ => legends.push(Legend::new(ButtonLegend::A, "Check for Updates")),
+        }
         ListPage {
             title: "Updates".into(),
             status,
             cursor: cursor.min(rows.len().saturating_sub(1)),
             rows,
-            hints: "A update   Y check again   B back".into(),
+            legends,
         }
     }
 
@@ -2652,8 +2869,8 @@ impl App {
             })
             .collect();
         let status = match (&v.busy, &v.error) {
-            (BtBusy::Starting, _) => "Turning Bluetooth on...".to_string(),
-            (BtBusy::Searching, _) => "Looking for devices...".to_string(),
+            (BtBusy::Starting, _) => "Turning on Bluetooth...".to_string(),
+            (BtBusy::Searching, _) => "Searching for devices...".to_string(),
             (BtBusy::Pairing(name), _) => format!("Pairing {name}..."),
             (BtBusy::Connecting(name), _) => format!("Connecting {name}..."),
             (BtBusy::Idle, Some(error)) => error.clone(),
@@ -2666,12 +2883,26 @@ impl App {
                 n => format!("{n} devices connected"),
             },
         };
+        let picked = v.devices.get(cursor.min(v.devices.len().saturating_sub(1)));
+        let mut legends = vec![back_legend(), Legend::new(ButtonLegend::Y, "Search")];
+        if picked.is_some_and(|d| d.paired) {
+            legends.push(Legend::new(ButtonLegend::X, "Forget"));
+        }
+        legends.push(Legend::new(
+            ButtonLegend::A,
+            match picked {
+                Some(d) if d.connected => "Disconnect",
+                Some(d) if d.paired => "Connect",
+                Some(_) => "Pair",
+                None => "Search",
+            },
+        ));
         ListPage {
             title: "Bluetooth".into(),
             status,
             cursor: cursor.min(rows.len().saturating_sub(1)),
             rows,
-            hints: "A connect   X forget   Y search   B back".into(),
+            legends,
         }
     }
 
@@ -2888,7 +3119,7 @@ impl App {
                     title: "Tailscale".into(),
                     status: "Scan to sign in, or open the link on another device".into(),
                     url: url.clone(),
-                    hints: "X turn off   B back".into(),
+                    legends: vec![back_legend(), Legend::new(ButtonLegend::X, "Turn Off")],
                 })),
                 _ => None,
             },
@@ -2902,8 +3133,22 @@ impl App {
 
     fn networks_page(&self, cursor: usize, note: Option<&str>) -> ListPage {
         let v = &self.wifi_view;
-        let rows: Vec<ListRow> = self
-            .network_rows()
+        let nets = self.network_rows();
+        let mut legends = vec![back_legend(), Legend::new(ButtonLegend::Y, "Search")];
+        match nets.get(cursor.min(nets.len().saturating_sub(1))) {
+            Some(NetRow::Other) => legends.push(Legend::new(ButtonLegend::A, "Join Other")),
+            Some(NetRow::Network(net)) => {
+                if net.saved {
+                    legends.push(Legend::new(ButtonLegend::X, "Forget"));
+                }
+                let here = v.connected.as_deref() == Some(net.ssid.as_str());
+                if !here && net.security != Security::Unsupported {
+                    legends.push(Legend::new(ButtonLegend::A, "Join"));
+                }
+            }
+            None => {}
+        }
+        let rows: Vec<ListRow> = nets
             .into_iter()
             .map(|row| match row {
                 NetRow::Other => ListRow {
@@ -2926,11 +3171,11 @@ impl App {
             })
             .collect();
         let status = match (&v.busy, note.filter(|n| !n.is_empty()), &v.error) {
-            (Busy::Starting, ..) => "Turning the Wi-Fi on...".to_string(),
+            (Busy::Starting, ..) => "Turning on Wi-Fi...".to_string(),
             (Busy::Joining(ssid), ..) => format!("Joining {ssid}..."),
             (_, Some(note), _) => note.to_string(),
             (_, None, Some(error)) => error.clone(),
-            (Busy::Scanning, ..) => "Looking for networks...".to_string(),
+            (Busy::Scanning, ..) => "Searching for networks...".to_string(),
             (Busy::Idle, None, None) => match (&v.connected, &v.ip) {
                 (Some(ssid), Some(ip)) => format!("Connected to {ssid}, {ip}"),
                 (Some(ssid), None) => format!("Connected to {ssid}"),
@@ -2942,7 +3187,7 @@ impl App {
             status,
             cursor: cursor.min(rows.len().saturating_sub(1)),
             rows,
-            hints: "A join   X forget   Y search again   B back".into(),
+            legends,
         }
     }
 
@@ -3095,6 +3340,8 @@ impl App {
             | QuickRow::Rumble
             | QuickRow::Theme
             | QuickRow::Clock
+            | QuickRow::MenuSounds
+            | QuickRow::Haptics
             | QuickRow::Recents
             | QuickRow::ShowTitles
             | QuickRow::Wallpaper
@@ -3209,6 +3456,8 @@ impl App {
             }
             QuickRow::Theme => s.appearance = s.appearance.toggle(),
             QuickRow::Clock => s.clock_12h = !s.clock_12h,
+            QuickRow::MenuSounds => s.menu_sounds = !s.menu_sounds,
+            QuickRow::Haptics => s.haptics = !s.haptics,
             QuickRow::WallpaperTint => s.wallpaper_tint = s.wallpaper_tint.step(right),
             QuickRow::Wallpaper
             | QuickRow::Recents
@@ -3482,12 +3731,15 @@ impl App {
             self.shelf_mut().release_hold();
         }
         let mut touched = false;
+        let mut stepped = false;
         let at = self.shelf_at;
         let next = match &mut self.phase {
             Phase::Shelf => {
                 let shelf = &mut self.shelves[at].1;
+                let was = shelf.index;
                 shelf.tick(now);
                 shelf.update(dt);
+                stepped = shelf.index != was;
                 None
             }
             Phase::Inserting {
@@ -3515,11 +3767,20 @@ impl App {
             }
             _ => None,
         };
+        if stepped {
+            self.cue(Sfx::Move);
+        }
         if touched {
-            self.sfx = Some(match self.phase {
+            let sfx = match self.phase {
                 Phase::Ejecting { .. } => Sfx::Eject,
                 _ => Sfx::Insert,
-            });
+            };
+            self.sfx = Some(sfx);
+            // The motor knocks as the cart hits home, which the insert's clip leads up to.
+            match sfx {
+                Sfx::Insert => self.buzz(BUZZ_SEAT_MS, (Sfx::Insert.lead() * 1000.0) as Millis),
+                _ => self.buzz(BUZZ_EJECT_MS, 0),
+            }
         }
         if let Some(phase) = next {
             self.phase = phase;
@@ -3711,6 +3972,7 @@ impl App {
         }
         if let Some(scraper) = &self.scraper {
             self.scrape_view = scraper.view();
+            self.show_scraped();
         }
         if let Some(services) = &self.services {
             self.services_view = services.view();
@@ -3993,6 +4255,8 @@ impl App {
 
     pub fn refuse(&mut self) {
         self.refusal = Some(Refusal::started(self.now()));
+        self.cue(Sfx::Error);
+        self.buzz(BUZZ_REFUSE_MS, 0);
     }
 
     pub fn refusal_active(&self, now: Millis) -> bool {
@@ -5710,6 +5974,18 @@ fn trusted_write(
 
 fn up(level: u8, step: u8, max: u8) -> u8 {
     level.saturating_add(step).min(max)
+}
+
+/// B, which leaves every page for the one it was opened from.
+fn back_legend() -> Legend {
+    Legend::new(ButtonLegend::B, "Back")
+}
+
+/// Back, and A for `action` when there is one.
+fn with_action(action: Option<&str>) -> Vec<Legend> {
+    let mut legends = vec![back_legend()];
+    legends.extend(action.map(|a| Legend::new(ButtonLegend::A, a)));
+    legends
 }
 
 fn shader_value(shader: Shader) -> QuickValue {

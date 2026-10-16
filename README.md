@@ -29,7 +29,8 @@ thirteen systems, Wi-Fi and Bluetooth, analog sticks, network services and updat
 - **Analog sticks** on the models that have them.
 - **Services:** SSH and SFTP, sharing the card over SMB, Tailscale (sign in by scanning a code) and WireGuard.
 - **Updates over the air**, for unslot and for BaseOS under it, with an automatic rollback if a new version never starts.
-- **Game Art** finds a label for each game online, matched by CRC and file name.
+- **Game Art** finds a label for each game online, matched by CRC and file name. It keeps going while you play, and each label shows on the shelf as soon as it is found.
+- **Menu sounds and haptics:** recorded clicks of real buttons and switches, and a nudge of the rumble motor when a cart goes home or a setting changes. Both can be turned off in Settings → General.
 - **Wallpapers:** a bundled set, or any PNG or JPG of your own.
 
 Everything slot does is still here: the carts, the shelves, the link cable, the in-game menu and the save handling.
@@ -115,6 +116,7 @@ unslot is a fork of **[slot](https://github.com/BrandonKowalski/slot)** by Brand
 | Services | [Tailscale](https://github.com/tailscale/tailscale), [wireguard-go](https://git.zx2c4.com/wireguard-go) and [spruceOS](https://github.com/spruceUI/spruceOS)'s Samba build |
 | Wallpapers | NASA, ESA, CSA and STScI; Poly Haven; ambientCG; and Luis Zuno. Each is credited in `System/licenses/wallpapers.txt`. |
 | Type | Open Sans, and Nerd Fonts Symbols by Ryan L McIntyre |
+| Sounds | The cart's sounds are slot's. The menu's are CC0 recordings from Freesound by 5ro4, Nekkowe, greatsoundstube and BenjaminNelan, credited in `System/licenses/sounds.txt`. |
 
 Every licence, with gpSP's source, ships in `System/licenses/`.
 

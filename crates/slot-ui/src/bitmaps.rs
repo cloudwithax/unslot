@@ -305,23 +305,33 @@ pub fn shell_asset(mould: Mould, clear: bool) -> &'static [u8] {
 }
 
 /// Footer buttons. Each file is already the footer height.
-#[derive(Copy, Clone)]
-pub(crate) enum ButtonLegend {
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum ButtonLegend {
     A,
     B,
     Left,
     Right,
     Select,
     X,
+    Y,
+    Start,
+    Menu,
+    L1,
+    R1,
 }
 
-const BUTTON_LEGEND_PNG: [&[u8]; 6] = [
+const BUTTON_LEGEND_PNG: [&[u8]; 11] = [
     include_bytes!("../../../assets/buttonlegend_round_a.png"),
     include_bytes!("../../../assets/buttonlegend_round_b.png"),
     include_bytes!("../../../assets/buttonlegend_dpad_left.png"),
     include_bytes!("../../../assets/buttonlegend_dpad_right.png"),
     include_bytes!("../../../assets/buttonlegend_long_select.png"),
     include_bytes!("../../../assets/buttonlegend_round_x.png"),
+    include_bytes!("../../../assets/buttonlegend_round_y.png"),
+    include_bytes!("../../../assets/buttonlegend_long_start.png"),
+    include_bytes!("../../../assets/buttonlegend_round_menu.png"),
+    include_bytes!("../../../assets/buttonlegend_square_l1.png"),
+    include_bytes!("../../../assets/buttonlegend_square_r1.png"),
 ];
 
 pub(crate) fn button_legend(which: ButtonLegend) -> (&'static [u8], u32, u32) {

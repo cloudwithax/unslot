@@ -240,6 +240,8 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             show_recents: false,
             show_titles: false,
             clock_12h: false,
+            menu_sounds: true,
+            haptics: true,
             wifi: false,
             bluetooth: false,
             ssh: true,
@@ -288,6 +290,8 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
         gb_palette: GbPalette::parse("GBC Dark Green →A").unwrap(),
         wallpaper_tint: WallpaperTint::Medium,
         clock_12h: true,
+        menu_sounds: false,
+        haptics: false,
         wifi: true,
         bluetooth: true,
         ssh: false,
@@ -307,6 +311,8 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
     let text = std::fs::read_to_string(d.path().join("Config/slot.state")).unwrap();
     for line in [
         "rumble=0",
+        "menu_sounds=0",
+        "haptics=0",
         "ff_speed=2",
         "ff_sound=1",
         "colour_correction_gba=1",

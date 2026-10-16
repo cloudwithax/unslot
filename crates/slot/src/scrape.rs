@@ -379,7 +379,8 @@ pub struct ScrapeView {
     pub done: usize,
     pub total: usize,
     pub current: Option<String>,
-    /// The games given a label since slot started, which the shelf shows once it restarts.
+    /// The games given a label since slot started, in the order they got one. The app puts
+    /// each on its cart as it appears here.
     pub made: Vec<(Platform, String)>,
     /// Games looked for and not found.
     pub missed: usize,
@@ -432,6 +433,12 @@ fn work(
     jobs: Receiver<Vec<Cart>>,
     view: Arc<Mutex<ScrapeView>>,
 ) {
+    // Finding art goes on while a game plays, so it gives way to the game for the CPU. Linux
+    // keeps a nice value for each thread, and 0 is this one.
+    #[cfg(target_os = "linux")]
+    unsafe {
+        libc::setpriority(libc::PRIO_PROCESS, 0, 10);
+    }
     let set =
         |f: &mut dyn FnMut(&mut ScrapeView)| f(&mut view.lock().unwrap_or_else(|e| e.into_inner()));
     let mut dats: HashMap<&'static str, Dat> = HashMap::new();

@@ -8,8 +8,8 @@ use common::{app_booting_at, tmp_root_with_carts, CLOCK_IS_SET};
 use slot::app::{App, PageModel, Phase};
 use slot::wifi::SimWifi;
 use slot_input::{Action, Btn};
-use slot_store::{read_slot_state, write_slot_state, SlotState};
-use slot_ui::{ListPage, QuickRow};
+use slot_store::{read_slot_state, write_slot_state, Platform, SlotState};
+use slot_ui::{ButtonLegend, ListPage, QuickRow};
 
 fn press(a: &mut App, btn: Btn) {
     a.apply(Action::GbaDown(btn));
@@ -33,6 +33,15 @@ fn list(a: &App) -> ListPage {
         Some(PageModel::List(list)) => list,
         other => panic!("not on the network list: {other:?}"),
     }
+}
+
+/// What A says it does on the row the cursor is on, if anything.
+fn action(a: &App) -> Option<String> {
+    list(a)
+        .legends
+        .into_iter()
+        .find(|l| l.buttons == [ButtonLegend::A])
+        .map(|l| l.label)
 }
 
 /// Opens the settings, turns the Wi-Fi on and opens the network list.
@@ -397,7 +406,7 @@ fn tailscale_shows_a_code_to_sign_in_and_x_turns_it_off() {
     go_to(&mut a, "Tailscale");
     press(&mut a, Btn::A);
     until(&mut a, |a| detail(a, "Tailscale") == "Sign in");
-    assert_eq!(list(&a).hints, "A sign in   B back");
+    assert_eq!(action(&a), Some("Sign In".to_string()));
     press(&mut a, Btn::A);
     let Some(PageModel::Qr(qr)) = a.page_model() else {
         panic!("no code to scan: {:?}", a.phase());
@@ -473,28 +482,30 @@ fn updates_offer_the_newer_releases_and_a_downloaded_one_restarts_to_install() {
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
     std::fs::write(d.path().join("System/version"), "v2.0.0\n").unwrap();
     let mut a = on_updates(&d);
-    let get = |v: &str| format!("Get {v}");
+    let get = |v: &str| format!("{v} available");
     until(&mut a, |a| {
         detail(a, "unslot") == get(SimUpdates::UNSLOT)
             && detail(a, "BaseOS") == get(SimUpdates::BASEOS)
     });
     assert_eq!(list(&a).status, "unslot v2.0.0   BaseOS 1.4.0");
+    assert_eq!(action(&a), Some(format!("Download {}", SimUpdates::UNSLOT)));
     press(&mut a, Btn::A);
-    until(&mut a, |a| detail(a, "unslot") == "Restart");
+    until(&mut a, |a| detail(a, "unslot") == "Ready to install");
     assert!(
         d.path().join(slot::update::PACK).exists(),
         "the pack is not where BaseOS looks"
     );
     assert_eq!(
         list(&a).status,
-        "Restart to install, with the power connected"
+        "Installs when the device restarts. Keep the power connected"
     );
+    assert_eq!(action(&a), Some("Restart to Install".to_string()));
     press(&mut a, Btn::A);
     assert!(a.restarting(), "A on a downloaded update did not restart");
 }
 
 #[test]
-fn game_art_labels_what_it_finds_and_restarts_to_show_it() {
+fn game_art_labels_what_it_finds_and_shows_it_without_a_restart() {
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
     // Eight zero bytes: the game the pretend database knows by its CRC.
     std::fs::write(d.path().join("Games/GBA/Zero.gba"), [0u8; 8]).unwrap();
@@ -527,6 +538,12 @@ fn game_art_labels_what_it_finds_and_restarts_to_show_it() {
     );
     assert_eq!(detail(&a, "All systems"), "0 of 3");
     assert_eq!(detail(&a, "Game Boy Advance"), "0 of 3");
+    assert_eq!(action(&a), Some("Find Missing Art".to_string()));
+    let zero = (0..Platform::COUNT + 2)
+        .flat_map(|s| (0..3).map(move |i| (s, i)))
+        .find(|&(s, i)| a.face_cart(s, i).is_some_and(|c| c.stem == "Zero"))
+        .expect("Zero is on a shelf");
+    a.set_cart_face(zero.0, zero.1, slot_ui::TexId::from_raw(7));
     press(&mut a, Btn::A);
     until(&mut a, |a| {
         !a.scrape_view().running && a.scrape_view().done == 3
@@ -536,14 +553,19 @@ fn game_art_labels_what_it_finds_and_restarts_to_show_it() {
         "no label on the card"
     );
     assert_eq!(detail(&a, "All systems"), "1 of 3");
+    assert_eq!(list(&a).status, "Added 1 label to the shelves");
+    // The label goes on the cart as soon as it is made, and its face is built again with it,
+    // so the shelf shows it without slot starting again.
     assert_eq!(
-        list(&a).status,
-        "1 new label. Press START to restart and see them"
+        a.face_cart(zero.0, zero.1).and_then(|c| c.label.clone()),
+        Some(d.path().join("Labels").join("GBA").join("Zero.png"))
     );
-    press(&mut a, Btn::A);
-    until(&mut a, |a| !a.scrape_view().running);
+    assert_eq!(a.take_relabelled(), [zero]);
     press(&mut a, Btn::Start);
-    assert!(a.restarting(), "START did not restart to show the labels");
+    assert!(
+        !a.restarting(),
+        "START restarted, which labels no longer need"
+    );
 }
 
 #[test]
@@ -586,7 +608,7 @@ fn a_screenscraper_login_is_typed_in_on_game_art_and_saved_to_the_card() {
     assert_eq!(detail(&a, "ScreenScraper"), "Sign in");
     // Up from the first row wraps to the last, the sign in.
     press(&mut a, Btn::Up);
-    assert_eq!(list(&a).hints, "A sign in   B back");
+    assert_eq!(action(&a), Some("Sign In".to_string()));
     press(&mut a, Btn::A);
     let Some(PageModel::Keys(_)) = a.page_model() else {
         panic!("no keyboard for the username: {:?}", a.phase());

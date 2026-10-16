@@ -8,7 +8,7 @@ use slot_ui::FfState;
 pub const RUMBLE_MIN_MS: Millis = 100;
 pub const RUMBLE_MAX_MS: Millis = 150;
 
-use crate::app::{App, Phase};
+use crate::app::{App, Buzz, Phase};
 use crate::audio::{opened_sink, AudioSink, Ring, Sfx};
 use crate::core::open_core;
 use crate::emu::{CoreState, EmuHandle, Speed};
@@ -28,6 +28,8 @@ pub struct Session {
     fast: bool,
     motor: u16,
     pulse: Option<(Millis, u16)>,
+    /// The menus' nudge of the motor, run alongside whatever the game asks.
+    buzz: Option<Buzz>,
     prefetch: Prefetch,
     reloading: bool,
     driven: bool,
@@ -50,6 +52,7 @@ impl Session {
             fast: false,
             motor: 0,
             pulse: None,
+            buzz: None,
             prefetch: Prefetch::default(),
             reloading: false,
             driven: false,
@@ -320,14 +323,24 @@ impl Session {
     }
 
     fn sync_rumble(&mut self) {
+        let now = self.app.now();
+        if let Some(buzz) = self.app.take_buzz() {
+            self.buzz = Some(buzz);
+        }
+        if self.buzz.is_some_and(|b| now >= b.at + b.ms) {
+            self.buzz = None;
+        }
+        let buzzing = match self.buzz {
+            Some(b) if now >= b.at => u16::MAX,
+            _ => 0,
+        };
         let asked = match &self.emu {
             Some(emu) if self.playing() && self.app.rumble_enabled() => emu.rumble().strength(),
             _ => {
                 self.pulse = None;
-                return self.rumble(0);
+                return self.rumble(buzzing);
             }
         };
-        let now = self.app.now();
         let want = match (asked, self.pulse) {
             (0, Some((at, strength))) if now.saturating_sub(at) < RUMBLE_MIN_MS => strength,
             (0, _) => {
@@ -347,7 +360,7 @@ impl Session {
                 asked
             }
         };
-        self.rumble(want);
+        self.rumble(want.max(buzzing));
     }
 
     fn sync_ff_hud(&mut self) {

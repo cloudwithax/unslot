@@ -65,6 +65,16 @@ fn with_rumble_off_the_motor_stays_still_whatever_the_core_asks() {
 #[test]
 fn ejecting_stops_the_motor() {
     let d = tmp_root_with_carts(&["Emerald"]);
+    // An eject refused while the core is still loading nudges the motor itself, which is not
+    // the game's rumble this is about.
+    write_slot_state(
+        d.path(),
+        &SlotState {
+            haptics: false,
+            ..SlotState::default()
+        },
+    )
+    .expect("write slot.state");
     let (mut s, motor) = session_with_platform(d.path());
     s.rumble(u16::MAX);
     assert_ne!(motor.last(), 0);

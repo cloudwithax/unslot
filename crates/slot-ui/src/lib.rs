@@ -42,6 +42,7 @@ pub use backdrop::{
 };
 pub use barcode::{code39, CODE39_NARROW, CODE39_WIDE};
 pub use battery::{draw_gauge, BOLT_PX, GAUGE_H, GAUGE_W, WALL};
+pub use bitmaps::ButtonLegend;
 pub use board::{
     board_at, board_face, board_from, board_in, board_x, board_zoom, chip_face, chip_shadow_face,
     grown, lid_at, lid_from, lift_of, on_board, padded, rom_marking, rom_marking_face, shelf_cart,
@@ -75,6 +76,7 @@ pub use link_art::{
 };
 pub use list_page::{ListPage, ListRow, LIST_ROWS};
 pub use media::Media;
+pub use page::Legend;
 pub use plate::{
     arrows_hint_coloured, arrows_hint_face, arrows_hint_width, cap_width, centred_hints,
     hint_coloured, hint_face, hint_quad, hint_row, hint_width, title_face, title_line_face,

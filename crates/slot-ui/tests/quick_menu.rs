@@ -105,7 +105,9 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Recents",
             "Game Titles",
             "Date & Time",
-            "Clock"
+            "Clock",
+            "Menu Sounds",
+            "Haptics"
         ]
     );
     assert_eq!(
@@ -212,7 +214,7 @@ fn a_hidden_row_is_stepped_over_and_takes_no_place() {
     let hidden = [QuickRow::WallpaperTint];
     assert_eq!(QuickRow::Wallpaper.down(&hidden), QuickRow::Theme);
     assert_eq!(QuickRow::Theme.up(&hidden), QuickRow::Wallpaper);
-    assert_eq!(QuickRow::Wallpaper.up(&hidden), QuickRow::Clock);
+    assert_eq!(QuickRow::Wallpaper.up(&hidden), QuickRow::Haptics);
     assert_eq!(QuickRow::Theme.position(&hidden), 1);
     assert_eq!(QuickRow::Wallpaper.down(&[]), QuickRow::WallpaperTint);
     assert_eq!(QuickRow::Theme.position(&[]), 2);
