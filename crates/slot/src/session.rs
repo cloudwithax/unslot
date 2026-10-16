@@ -175,6 +175,15 @@ impl Session {
         self.sync_pad();
     }
 
+    /// Hands the sticks to the running game, or rest while a menu is over it.
+    pub fn set_sticks(&mut self, sticks: [i16; 4]) {
+        let Some(emu) = &self.emu else {
+            return;
+        };
+        let to_game = self.playing() && self.app.in_game_menu().is_none();
+        emu.set_sticks(if to_game { sticks } else { [0; 4] });
+    }
+
     pub fn set_menu_dpad_display(&mut self, enabled: bool) {
         self.gestures.set_menu_dpad_display(enabled);
     }

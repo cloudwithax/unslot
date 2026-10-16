@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use slot::input::evdev::{decode, has_bit, pick_devices, to_raw, EVENT_BYTES};
-use slot_input::{Btn, RawEvent};
+use slot_input::{Btn, InputSource, RawEvent};
 
 fn packet(kind: u16, code: u16, value: i32) -> [u8; EVENT_BYTES] {
     let mut b = [0x11u8; EVENT_BYTES];
@@ -15,6 +15,7 @@ fn packet(kind: u16, code: u16, value: i32) -> [u8; EVENT_BYTES] {
 }
 
 const EV_KEY: u16 = 0x01;
+const EV_ABS: u16 = 0x03;
 const EV_SW: u16 = 0x05;
 const EV_SYN: u16 = 0x00;
 const CODE_R1: u16 = 0x135;
@@ -329,4 +330,49 @@ fn a_hat_axis_is_traced_as_the_axis_it_is() {
     );
     assert!(line.contains("hat0y"), "{line}");
     assert!(!line.contains("ignored"), "{line}");
+}
+
+#[test]
+fn a_stick_models_sticks_and_clicks_come_off_the_button_node() {
+    let d = input_tree();
+    let (dev, sys) = (d.path().join("dev/input"), d.path().join("sys/class/input"));
+    // An RG34XXSP: Z, RX, RY, RZ and the hat on the same node as the buttons.
+    write(&sys.join("event1/device/capabilities/abs"), "3003c\n");
+    let (abs_z, abs_rx, abs_ry) = (0x02, 0x03, 0x04);
+    let mut stream = Vec::new();
+    for (kind, code, value) in [
+        (EV_ABS, abs_z, -1800),
+        (EV_ABS, abs_rx, 0),
+        (EV_ABS, abs_ry, 1800),
+        (EV_KEY, 0x139, 1),
+    ] {
+        stream.extend_from_slice(&packet(kind, code, value));
+    }
+    fs::write(dev.join("event1"), stream).unwrap();
+
+    let card = tempfile::tempdir().unwrap();
+    let mut input = slot::input::DeviceInput::open_in(&dev, &sys, card.path(), false);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let mut events = Vec::new();
+    while std::time::Instant::now() < deadline
+        && (input.sticks() == [0; 4] || !events.contains(&RawEvent::Down(Btn::L3)))
+    {
+        events.extend(input.poll(0));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(
+        input.sticks(),
+        [-i16::MAX, 0, i16::MAX, 0],
+        "full left and full right did not reach full scale"
+    );
+    assert!(
+        events.contains(&RawEvent::Down(Btn::L3)),
+        "the left stick's click was lost: {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, RawEvent::Down(Btn::Left | Btn::Right))),
+        "a stick axis was read as the d-pad: {events:?}"
+    );
 }

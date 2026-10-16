@@ -694,6 +694,7 @@ impl Frontend {
         }
         self.session
             .set_menu_dpad_display(input.menu_dpad_display());
+        self.session.set_sticks(input.sticks());
         self.session.feed(events, now);
         let dt = self.last.elapsed().as_secs_f32();
         self.last = Instant::now();
@@ -712,6 +713,7 @@ impl Frontend {
         let events = input.poll(now);
         self.session
             .set_menu_dpad_display(input.menu_dpad_display());
+        self.session.set_sticks(input.sticks());
         self.session.feed(events, now);
         self.session.update(dt);
     }

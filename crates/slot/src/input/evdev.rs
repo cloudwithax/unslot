@@ -85,6 +85,9 @@ pub fn code_to_btn(code: u16) -> Option<Btn> {
         0x138 => Btn::Menu,
         0x13a => Btn::L2,
         0x13b => Btn::R2,
+        // The stick clicks on the stick models, under codes the kernel header names otherwise.
+        0x139 => Btn::L3,
+        0x13c => Btn::R3,
         115 => Btn::VolUp,
         114 => Btn::VolDown,
         116 => Btn::Power,

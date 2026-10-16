@@ -1,4 +1,4 @@
-use gilrs::{EventType, Gilrs};
+use gilrs::{Axis, EventType, Gilrs};
 use slot_input::{Btn, InputSource, Millis, RawEvent};
 use winit::event::WindowEvent;
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -11,6 +11,7 @@ pub struct HostInput {
     pad: Option<Gilrs>,
     lid_closed: bool,
     held_keys: Vec<Btn>,
+    sticks: [i16; 4],
 }
 
 impl HostInput {
@@ -20,6 +21,7 @@ impl HostInput {
             pad: Gilrs::new().ok(),
             lid_closed: false,
             held_keys: Vec::new(),
+            sticks: [0; 4],
         }
     }
 
@@ -88,6 +90,17 @@ impl HostInput {
             match ev.event {
                 EventType::ButtonPressed(b, _) => edges.push((b, true)),
                 EventType::ButtonReleased(b, _) => edges.push((b, false)),
+                EventType::AxisChanged(axis, value, _) => {
+                    // gilrs counts up as positive; libretro counts it as negative.
+                    let (at, sign) = match axis {
+                        Axis::LeftStickX => (0, 1.0),
+                        Axis::LeftStickY => (1, -1.0),
+                        Axis::RightStickX => (2, 1.0),
+                        Axis::RightStickY => (3, -1.0),
+                        _ => continue,
+                    };
+                    self.sticks[at] = (value * sign * f32::from(i16::MAX)).round() as i16;
+                }
                 _ => {}
             }
         }
@@ -109,5 +122,9 @@ impl InputSource for HostInput {
     fn poll(&mut self, _now: Millis) -> Vec<RawEvent> {
         self.drain_pad();
         std::mem::take(&mut self.pending)
+    }
+
+    fn sticks(&self) -> [i16; 4] {
+        self.sticks
     }
 }

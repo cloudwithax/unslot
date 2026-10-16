@@ -18,6 +18,8 @@ pub fn pad_to_btn(button: Button) -> Option<Btn> {
         Button::Start => Btn::Start,
         Button::Select => Btn::Select,
         Button::Mode => Btn::Menu,
+        Button::LeftThumb => Btn::L3,
+        Button::RightThumb => Btn::R3,
         _ => return None,
     })
 }

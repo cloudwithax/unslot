@@ -5,10 +5,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use slot_input::{Btn, InputSource, Millis, RawEvent};
+use slot_retro::Sticks;
 
 use super::evdev::{
     decode, device_name, pick_devices, to_raw, Ev, Hat, EVENT_BYTES, EV_ABS, EV_KEY, EV_SYN,
 };
+use super::stick::{layout, Range, StickNode};
 use super::trace;
 
 const DEV: &str = "/dev/input";
@@ -19,6 +21,7 @@ const LID_POLL_MS: Millis = 150;
 
 pub struct DeviceInput {
     pending: Arc<Mutex<Vec<RawEvent>>>,
+    sticks: Arc<Mutex<Sticks>>,
     hall: Option<PathBuf>,
     lid_shut: Option<bool>,
     next_lid_poll: Millis,
@@ -33,16 +36,24 @@ impl DeviceInput {
     pub fn open_in(dev: &Path, sys: &Path, root: &Path, trace: bool) -> Self {
         let trace = trace.then(|| Trace::start(root, dev, sys)).flatten();
         let target = crate::baseos::var("BASEOS_TARGET");
-        DeviceInput::open_traced(dev, sys, menu_dpad_display(target.as_deref()), trace)
+        DeviceInput::open_traced(
+            dev,
+            sys,
+            menu_dpad_display(target.as_deref()),
+            right_stick(target.as_deref()),
+            trace,
+        )
     }
 
     fn open_traced(
         dev: &Path,
         sys: &Path,
         menu_dpad_display: bool,
+        right_stick: bool,
         trace: Option<Arc<Trace>>,
     ) -> Self {
         let pending: Arc<Mutex<Vec<RawEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sticks: Arc<Mutex<Sticks>> = Arc::new(Mutex::new([0; 4]));
         for node in pick_devices(dev, sys) {
             eprintln!(
                 "slot: input {} ({})",
@@ -50,18 +61,27 @@ impl DeviceInput {
                 device_name(sys, &node)
             );
             quicken_poll(sys, &node);
+            let axes = stick_axes(sys, &node);
+            if let Some(axes) = axes {
+                eprintln!("slot: input {}: sticks on {axes:?}", node.display());
+            }
             let queue = pending.clone();
+            let out = sticks.clone();
             let name = node.display().to_string();
             let trace = trace.clone();
             let spawned = std::thread::Builder::new()
                 .name(format!("slot-input-{name}"))
-                .spawn(move || read_node(&node, &queue, trace.as_deref()));
+                .spawn(move || {
+                    let sticks = axes.map(|axes| (axes, right_stick, out));
+                    read_node(&node, &queue, sticks, trace.as_deref())
+                });
             if let Err(e) = spawned {
                 eprintln!("slot: input {name}: {e}");
             }
         }
         DeviceInput {
             pending,
+            sticks,
             hall: find_hall(Path::new(PSY)),
             lid_shut: None,
             next_lid_poll: 0,
@@ -94,7 +114,21 @@ fn quicken_poll(sys: &Path, node: &Path) {
     }
 }
 
-fn read_node(node: &Path, queue: &Mutex<Vec<RawEvent>>, trace: Option<&Trace>) {
+/// The axes a node carries its sticks on, if it has any.
+fn stick_axes(sys: &Path, node: &Path) -> Option<[u16; 4]> {
+    let name = node.file_name()?;
+    let abs = std::fs::read_to_string(sys.join(name).join("device/capabilities/abs")).ok()?;
+    layout(&abs)
+}
+
+type StickOut = ([u16; 4], bool, Arc<Mutex<Sticks>>);
+
+fn read_node(
+    node: &Path,
+    queue: &Mutex<Vec<RawEvent>>,
+    sticks: Option<StickOut>,
+    trace: Option<&Trace>,
+) {
     let label = node
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -107,6 +141,14 @@ fn read_node(node: &Path, queue: &Mutex<Vec<RawEvent>>, trace: Option<&Trace>) {
             return;
         }
     };
+    let mut sticks = sticks.map(|(axes, right, out)| {
+        let ranges = axes.map(|code| {
+            let range = abs_range(&file, code);
+            eprintln!("slot: input {}: axis {code:#x} {range:?}", node.display());
+            range
+        });
+        (StickNode::new(axes, ranges, right), out)
+    });
     let mut buf = [0u8; EVENT_BYTES * 16];
     loop {
         let read = match file.read(&mut buf) {
@@ -125,6 +167,12 @@ fn read_node(node: &Path, queue: &Mutex<Vec<RawEvent>>, trace: Option<&Trace>) {
             }
             if (ev.kind == EV_KEY && ev.value == 1) || (ev.kind == EV_ABS && ev.value != 0) {
                 crate::latency::read();
+            }
+            if let Some((node, out)) = sticks.as_mut() {
+                if node.feed(ev) {
+                    *out.lock().unwrap_or_else(|e| e.into_inner()) = node.values();
+                    continue;
+                }
             }
             match ev.kind {
                 EV_ABS => events.extend(hat.feed(ev)),
@@ -213,6 +261,41 @@ impl InputSource for DeviceInput {
     fn menu_dpad_display(&self) -> bool {
         self.menu_dpad_display
     }
+
+    fn sticks(&self) -> [i16; 4] {
+        *self.sticks.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// An axis's range from the kernel, and where it reads now. ROCKNIX's driver reports ±1800, so
+/// that is the guess for a kernel that will not say.
+fn abs_range(file: &File, code: u16) -> Range {
+    match absinfo(file, code) {
+        Some((value, min, max)) if max > min => Range::new(min, max, value),
+        _ => Range::new(-1800, 1800, 0),
+    }
+}
+
+/// `EVIOCGABS`: the axis's value, minimum and maximum.
+#[cfg(unix)]
+fn absinfo(file: &File, code: u16) -> Option<(i32, i32, i32)> {
+    use std::os::unix::io::AsRawFd;
+    // _IOR('E', 0x40 + code, struct input_absinfo), six i32s.
+    let request = 0x8018_4540u64 + u64::from(code);
+    let mut info = [0i32; 6];
+    let rc = unsafe { libc::ioctl(file.as_raw_fd(), request as _, info.as_mut_ptr()) };
+    (rc == 0).then_some((info[0], info[1], info[2]))
+}
+
+#[cfg(not(unix))]
+fn absinfo(_file: &File, _code: u16) -> Option<(i32, i32, i32)> {
+    None
+}
+
+/// Whether the model has a second stick. The RG40XX V has only the left one; its right channels
+/// read nothing worth passing on.
+fn right_stick(target: Option<&str>) -> bool {
+    target.map(str::trim) != Some("rg40xxv")
 }
 
 fn find_hall(psy: &Path) -> Option<PathBuf> {
@@ -235,6 +318,14 @@ fn menu_dpad_display(target: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_one_stick_rg40xx_v_leaves_its_right_stick_at_rest() {
+        assert!(!right_stick(Some("rg40xxv")));
+        for target in [Some("rg40xxh"), Some("rg34xxsp"), Some("rgcubexx"), None] {
+            assert!(right_stick(target), "{target:?}");
+        }
+    }
 
     #[test]
     fn only_the_rg34xx_baseos_target_enables_the_menu_dpad_display_gesture() {

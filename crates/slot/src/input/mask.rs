@@ -46,6 +46,8 @@ fn bit(btn: Btn) -> Option<u16> {
         Btn::R1 => ButtonMask::R,
         Btn::L2 => ButtonMask::L2,
         Btn::R2 => ButtonMask::R2,
+        Btn::L3 => ButtonMask::L3,
+        Btn::R3 => ButtonMask::R3,
         Btn::Start => ButtonMask::START,
         Btn::Select => ButtonMask::SELECT,
         _ => return None,
