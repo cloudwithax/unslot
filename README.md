@@ -36,6 +36,10 @@ Games go in `Games/<Folder>`, label art in `Labels/<Folder>/<game>.png`, BIOS fi
 A multi-disc game is shelved once through its `.m3u` playlist, and its discs are swapped from
 Gameplay in the game menu.
 
+Services, under Network, turns on SSH and SFTP as `root` (BaseOS's password until one is set
+there), sharing the card over SMB, Tailscale (signed in by scanning a code) and WireGuard. A
+WireGuard tunnel is a wg-quick `.conf` in `Config/wireguard`.
+
 > [!IMPORTANT]
 > ROMs must be unzipped. slot does not read `.zip` or `.7z` files.
 

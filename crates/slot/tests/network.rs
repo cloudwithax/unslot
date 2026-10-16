@@ -301,3 +301,136 @@ fn x_forgets_a_paired_device() {
     press(&mut a, Btn::X);
     until(&mut a, |a| !a.bt_view().devices.iter().any(|d| d.paired));
 }
+
+/// Opens the services page under Network.
+fn on_services(d: &tempfile::TempDir) -> App {
+    let set = SlotState {
+        clock_set: true,
+        ..SlotState::default()
+    };
+    write_slot_state(d.path(), &set).expect("write slot.state");
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    a.apply(Action::QuickMenu);
+    for _ in 0..QuickRow::MAIN.len() {
+        if a.quick_menu() == Some(QuickRow::Network) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    press(&mut a, Btn::A);
+    for _ in 0..QuickRow::NETWORK.len() {
+        if a.quick_menu() == Some(QuickRow::Services) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    assert_eq!(a.quick_menu(), Some(QuickRow::Services), "no Services row");
+    press(&mut a, Btn::A);
+    assert!(
+        matches!(a.phase(), Phase::Services { .. }),
+        "{:?}",
+        a.phase()
+    );
+    a
+}
+
+fn detail(a: &App, label: &str) -> String {
+    list(a)
+        .rows
+        .iter()
+        .find(|r| r.label == label)
+        .unwrap_or_else(|| panic!("no {label} row"))
+        .detail
+        .clone()
+}
+
+fn go_to(a: &mut App, label: &str) {
+    let at = row_of(a, label);
+    go_to_row(a, at);
+}
+
+#[test]
+fn ssh_starts_on_and_turning_it_off_is_kept() {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    let mut a = on_services(&d);
+    assert_eq!(detail(&a, "SSH"), "On");
+    assert_eq!(detail(&a, "Password"), "BaseOS's");
+    press(&mut a, Btn::A);
+    assert_eq!(detail(&a, "SSH"), "Off");
+    assert!(
+        !read_slot_state(d.path()).ssh,
+        "turning SSH off was not saved"
+    );
+}
+
+#[test]
+fn file_sharing_asks_for_a_password_first_then_shares() {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    let mut a = on_services(&d);
+    go_to(&mut a, "File sharing");
+    press(&mut a, Btn::A);
+    assert!(
+        matches!(a.page_model(), Some(PageModel::Keys(_))),
+        "sharing began with no password: {:?}",
+        a.phase()
+    );
+    for _ in 0..4 {
+        press(&mut a, Btn::A);
+    }
+    press(&mut a, Btn::Start);
+    assert!(
+        matches!(a.phase(), Phase::Services { .. }),
+        "{:?}",
+        a.phase()
+    );
+    let saved = read_slot_state(d.path());
+    assert!(saved.samba, "sharing did not come on after the password");
+    assert_eq!(saved.password.map(|p| p.len()), Some(4));
+    assert_eq!(detail(&a, "File sharing"), "On");
+    assert_eq!(detail(&a, "Password"), "Set");
+}
+
+#[test]
+fn tailscale_shows_a_code_to_sign_in_and_x_turns_it_off() {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    let mut a = on_services(&d);
+    go_to(&mut a, "Tailscale");
+    press(&mut a, Btn::A);
+    until(&mut a, |a| detail(a, "Tailscale") == "Sign in");
+    assert_eq!(list(&a).hints, "A sign in   B back");
+    press(&mut a, Btn::A);
+    let Some(PageModel::Qr(qr)) = a.page_model() else {
+        panic!("no code to scan: {:?}", a.phase());
+    };
+    assert_eq!(qr.url, slot::services::SimServices::URL);
+    press(&mut a, Btn::X);
+    assert!(matches!(a.phase(), Phase::Services { .. }));
+    assert!(!read_slot_state(d.path()).tailscale);
+    until(&mut a, |a| detail(a, "Tailscale") == "Off");
+}
+
+#[test]
+fn the_vpn_steps_through_the_cards_tunnels_and_back_to_off() {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    let mut a = on_services(&d);
+    go_to(&mut a, "VPN");
+    press(&mut a, Btn::A);
+    assert_eq!(
+        list(&a).status,
+        "Put WireGuard configs in Config/wireguard on the card"
+    );
+    let dir = d.path().join(slot::wireguard::WG_DIR);
+    std::fs::create_dir_all(&dir).unwrap();
+    let conf = "[Interface]\nPrivateKey = yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=\nAllowedIPs = 10.0.0.0/24\n";
+    for name in ["home", "work"] {
+        std::fs::write(dir.join(format!("{name}.conf")), conf).unwrap();
+    }
+    press(&mut a, Btn::A);
+    until(&mut a, |a| detail(a, "VPN") == "home");
+    press(&mut a, Btn::A);
+    until(&mut a, |a| detail(a, "VPN") == "work");
+    assert_eq!(read_slot_state(d.path()).vpn.as_deref(), Some("work"));
+    press(&mut a, Btn::A);
+    assert_eq!(detail(&a, "VPN"), "Off");
+    assert_eq!(read_slot_state(d.path()).vpn, None);
+}

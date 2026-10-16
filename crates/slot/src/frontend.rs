@@ -1177,6 +1177,7 @@ fn sync_page(app: &mut App, compositor: &mut Compositor, state: &mut PageSync) {
         let face = match page {
             crate::app::PageModel::List(list) => list.face(),
             crate::app::PageModel::Keys(keys) => keys.face(),
+            crate::app::PageModel::Qr(qr) => qr.face(),
         };
         let (w, h) = (face.w, face.h);
         let tex = upload(compositor, &mut state.tex, face);

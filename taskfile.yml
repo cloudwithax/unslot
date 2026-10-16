@@ -98,6 +98,7 @@ tasks:
       - sh card/test-launch.sh
       - sh card/test-slotwifi.sh
       - sh card/test-slotbt.sh
+      - sh card/test-slotservices.sh
 
   core:
     desc: >-
@@ -286,6 +287,16 @@ tasks:
         mv "$tmp/manifest" vendor/cores.manifest
         echo "fetched {{.FETCHED}}"
 
+  services:
+    desc: >-
+      Build Tailscale and wireguard-go for the H700 from pinned sources and fetch spruceOS's
+      prebuilt Samba, into vendor/services, noting where each came from in services.manifest.
+      Needs a Linux host; Go is fetched and checked if a new enough one is not on PATH
+    status:
+      - test -f vendor/services/services.manifest
+    cmds:
+      - sh tools/services/build.sh vendor/services
+
   core:fetch:update:
     desc: Re-fetch the buildbot cores even if every one is already in vendor/
     cmds:
@@ -344,7 +355,7 @@ tasks:
 
   dist:device:
     desc: Build the SD2 tree for an H700 device, OUT defaults to ./dist-device
-    deps: [core:device, core:gpsp, core:fetch, build:device]
+    deps: [core:device, core:gpsp, core:fetch, services, build:device]
     vars:
       OUT: '{{.OUT | default "dist-device"}}'
     cmds:
@@ -361,6 +372,8 @@ tasks:
       - for c in {{.FETCHED}}; do cp "vendor/${c}_libretro.so" {{.OUT}}/System/; done
       - cp -r licenses {{.OUT}}/System/licenses
       - cp vendor/cores.manifest {{.OUT}}/System/licenses/cores.manifest
+      - cp -R vendor/services {{.OUT}}/System/services
+      - mv {{.OUT}}/System/services/services.manifest {{.OUT}}/System/licenses/services.manifest
       - |
         set -euo pipefail
         sha="$(cat vendor/gpsp-src.sha)"
@@ -380,7 +393,7 @@ tasks:
 
   deploy:device:
     desc: Build and push onto a device over adb, then restart it. SD defaults to /mnt/sdcard
-    deps: [core:device, core:gpsp, core:fetch, build:device]
+    deps: [core:device, core:gpsp, core:fetch, services, build:device]
     vars:
       SD: '{{.SD | default "/mnt/sdcard"}}'
     cmds:
@@ -393,6 +406,7 @@ tasks:
       - adb push vendor/gpsp_libretro.so '{{.SD}}/System/gpsp_libretro.so'
       - for c in {{.FETCHED}}; do adb push "vendor/${c}_libretro.so" '{{.SD}}/System/'; done
       - adb push licenses '{{.SD}}/System/'
+      - adb push vendor/services '{{.SD}}/System/'
       - |
         set -euo pipefail
         sha="$(cat vendor/gpsp-src.sha)"

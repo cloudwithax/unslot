@@ -224,6 +224,16 @@ pub struct SlotState {
     pub wifi: bool,
     /// Whether Bluetooth is meant to be on, likewise.
     pub bluetooth: bool,
+    /// Whether BaseOS's SSH server is left running. It starts at boot whatever slot says.
+    pub ssh: bool,
+    /// Whether the card is shared over SMB.
+    pub samba: bool,
+    pub tailscale: bool,
+    /// The WireGuard tunnel to bring up, by the name of its config in `Config/wireguard`.
+    pub vpn: Option<String>,
+    /// The root password slot sets for SSH and file sharing, or None to keep BaseOS's own. Kept
+    /// as written, as BaseOS keeps its own in baseos.conf.
+    pub password: Option<String>,
     pub recents: Vec<Recent>,
     pub favorites: Vec<Recent>,
     pub shelf: Option<String>,
@@ -363,6 +373,11 @@ impl Default for SlotState {
             show_titles: false,
             wifi: false,
             bluetooth: false,
+            ssh: true,
+            samba: false,
+            tailscale: false,
+            vpn: None,
+            password: None,
             recents: Vec::new(),
             favorites: Vec::new(),
             shelf: None,
@@ -456,6 +471,14 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     text.push_str(&format!("show_titles={}\n", s.show_titles as u8));
     text.push_str(&format!("wifi={}\n", s.wifi as u8));
     text.push_str(&format!("bluetooth={}\n", s.bluetooth as u8));
+    text.push_str(&format!("ssh={}\n", s.ssh as u8));
+    text.push_str(&format!("samba={}\n", s.samba as u8));
+    text.push_str(&format!("tailscale={}\n", s.tailscale as u8));
+    text.push_str(&format!("vpn={}\n", s.vpn.as_deref().unwrap_or("")));
+    text.push_str(&format!(
+        "password={}\n",
+        s.password.as_deref().unwrap_or("")
+    ));
     text.push_str(&format!("shelf={}\n", s.shelf.as_deref().unwrap_or("")));
     text.push_str(&format!(
         "shelf_cart={}\n",
@@ -501,6 +524,8 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut show_titles = None;
     let mut wifi = None;
     let mut bluetooth = None;
+    let (mut ssh, mut samba, mut tailscale) = (None, None, None);
+    let (mut vpn, mut password) = (None, None);
     let mut shelf = None;
     let mut shelf_cart = None;
     for line in text.lines().filter(|l| !l.is_empty()) {
@@ -546,6 +571,11 @@ fn parse(text: &str) -> Option<SlotState> {
             "show_titles" => show_titles = flag(value),
             "wifi" => wifi = flag(value),
             "bluetooth" => bluetooth = flag(value),
+            "ssh" => ssh = flag(value),
+            "samba" => samba = flag(value),
+            "tailscale" => tailscale = flag(value),
+            "vpn" => vpn = Some(value.to_string()).filter(|v| !v.is_empty()),
+            "password" => password = Some(value.to_string()).filter(|v| !v.is_empty()),
             "shelf" => shelf = Some(value.to_string()).filter(|v| !v.is_empty()),
             "shelf_cart" => shelf_cart = recent_value(value),
             _ => {}
@@ -597,6 +627,11 @@ fn parse(text: &str) -> Option<SlotState> {
         show_titles: show_titles.unwrap_or(fallback.show_titles),
         wifi: wifi.unwrap_or(fallback.wifi),
         bluetooth: bluetooth.unwrap_or(fallback.bluetooth),
+        ssh: ssh.unwrap_or(fallback.ssh),
+        samba: samba.unwrap_or(fallback.samba),
+        tailscale: tailscale.unwrap_or(fallback.tailscale),
+        vpn,
+        password,
         recents: Vec::new(),
         favorites: Vec::new(),
         shelf,

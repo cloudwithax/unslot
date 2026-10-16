@@ -180,6 +180,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::Network,
             QuickRow::WifiNetworks,
             QuickRow::BtDevices,
+            QuickRow::Services,
         ]
         .into_iter()
         .chain(Platform::ALL.map(QuickRow::ScreenOf))

@@ -40,6 +40,10 @@ jobs:
             file "$out/System/${c}_libretro.so" | grep -q aarch64
           done
           test -s "$out/System/licenses/cores.manifest"
+          for b in tailscaled wireguard-go samba/bin/smbd samba/bin/smbpasswd; do
+            file "$out/System/services/$b" | grep -q aarch64
+          done
+          test -s "$out/System/licenses/services.manifest"
           test -x "$out/System/slot"
           gpsp_src_sha="$(cat vendor/gpsp-src.sha)"
           test -f "$out/System/licenses/gpsp-${gpsp_src_sha}.tar.gz"

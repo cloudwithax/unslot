@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 fontdue = { workspace = true }
 png = { workspace = true }
+qrcode = { workspace = true }
 resvg = { workspace = true }
 usvg = { workspace = true }
 slot-gfx = { path = "../slot-gfx", default-features = false }

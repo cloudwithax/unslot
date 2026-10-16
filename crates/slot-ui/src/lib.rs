@@ -23,6 +23,7 @@ mod page;
 mod plate;
 mod polaroids;
 mod power_menu;
+mod qr_page;
 mod quick_menu;
 mod rebuild;
 mod refusal;
@@ -78,6 +79,7 @@ pub use plate::{
 };
 pub use polaroids::{photo_face, PhotoFace, Polaroids, DOT, LEGEND, PHOTO_H, PHOTO_W};
 pub use power_menu::{menu_face, PowerChoice, MENU_PAD};
+pub use qr_page::QrPage;
 pub use quick_menu::{
     core_button_legends, draw_menu_ground, link_button_legends, quick_caret_face, quick_label_face,
     quick_legend_faces, quick_pointer_face, quick_row_top, quick_row_top_at, quick_value_face,

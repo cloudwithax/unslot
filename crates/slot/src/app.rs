@@ -15,7 +15,7 @@ use slot_ui::{
     board_from, board_zoom, draw_empty_slot, draw_footer, draw_ground, draw_slot_name,
     draw_sticker, ease, footer_ink, grown, lid_at, lid_from, lift_of, on_board, repeat_gap,
     shelf_cart_at, ClockPicker, Draw, FfState, Hud, HudKind, Icon, KeyInput, KeyOutcome, Keyboard,
-    LinkBadge, ListPage, ListRow, Millis, Mould, Placed, Polaroids, PowerChoice, QuickMenu,
+    LinkBadge, ListPage, ListRow, Millis, Mould, Placed, Polaroids, PowerChoice, QrPage, QuickMenu,
     QuickMenuFaces, QuickRow, QuickValue, Refusal, Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H,
     CHIP_U, CHIP_V, CHIP_W, HINT_EDGE, HOP_LIFT, MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W,
     SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W, TURN_PAD,
@@ -29,6 +29,7 @@ use crate::link_radio::{radio_jobs, LinkRole, RadioJob, RadioJobs};
 use crate::link_screen::LinkSprites;
 use crate::link_start::{link_port, LinkFail, LinkProgress, LinkStarter, LinkStep};
 use crate::persist::{self, Snapshot};
+use crate::services::{Services, ServicesView, Tailnet, Wanted};
 use crate::video_mode::{self, VideoMode};
 use crate::wifi::{Busy, Network, Security, Wifi, WifiView};
 
@@ -274,7 +275,14 @@ pub enum Phase {
     Devices {
         cursor: usize,
     },
-    /// Typing for the network page, which it goes back to at `cursor`.
+    /// SSH, file sharing, Tailscale and the VPN. `note` says why the last change went nowhere.
+    Services {
+        cursor: usize,
+        note: Option<String>,
+    },
+    /// The code to scan to sign the device in to Tailscale.
+    TailscaleLogin,
+    /// Typing for the network or services page, which it goes back to at `cursor`.
     Keyboard {
         keys: Keyboard,
         typing: Typing,
@@ -289,6 +297,30 @@ pub enum Typing {
     /// The name of a network that does not announce itself.
     HiddenName,
     HiddenPassword(String),
+    /// Root's password, for SSH and file sharing, which is turned on after if `share`.
+    RootPassword {
+        share: bool,
+    },
+}
+
+/// A row on the services page.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum ServiceRow {
+    Ssh,
+    Sharing,
+    Tailscale,
+    Vpn,
+    Password,
+}
+
+impl ServiceRow {
+    const ALL: [ServiceRow; 5] = [
+        ServiceRow::Ssh,
+        ServiceRow::Sharing,
+        ServiceRow::Tailscale,
+        ServiceRow::Vpn,
+        ServiceRow::Password,
+    ];
 }
 
 /// A page slot draws whole, for the frontend to turn into a picture when it changes.
@@ -296,6 +328,7 @@ pub enum Typing {
 pub enum PageModel {
     List(ListPage),
     Keys(Keyboard),
+    Qr(QrPage),
 }
 
 /// A row on the network page.
@@ -456,6 +489,8 @@ pub struct App {
     wifi_view: WifiView,
     bluetooth: Option<Bluetooth>,
     bt_view: BtView,
+    services: Option<Services>,
+    services_view: ServicesView,
     page_face: Option<(TexId, u32, u32)>,
 }
 
@@ -624,6 +659,8 @@ impl App {
             wifi_view: WifiView::default(),
             bluetooth: None,
             bt_view: BtView::default(),
+            services: None,
+            services_view: ServicesView::default(),
             page_face: None,
         }
     }
@@ -648,6 +685,9 @@ impl App {
             }
             app.bluetooth = Some(bluetooth);
         }
+        let services = Services::for_card(root);
+        services.want(app.wanted());
+        app.services = Some(services);
         app.restock_recents();
         app.restock_favorites();
         if let Some((at, i)) = app.remembered_seat() {
@@ -755,7 +795,10 @@ impl App {
         }
         match self.phase {
             Phase::SetClock { .. } | Phase::Keyboard { .. } => true,
-            Phase::QuickMenu { .. } | Phase::Networks { .. } | Phase::Devices { .. } => vertical,
+            Phase::QuickMenu { .. }
+            | Phase::Networks { .. }
+            | Phase::Devices { .. }
+            | Phase::Services { .. } => vertical,
             Phase::Shelf => vertical && self.core_picker.is_none(),
             Phase::Polaroids { .. } => !vertical,
             Phase::Playing { .. } => vertical && self.in_game_menu.is_some(),
@@ -1008,7 +1051,7 @@ impl App {
             | QuickRow::Bezel => None,
             QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
             QuickRow::Bluetooth => Some(QuickValue::flag(self.state.bluetooth)),
-            QuickRow::BtDevices => None,
+            QuickRow::BtDevices | QuickRow::Services => None,
         }
     }
 
@@ -2003,7 +2046,195 @@ impl App {
             Phase::QuickMenu { row } => self.quick_menu_input(row, action),
             Phase::Networks { cursor, .. } => self.networks_input(cursor, action),
             Phase::Devices { cursor } => self.devices_input(cursor, action),
+            Phase::Services { cursor, .. } => self.services_input(cursor, action),
+            Phase::TailscaleLogin => self.tailscale_login_input(action),
             Phase::Keyboard { .. } => self.keyboard_input(action),
+            _ => {}
+        }
+    }
+
+    fn wanted(&self) -> Wanted {
+        Wanted {
+            ssh: self.state.ssh,
+            samba: self.state.samba,
+            tailscale: self.state.tailscale,
+            vpn: self.state.vpn.clone(),
+            password: self.state.password.clone(),
+        }
+    }
+
+    /// Saves the services' settings and has them put into effect.
+    fn services_changed(&mut self) {
+        self.persist();
+        if let Some(services) = &self.services {
+            services.want(self.wanted());
+        }
+    }
+
+    pub fn services_view(&self) -> &ServicesView {
+        &self.services_view
+    }
+
+    fn tunnels(&self) -> Vec<String> {
+        self.root
+            .as_deref()
+            .map(crate::wireguard::tunnels)
+            .unwrap_or_default()
+    }
+
+    fn services_input(&mut self, cursor: usize, action: Action) {
+        let n = ServiceRow::ALL.len();
+        let cursor = cursor.min(n - 1);
+        let (cursor, note) = match action {
+            Action::GbaDown(Btn::Up) => ((cursor + n - 1) % n, None),
+            Action::GbaDown(Btn::Down) => ((cursor + 1) % n, None),
+            Action::GbaDown(Btn::A) => match self.change_service(ServiceRow::ALL[cursor], cursor) {
+                Some(note) => (cursor, note),
+                None => return,
+            },
+            Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::Services,
+                };
+                return;
+            }
+            _ => return,
+        };
+        self.phase = Phase::Services { cursor, note };
+    }
+
+    /// Changes what `row` is for. None when it has gone to another page, else the note to
+    /// show, if any.
+    fn change_service(&mut self, row: ServiceRow, cursor: usize) -> Option<Option<String>> {
+        let password = |share: bool| Phase::Keyboard {
+            keys: Keyboard::new("New password for root", "", true, 4, 63),
+            typing: Typing::RootPassword { share },
+            cursor,
+        };
+        match row {
+            ServiceRow::Ssh => self.state.ssh = !self.state.ssh,
+            ServiceRow::Sharing if !self.state.samba && self.state.password.is_none() => {
+                self.phase = password(true);
+                return None;
+            }
+            ServiceRow::Sharing => self.state.samba = !self.state.samba,
+            ServiceRow::Tailscale => match (self.state.tailscale, &self.services_view.tailnet) {
+                (true, Tailnet::SignIn(_)) => {
+                    self.phase = Phase::TailscaleLogin;
+                    return None;
+                }
+                (on, _) => self.state.tailscale = !on,
+            },
+            ServiceRow::Vpn => {
+                let tunnels = self.tunnels();
+                if tunnels.is_empty() {
+                    return Some(Some(format!(
+                        "Put WireGuard configs in {} on the card",
+                        crate::wireguard::WG_DIR
+                    )));
+                }
+                // Off, then each tunnel in turn, then off again.
+                let at = self
+                    .state
+                    .vpn
+                    .as_ref()
+                    .and_then(|v| tunnels.iter().position(|t| t == v));
+                self.state.vpn = match at {
+                    None => tunnels.first().cloned(),
+                    Some(i) => tunnels.get(i + 1).cloned(),
+                };
+            }
+            ServiceRow::Password => {
+                self.phase = password(false);
+                return None;
+            }
+        }
+        self.services_changed();
+        Some(None)
+    }
+
+    fn services_page(&self, cursor: usize, note: Option<&str>) -> ListPage {
+        let v = &self.services_view;
+        let on = |b: bool| if b { "On" } else { "Off" }.to_string();
+        let rows: Vec<ListRow> = ServiceRow::ALL
+            .iter()
+            .map(|row| {
+                let (label, detail) = match row {
+                    ServiceRow::Ssh => ("SSH", on(self.state.ssh)),
+                    ServiceRow::Sharing => ("File sharing", on(self.state.samba)),
+                    ServiceRow::Tailscale => (
+                        "Tailscale",
+                        match (&v.tailnet, self.state.tailscale) {
+                            (_, false) | (Tailnet::Off, _) => "Off".into(),
+                            (Tailnet::Starting, _) => "Starting".into(),
+                            (Tailnet::SignIn(_), _) => "Sign in".into(),
+                            (Tailnet::Approval, _) => "Needs approval".into(),
+                            (Tailnet::Running(ip), _) => ip.clone().unwrap_or_else(|| "On".into()),
+                        },
+                    ),
+                    ServiceRow::Vpn => (
+                        "VPN",
+                        match (&self.state.vpn, &v.vpn) {
+                            (None, _) => "Off".into(),
+                            (Some(name), Some(up)) if name == up => name.clone(),
+                            (Some(_), _) if v.busy.is_some() => "Connecting".into(),
+                            (Some(_), _) => "Not connected".into(),
+                        },
+                    ),
+                    ServiceRow::Password => (
+                        "Password",
+                        match self.state.password {
+                            Some(_) => "Set".into(),
+                            None => "BaseOS's".into(),
+                        },
+                    ),
+                };
+                ListRow {
+                    label: label.into(),
+                    detail,
+                    bars: None,
+                }
+            })
+            .collect();
+        let address = match &self.wifi_view.ip {
+            Some(ip) => format!("root@{}.local   {ip}", crate::services::hostname()),
+            None => "Connect to Wi-Fi to reach these".into(),
+        };
+        let status = match (note, &v.busy, &v.error) {
+            (Some(note), ..) if !note.is_empty() => note.to_string(),
+            (_, Some(busy), _) => busy.clone(),
+            (_, None, Some(error)) => error.clone(),
+            _ => address,
+        };
+        let row = ServiceRow::ALL[cursor.min(ServiceRow::ALL.len() - 1)];
+        let hints = match (row, &v.tailnet) {
+            (ServiceRow::Tailscale, Tailnet::SignIn(_)) if self.state.tailscale => {
+                "A sign in   B back"
+            }
+            (ServiceRow::Vpn, _) => "A next tunnel   B back",
+            _ => "A change   B back",
+        };
+        ListPage {
+            title: "Services".into(),
+            status,
+            cursor: cursor.min(rows.len() - 1),
+            rows,
+            hints: hints.into(),
+        }
+    }
+
+    fn tailscale_login_input(&mut self, action: Action) {
+        let back = Phase::Services {
+            cursor: ServiceRow::Tailscale as usize,
+            note: None,
+        };
+        match action {
+            Action::GbaDown(Btn::X) => {
+                self.state.tailscale = false;
+                self.services_changed();
+                self.phase = back;
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => self.phase = back,
             _ => {}
         }
     }
@@ -2232,9 +2463,18 @@ impl App {
         match keys.press(input) {
             KeyOutcome::Typing => {}
             KeyOutcome::Cancelled => {
-                self.phase = Phase::Networks { cursor, note: None };
+                self.phase = match typing {
+                    Typing::RootPassword { .. } => Phase::Services { cursor, note: None },
+                    _ => Phase::Networks { cursor, note: None },
+                };
             }
             KeyOutcome::Done(text) => match typing {
+                Typing::RootPassword { share } => {
+                    self.state.password = Some(text);
+                    self.state.samba |= share;
+                    self.services_changed();
+                    self.phase = Phase::Services { cursor, note: None };
+                }
                 Typing::Password(ssid) => {
                     self.with_wifi(|w| w.join(&ssid, Some(&text)));
                     self.phase = Phase::Networks { cursor, note: None };
@@ -2269,6 +2509,18 @@ impl App {
             )),
             Phase::Keyboard { keys, .. } => Some(PageModel::Keys(keys.clone())),
             Phase::Devices { cursor } => Some(PageModel::List(self.devices_page(*cursor))),
+            Phase::Services { cursor, note } => Some(PageModel::List(
+                self.services_page(*cursor, note.as_deref()),
+            )),
+            Phase::TailscaleLogin => match &self.services_view.tailnet {
+                Tailnet::SignIn(url) => Some(PageModel::Qr(QrPage {
+                    title: "Tailscale".into(),
+                    status: "Scan to sign in, or open the link on another device".into(),
+                    url: url.clone(),
+                    hints: "X turn off   B back".into(),
+                })),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -2417,6 +2669,12 @@ impl App {
                 self.phase = clock_screen(self.utc_secs(), self.state.utc_offset_min, true);
             }
             QuickRow::About => self.phase = Phase::About,
+            QuickRow::Services => {
+                self.phase = Phase::Services {
+                    cursor: 0,
+                    note: None,
+                }
+            }
             QuickRow::BtDevices => {
                 self.phase = Phase::Devices { cursor: 0 };
                 // Open on what is paired; a search only when there is nothing yet.
@@ -2592,6 +2850,7 @@ impl App {
             | QuickRow::WifiNetworks
             | QuickRow::Bluetooth
             | QuickRow::BtDevices
+            | QuickRow::Services
             | QuickRow::Bezel => return,
         }
         self.persist();
@@ -3060,6 +3319,18 @@ impl App {
             }
             self.bt_view = view;
         }
+        if let Some(services) = &self.services {
+            self.services_view = services.view();
+            // The code goes once it has been used, or when there is no longer one to show.
+            if matches!(self.phase, Phase::TailscaleLogin)
+                && !matches!(self.services_view.tailnet, Tailnet::SignIn(_))
+            {
+                self.phase = Phase::Services {
+                    cursor: ServiceRow::Tailscale as usize,
+                    note: None,
+                };
+            }
+        }
         self.play_hold();
         self.repeat_held_dir();
         let offer = self.undo_label();
@@ -3454,7 +3725,11 @@ impl App {
                 self.draw_menu_footer(out);
                 return;
             }
-            Phase::Networks { .. } | Phase::Devices { .. } | Phase::Keyboard { .. } => {
+            Phase::Networks { .. }
+            | Phase::Devices { .. }
+            | Phase::Services { .. }
+            | Phase::TailscaleLogin
+            | Phase::Keyboard { .. } => {
                 slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
                 if let Some((tex, w, h)) = self.page_face {
                     let canvas = self.canvas();
