@@ -169,7 +169,7 @@ tasks:
       ROOT: '{{.ROOT | default "./sdcard"}}'
     cmds:
       - ./target/debug/slot --init-root {{.ROOT}}
-      - 'echo "content root ready at {{.ROOT}}: roms in Games/<SYSTEM> (GBA, GB, GBC, NES, SNES, MD, SMS, GG, PCE, NGP, WS, LYNX, PS), labels in the matching Labels/<SYSTEM>, battery saves in the matching Saves/<SYSTEM>, save states under the matching States/<SYSTEM>, BIOS files (gba_bios.bin, lynxboot.img, PlayStation BIOS) in BIOS, pngs in Wallpapers, palette in Config/theme.txt"'
+      - 'echo "content root ready at {{.ROOT}}: roms in Games/<SYSTEM> (GBA, GB, GBC, NES, SNES, MD, SMS, GG, PCE, NGP, WS, LYNX, PS), labels in the matching Labels/<SYSTEM>, battery saves in the matching Saves/<SYSTEM>, save states under the matching States/<SYSTEM>, BIOS files (gba_bios.bin, lynxboot.img, PlayStation BIOS) in BIOS, pngs or jpgs in Wallpapers, palette in Config/theme.txt"'
       - 'echo "nothing is moved for you: a file loose at the top of Games/, Saves/, Labels/ or States/ is left where it is and never reaches the shelf"'
 
   run:
@@ -374,6 +374,8 @@ tasks:
       - cp -r licenses {{.OUT}}/System/licenses
       - cp vendor/cores.manifest {{.OUT}}/System/licenses/cores.manifest
       - cp -R vendor/services {{.OUT}}/System/services
+      - mkdir -p {{.OUT}}/System/Wallpapers
+      - cp assets/wallpapers/*.jpg assets/wallpapers/*.png {{.OUT}}/System/Wallpapers/
       - |
         set -eu
         # The release this tree is, which the updater compares with the latest.
@@ -442,6 +444,8 @@ tasks:
       - for c in {{.FETCHED}}; do adb push "vendor/${c}_libretro.so" '{{.SD}}/System/'; done
       - adb push licenses '{{.SD}}/System/'
       - adb push vendor/services '{{.SD}}/System/'
+      - adb shell 'mkdir -p {{.SD}}/System/Wallpapers'
+      - for f in assets/wallpapers/*.jpg assets/wallpapers/*.png; do adb push "$f" '{{.SD}}/System/Wallpapers/'; done
       - |
         set -euo pipefail
         sha="$(cat vendor/gpsp-src.sha)"

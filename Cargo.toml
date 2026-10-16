@@ -25,6 +25,7 @@ unicode-normalization = "0.1"
 resvg = { version = "0.48", default-features = false }
 usvg = { version = "0.48", default-features = false }
 qrcode = { version = "0.14", default-features = false }
+jpeg-decoder = { version = "0.3", default-features = false }
 
 [profile.device]
 inherits = "release"

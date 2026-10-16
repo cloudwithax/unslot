@@ -1013,7 +1013,7 @@ fn sync_wallpaper(app: &mut App, compositor: &mut Compositor, state: &mut Wallpa
         if let Some(name) = &shown {
             if let Some(rgba) = app
                 .root()
-                .map(|root| root.join("Wallpapers").join(name))
+                .map(|root| crate::wallpaper::path(root, name))
                 .and_then(|path| wallpaper_face(&path))
             {
                 let id = match state.tex {

@@ -139,14 +139,48 @@ fn a_sidecar_is_never_the_wallpaper() {
 }
 
 #[test]
-fn only_pngs_are_picked() {
+fn only_pictures_are_picked() {
     let (d, dir) = papers(&[]);
     std::fs::write(dir.join("notes.txt"), b"hello").unwrap();
-    std::fs::write(dir.join("art.jpg"), b"not a png either").unwrap();
-    assert!(pick(d.path(), 0).is_none(), "a non png was picked");
+    assert!(pick(d.path(), 0).is_none(), "a text file was picked");
     write_png(&dir, "real.PNG");
     assert!(
         pick(d.path(), 0).is_some(),
         "an upper case extension was skipped"
+    );
+    let (d, dir) = papers(&[]);
+    std::fs::write(dir.join("photo.JPG"), b"a jpeg, by its name").unwrap();
+    assert_eq!(pick(d.path(), 0).map(name).as_deref(), Some("photo.JPG"));
+}
+
+#[test]
+fn the_bundled_wallpapers_are_picked_beside_yours_and_yours_win_a_name() {
+    let (d, dir) = papers(&["mine.png", "nebula.png"]);
+    let bundled = d.path().join(slot::wallpaper::BUNDLED);
+    std::fs::create_dir_all(&bundled).unwrap();
+    write_png(&bundled, "nebula.png");
+    write_png(&bundled, "felt.png");
+    assert_eq!(
+        slot::wallpaper::list(d.path()),
+        ["felt.png", "mine.png", "nebula.png"]
+    );
+    assert_eq!(
+        slot::wallpaper::path(d.path(), "nebula.png"),
+        dir.join("nebula.png")
+    );
+    assert_eq!(
+        slot::wallpaper::path(d.path(), "felt.png"),
+        bundled.join("felt.png")
+    );
+    let mut seen = HashSet::new();
+    for seed in 0..3 {
+        let p = pick(d.path(), seed).unwrap();
+        assert!(p.exists(), "{} is not where it was said to be", p.display());
+        seen.insert(name(p));
+    }
+    assert_eq!(
+        seen.len(),
+        3,
+        "a round did not deal every wallpaper: {seen:?}"
     );
 }

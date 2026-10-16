@@ -6,7 +6,7 @@ pub fn cover(path: &Path, w: u32, h: u32) -> Option<Vec<u8>> {
 }
 
 pub fn cover_bytes(bytes: &[u8], w: u32, h: u32) -> Option<Vec<u8>> {
-    let (src, sw, sh) = decode_png_bytes(bytes)?;
+    let (src, sw, sh) = decode_bytes(bytes)?;
     cover_rgba(&src, sw, sh, w, h)
 }
 
@@ -59,7 +59,48 @@ fn box_average(src: &[u8], sw: u32, sh: u32, x0: f32, y0: f32, x1: f32, y1: f32)
 
 fn decode(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
     let bytes = std::fs::read(path).ok()?;
-    decode_png_bytes(&bytes)
+    decode_bytes(&bytes)
+}
+
+/// A PNG or a JPEG, told apart by its first bytes rather than its name.
+fn decode_bytes(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+    match bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        true => decode_jpeg_bytes(bytes),
+        false => decode_png_bytes(bytes),
+    }
+}
+
+/// A JPEG as RGBA, as most wallpapers come. Bounded like a PNG: a picture past 16 million pixels
+/// is refused rather than held.
+fn decode_jpeg_bytes(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+    let mut dec = jpeg_decoder::Decoder::new(bytes);
+    dec.read_info().ok()?;
+    let info = dec.info()?;
+    let (w, h) = (u32::from(info.width), u32::from(info.height));
+    if w == 0 || h == 0 || w as u64 * h as u64 > 16 << 20 {
+        return None;
+    }
+    let px = dec.decode().ok()?;
+    let rgba: Vec<u8> = match info.pixel_format {
+        jpeg_decoder::PixelFormat::RGB24 => px
+            .chunks_exact(3)
+            .flat_map(|p| [p[0], p[1], p[2], 255])
+            .collect(),
+        jpeg_decoder::PixelFormat::L8 => px.iter().flat_map(|&l| [l, l, l, 255]).collect(),
+        jpeg_decoder::PixelFormat::L16 => px
+            .chunks_exact(2)
+            .flat_map(|p| [p[0], p[0], p[0], 255])
+            .collect(),
+        jpeg_decoder::PixelFormat::CMYK32 => px
+            .chunks_exact(4)
+            .flat_map(|p| {
+                let k = 255 - p[3] as u32;
+                let ch = |c: u8| ((255 - c as u32) * k / 255) as u8;
+                [ch(p[0]), ch(p[1]), ch(p[2]), 255]
+            })
+            .collect(),
+    };
+    (rgba.len() == (w * h * 4) as usize).then_some((rgba, w, h))
 }
 
 pub(crate) fn decode_png_bytes(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
@@ -187,5 +228,41 @@ fn unpremultiply(rgba: &mut [u8]) {
         for c in &mut px[..3] {
             *c = ((*c as u32 * 255 + a as u32 / 2) / a as u32).min(255) as u8;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_jpeg_covers_like_a_png() {
+        // Red over blue, 16 by 16.
+        let bytes = include_bytes!("../tests/fixtures/two-bands.jpg");
+        let px = cover_bytes(bytes, 4, 4).expect("the jpeg did not decode");
+        let (top, bottom) = (&px[..4], &px[(3 * 4 * 4)..][..4]);
+        assert!(top[0] > 180 && top[2] < 80, "the top is not red: {top:?}");
+        assert!(
+            bottom[2] > 180 && bottom[0] < 80,
+            "the bottom is not blue: {bottom:?}"
+        );
+        assert_eq!(top[3], 255);
+    }
+
+    #[test]
+    fn a_greyscale_jpeg_is_grey() {
+        let px = cover_bytes(include_bytes!("../tests/fixtures/grey.jpg"), 2, 2).unwrap();
+        let p = &px[..4];
+        assert!(
+            p[0] == p[1] && p[1] == p[2] && (120..=136).contains(&p[0]),
+            "{p:?}"
+        );
+    }
+
+    #[test]
+    fn a_broken_jpeg_is_nothing() {
+        let mut bytes = include_bytes!("../tests/fixtures/two-bands.jpg").to_vec();
+        bytes.truncate(40);
+        assert!(cover_bytes(&bytes, 4, 4).is_none());
     }
 }

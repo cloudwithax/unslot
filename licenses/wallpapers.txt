@@ -1,0 +1,135 @@
+The wallpapers unslot ships in System/Wallpapers.
+
+Changes made for unslot: the space photos were scaled and centre-cropped to 1440x960; the textures had a
+centre section cropped and scaled to 1440x960; the pixel art was flattened from its layers and scaled
+up by a whole number to 480 px tall, as noted below. All were re-encoded.
+
+Wallpaper credits
+=================
+
+Each entry: file, title, credit, licence, source page.
+CC0 and public-domain items need no credit. The credit is listed anyway as a courtesy.
+CC BY 4.0 items MUST show the credit line exactly as written, wherever the image is shown or distributed.
+If an image is changed beyond resizing or cropping, the publisher suggests noting the change after the credit line.
+
+------------------------------------------------------------------------
+SPACE
+------------------------------------------------------------------------
+
+carina-cosmic-cliffs.jpg
+  Title:   NIRCam Image of the "Cosmic Cliffs" in Carina
+  Credit:  NASA, ESA, CSA, and STScI
+  Licence: Creative Commons Attribution 4.0 International (CC BY 4.0)
+           https://creativecommons.org/licenses/by/4.0/
+           (ESA/Webb usage terms: https://esawebb.org/copyright/)
+  Source:  https://esawebb.org/images/weic2205a/
+  File:    https://cdn.esawebb.org/archives/images/publicationjpg/weic2205a.jpg
+
+barred-spiral-galaxy.jpg
+  Title:   A poster-size image of the beautiful barred spiral galaxy NGC 1300
+  Credit:  NASA, ESA, and The Hubble Heritage Team (STScI/AURA)
+  Licence: Creative Commons Attribution 4.0 International (CC BY 4.0)
+           https://creativecommons.org/licenses/by/4.0/
+           (ESA/Hubble usage terms: https://esahubble.org/copyright/)
+  Source:  https://esahubble.org/images/opo0501a/
+  File:    https://cdn.esahubble.org/archives/images/wallpaper_uhd/opo0501a.jpg
+
+lagoon-nebula.jpg
+  Title:   Hubble's 28th birthday picture: The Lagoon Nebula
+  Credit:  NASA, ESA, STScI
+  Licence: Creative Commons Attribution 4.0 International (CC BY 4.0)
+           https://creativecommons.org/licenses/by/4.0/
+           (ESA/Hubble usage terms: https://esahubble.org/copyright/)
+  Source:  https://esahubble.org/images/heic1808a/
+  File:    https://cdn.esahubble.org/archives/images/wallpaper5/heic1808a.jpg
+           (ESA/Hubble's own 4:3 2048x1536 wallpaper crop; the full original is portrait)
+
+earth-aurora.jpg
+  Title:   A brilliant aurora streams above Earth's horizon
+  Credit:  NASA/Kjell Lindgren
+  Licence: Public domain (US government work, NASA; Commons tag PD-USGov-NASA)
+           https://commons.wikimedia.org/wiki/Template:PD-USGov-NASA
+  Source:  https://commons.wikimedia.org/wiki/File:A_brilliant_aurora_streams_above_Earth%27s_horizon_(1).jpg
+           (originally https://www.flickr.com/photos/nasa2explore/52295677147/)
+  File:    https://upload.wikimedia.org/wikipedia/commons/8/86/A_brilliant_aurora_streams_above_Earth%27s_horizon_%281%29.jpg
+
+------------------------------------------------------------------------
+TEXTURES
+------------------------------------------------------------------------
+
+brown-leather.jpg
+  Title:   Brown Leather (diffuse/albedo map, 4K)
+  Credit:  Rob Tuytel, Poly Haven
+  Licence: CC0 1.0 Universal (public domain dedication)
+           https://creativecommons.org/publicdomain/zero/1.0/
+           (Poly Haven licence: https://polyhaven.com/license)
+  Source:  https://polyhaven.com/a/brown_leather
+  File:    https://dl.polyhaven.org/file/ph-assets/Textures/jpg/4k/brown_leather/brown_leather_albedo_4k.jpg
+
+denim.jpg
+  Title:   Denim Fabric 03 (diffuse map, 4K)
+  Credit:  colormass (photography), Rico Cilliers (processing), Poly Haven
+  Licence: CC0 1.0 Universal (public domain dedication)
+           https://creativecommons.org/publicdomain/zero/1.0/
+           (Poly Haven licence: https://polyhaven.com/license)
+  Source:  https://polyhaven.com/a/denim_fabric_03
+  File:    https://dl.polyhaven.org/file/ph-assets/Textures/jpg/4k/denim_fabric_03/denim_fabric_03_diff_4k.jpg
+
+red-velvet.jpg
+  Title:   Velour Velvet (diffuse map, 4K)
+  Credit:  colormass (photography), Rico Cilliers (processing), Poly Haven
+  Licence: CC0 1.0 Universal (public domain dedication)
+           https://creativecommons.org/publicdomain/zero/1.0/
+           (Poly Haven licence: https://polyhaven.com/license)
+  Source:  https://polyhaven.com/a/velour_velvet
+  File:    https://dl.polyhaven.org/file/ph-assets/Textures/jpg/4k/velour_velvet/velour_velvet_diff_4k.jpg
+
+carbon-fibre.jpg
+  Title:   Fabric 004 (carbon fibre; Color map from the 2K-JPG pack)
+  Credit:  ambientCG.com (Lennart Demes)
+  Licence: CC0 1.0 Universal (public domain dedication)
+           https://creativecommons.org/publicdomain/zero/1.0/
+           (ambientCG licence: https://docs.ambientcg.com/license/)
+  Source:  https://ambientcg.com/view?id=Fabric004
+  File:    https://ambientcg.com/get?file=Fabric004_2K-JPG.zip  (member Fabric004_2K-JPG_Color.jpg)
+
+------------------------------------------------------------------------
+PIXEL ART
+All four are by Luis Zuno (ansimuz). Each is flattened from the pack's own
+background layers and scaled up with nearest-neighbour (whole-number factor)
+to 480 px tall. Each pack's licence.txt says: "License (CC0) You can copy,
+modify, distribute and perform the work, even for commercial purposes, all
+without asking permission".
+------------------------------------------------------------------------
+
+neon-city.png
+  Title:   Warped City (background layers: skyline-a, buildings-bg, near-buildings-bg), 2x
+  Credit:  Luis Zuno (ansimuz)
+  Licence: CC0 1.0 Universal (public domain dedication)
+           https://creativecommons.org/publicdomain/zero/1.0/
+  Source:  https://opengameart.org/content/warped-city
+  File:    https://opengameart.org/sites/default/files/warped_city_files.zip
+
+neon-rooftops.png
+  Title:   Warped City 2 (cyberpunk-city-2-back-preview.png, supplied in the pack at 3x)
+  Credit:  Luis Zuno (ansimuz)
+  Licence: CC0 1.0 Universal (public domain dedication)
+           https://creativecommons.org/publicdomain/zero/1.0/
+  Source:  https://opengameart.org/content/warped-city-2
+  File:    https://opengameart.org/sites/default/files/cyberpunk_city_2_files.zip
+
+dusk-mountains.png
+  Title:   Mountain at Dusk Background (all 5 parallax layers), 3x
+  Credit:  Luis Zuno (ansimuz)
+  Licence: CC0 1.0 Universal (public domain dedication)
+           https://creativecommons.org/publicdomain/zero/1.0/
+  Source:  https://opengameart.org/content/mountain-at-dusk-background
+  File:    https://opengameart.org/sites/default/files/parallax_mountain_pack.zip
+
+pixel-space.png
+  Title:   Space Background (all 5 parallax layers, planets placed by hand), 3x
+  Credit:  Luis Zuno (ansimuz)
+  Licence: CC0 1.0 Universal (public domain dedication)
+           https://creativecommons.org/publicdomain/zero/1.0/
+  Source:  https://opengameart.org/content/space-background-3
+  File:    https://opengameart.org/sites/default/files/space_background_pack.zip

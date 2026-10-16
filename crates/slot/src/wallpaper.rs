@@ -1,7 +1,18 @@
 use std::path::{Path, PathBuf};
 
+/// Your own wallpapers, on the card.
+pub const OWN: &str = "Wallpapers";
+/// The ones unslot ships, which come and go with System and so with its updates.
+pub const BUNDLED: &str = "System/Wallpapers";
+
+/// Every wallpaper there is to pick, yours and the bundled ones, by name. A name in both is yours.
 pub fn list(root: &Path) -> Vec<String> {
-    let mut files = pngs(&root.join("Wallpapers"));
+    let mut files = pictures(&root.join(OWN));
+    for name in pictures(&root.join(BUNDLED)) {
+        if !files.iter().any(|f| f.eq_ignore_ascii_case(&name)) {
+            files.push(name);
+        }
+    }
     files.sort_by(|a, b| {
         a.to_lowercase()
             .cmp(&b.to_lowercase())
@@ -10,16 +21,24 @@ pub fn list(root: &Path) -> Vec<String> {
     files
 }
 
+/// Where the wallpaper called `name` is: your folder's, else the bundled one.
+pub fn path(root: &Path, name: &str) -> PathBuf {
+    let own = root.join(OWN).join(name);
+    match own.exists() {
+        true => own,
+        false => root.join(BUNDLED).join(name),
+    }
+}
+
 pub fn pick(root: &Path, seed: u64) -> Option<PathBuf> {
-    let dir = root.join("Wallpapers");
-    let mut files = pngs(&dir);
+    let mut files = list(root);
     if files.is_empty() {
         return None;
     }
     files.sort();
     let mut rng = Rng(seed);
-    let path = root.join("Config").join("wallpaper.deck");
-    let (mut shown, mut queued) = read_deck(&path);
+    let deck = root.join("Config").join("wallpaper.deck");
+    let (mut shown, mut queued) = read_deck(&deck);
     shown.retain(|n| files.contains(n));
     queued.retain(|n| files.contains(n));
     for n in &files {
@@ -42,13 +61,13 @@ pub fn pick(root: &Path, seed: u64) -> Option<PathBuf> {
     }
     let next = queued.remove(0);
     shown.push(next.clone());
-    if let Err(e) = slot_store::atomic_write(&path, write_deck(&shown, &queued).as_bytes()) {
+    if let Err(e) = slot_store::atomic_write(&deck, write_deck(&shown, &queued).as_bytes()) {
         eprintln!("slot: wallpaper.deck: {e}");
     }
-    Some(dir.join(next))
+    Some(path(root, &next))
 }
 
-fn pngs(dir: &Path) -> Vec<String> {
+fn pictures(dir: &Path) -> Vec<String> {
     std::fs::read_dir(dir)
         .ok()
         .into_iter()
@@ -56,7 +75,13 @@ fn pngs(dir: &Path) -> Vec<String> {
         .flatten()
         .map(|e| e.path())
         .filter(|p| !slot_store::is_hidden(p))
-        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")))
+        .filter(|p| {
+            p.extension().is_some_and(|e| {
+                ["png", "jpg", "jpeg"]
+                    .iter()
+                    .any(|x| e.eq_ignore_ascii_case(x))
+            })
+        })
         .filter_map(|p| Some(p.file_name()?.to_str()?.to_owned()))
         .collect()
 }

@@ -45,6 +45,9 @@ the card and restart. BaseOS installs it before the frontend starts, replacing `
 keeping games, saves and settings; if the new one never starts, the old one comes back after
 three tries. Updates, under Network, downloads unslot's and BaseOS's own updates the same way.
 
+Wallpaper, under General, picks the background: unslot's own set (space, textures and pixel art,
+credited in `System/licenses/wallpapers.txt`), or any PNG or JPG you put in `Wallpapers`.
+
 > [!IMPORTANT]
 > ROMs must be unzipped. slot does not read `.zip` or `.7z` files.
 
