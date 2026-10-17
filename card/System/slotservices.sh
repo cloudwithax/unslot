@@ -1,12 +1,16 @@
 #!/bin/sh
-# Network services for slot: BaseOS's SSH server, and Samba, Tailscale and WireGuard from
-# System/services. Slot keeps what is wanted and calls this to start and stop things; it talks to
+# Network services for slot: BaseOS's SSH server, and Samba, Syncthing, Tailscale and WireGuard
+# from System/services. Slot keeps what is wanted and calls this to start and stop things; it talks to
 # tailscaled and wireguard-go through their own sockets for the rest, and sets wg0's routes itself.
 #
 #   slotservices.sh ssh on|off
 #   slotservices.sh password            set root's password to the line on stdin
 #   slotservices.sh samba on ROOT       share ROOT as "Card" to root, with the password on stdin
 #   slotservices.sh samba off
+#   slotservices.sh syncthing on ROOT   run Syncthing from ROOT/Config/syncthing, its web page
+#                                       signed in to as root with the password on stdin, and
+#                                       print its device ID
+#   slotservices.sh syncthing off
 #   slotservices.sh tailscale on|off    start or stop tailscaled
 #   slotservices.sh tailscale cli ARGS  the tailscale command, against slot's tailscaled
 #   slotservices.sh vpn up|down         start or stop wireguard-go on wg0
@@ -30,6 +34,7 @@ DROPBEAR_PID="$RUN/dropbear.pid"
 SMB="$RUN/slotsamba"
 TS_SOCK="$RUN/tailscale/tailscaled.sock"
 TS_PID="$RUN/slot-tailscaled.pid"
+ST_PID="$RUN/slot-syncthing.pid"
 
 alive() {
 	[ -f "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null
@@ -129,6 +134,41 @@ samba_off() {
 	return 0
 }
 
+syncthing_on() {
+	root="$1"
+	home="$root/Config/syncthing"
+	pw=""
+	IFS= read -r pw || [ -n "$pw" ] || { echo "no password given" >&2; return 1; }
+	syncthing_off
+	/bin/mkdir -p "$home"
+	# Makes the keys and config the first time, and each time sets the web page's login.
+	printf '%s\n' "$pw" | "$SVC/syncthing" generate --home="$home" --gui-user=root \
+		--gui-password=- --no-port-probing > "$RUN/slot-syncthing.log" 2>&1 ||
+		{ echo "could not set up $home" >&2; return 1; }
+	# Folders added on the web page go on the card rather than in BaseOS's small root, and the
+	# card's FAT has no permissions to keep in step.
+	sed -i "/<folder id=\"\" label=\"\"/{s|path=\"[^\"]*\"|path=\"$root\"|;s|ignorePerms=\"false\"|ignorePerms=\"true\"|}" \
+		"$home/config.xml"
+	"$SVC/syncthing" serve --home="$home" --no-browser --no-restart --no-upgrade \
+		--gui-address=0.0.0.0:8384 --log-file="$RUN/slot-syncthing.log" \
+		--log-max-size=1048576 --log-max-old-files=0 < /dev/null > /dev/null 2>&1 &
+	echo $! > "$ST_PID"
+	"$SVC/syncthing" device-id --home="$home"
+}
+
+syncthing_off() {
+	[ -f "$ST_PID" ] || return 0
+	pid="$(cat "$ST_PID")"
+	stop_pid "$ST_PID"
+	# Gone before another starts on its database, which it holds until it exits.
+	s=0
+	while kill -0 "$pid" 2>/dev/null && [ "$s" -lt $((WAIT_S * 4)) ]; do
+		sleep 0.25 2>/dev/null || sleep 1
+		s=$((s + 1))
+	done
+	return 0
+}
+
 tailscale_on() {
 	alive "$TS_PID" && return 0
 	/bin/mkdir -p "$DATA/tailscale" "$(dirname "$TS_SOCK")"
@@ -169,6 +209,8 @@ case "${1:-} ${2:-}" in
 "password "*) set_password ;;
 "samba on") samba_on "${3:?the folder to share}" ;;
 "samba off") samba_off ;;
+"syncthing on") syncthing_on "${3:?the card's root}" ;;
+"syncthing off") syncthing_off ;;
 "tailscale on") tailscale_on ;;
 "tailscale off") tailscale_off ;;
 "tailscale cli")
@@ -178,7 +220,7 @@ case "${1:-} ${2:-}" in
 "vpn up") vpn_up ;;
 "vpn down") vpn_down ;;
 *)
-	echo "usage: slotservices.sh ssh on|off | password | samba on ROOT|off | tailscale on|off|cli ARGS | vpn up|down" >&2
+	echo "usage: slotservices.sh ssh on|off | password | samba on ROOT|off | syncthing on ROOT|off | tailscale on|off|cli ARGS | vpn up|down" >&2
 	exit 2
 	;;
 esac

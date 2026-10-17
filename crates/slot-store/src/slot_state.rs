@@ -234,6 +234,8 @@ pub struct SlotState {
     pub ssh: bool,
     /// Whether the card is shared over SMB.
     pub samba: bool,
+    /// Whether Syncthing runs, with its settings in `Config/syncthing` on the card.
+    pub syncthing: bool,
     pub tailscale: bool,
     /// The WireGuard tunnel to bring up, by the name of its config in `Config/wireguard`.
     pub vpn: Option<String>,
@@ -384,6 +386,7 @@ impl Default for SlotState {
             bluetooth: false,
             ssh: true,
             samba: false,
+            syncthing: false,
             tailscale: false,
             vpn: None,
             password: None,
@@ -485,6 +488,7 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     text.push_str(&format!("bluetooth={}\n", s.bluetooth as u8));
     text.push_str(&format!("ssh={}\n", s.ssh as u8));
     text.push_str(&format!("samba={}\n", s.samba as u8));
+    text.push_str(&format!("syncthing={}\n", s.syncthing as u8));
     text.push_str(&format!("tailscale={}\n", s.tailscale as u8));
     text.push_str(&format!("vpn={}\n", s.vpn.as_deref().unwrap_or("")));
     text.push_str(&format!(
@@ -539,7 +543,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut show_titles = None;
     let mut wifi = None;
     let mut bluetooth = None;
-    let (mut ssh, mut samba, mut tailscale) = (None, None, None);
+    let (mut ssh, mut samba, mut syncthing, mut tailscale) = (None, None, None, None);
     let (mut vpn, mut password) = (None, None);
     let mut shelf = None;
     let mut shelf_cart = None;
@@ -591,6 +595,7 @@ fn parse(text: &str) -> Option<SlotState> {
             "bluetooth" => bluetooth = flag(value),
             "ssh" => ssh = flag(value),
             "samba" => samba = flag(value),
+            "syncthing" => syncthing = flag(value),
             "tailscale" => tailscale = flag(value),
             "vpn" => vpn = Some(value.to_string()).filter(|v| !v.is_empty()),
             "password" => password = Some(value.to_string()).filter(|v| !v.is_empty()),
@@ -650,6 +655,7 @@ fn parse(text: &str) -> Option<SlotState> {
         bluetooth: bluetooth.unwrap_or(fallback.bluetooth),
         ssh: ssh.unwrap_or(fallback.ssh),
         samba: samba.unwrap_or(fallback.samba),
+        syncthing: syncthing.unwrap_or(fallback.syncthing),
         tailscale: tailscale.unwrap_or(fallback.tailscale),
         vpn,
         password,

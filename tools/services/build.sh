@@ -4,6 +4,7 @@
 #   tailscaled         Tailscale, daemon and CLI in one small binary (the CLI runs with
 #                      TS_BE_CLI=1), built from a pinned tag with only the features slot uses
 #   wireguard-go       WireGuard in userspace, built from a pinned commit, fully static
+#   syncthing          Syncthing's own static release build, pinned and checked
 #   samba/             spruceOS's prebuilt Samba 3.6.23 for aarch64 glibc, from a pinned commit,
 #                      with the libnsl.so.1 it needs and BaseOS lacks, from Ubuntu jammy's libc6
 #   services.manifest  where each came from and its sha256
@@ -20,6 +21,8 @@ TAILSCALE_TAG=v1.104.1
 WIREGUARD_GO_COMMIT=2631ce99a06f27120d581611cf125d68bc6aa565
 SPRUCE_COMMIT=590ebbb2e2ccf066ced623e2405710c1483b2558
 # The glibc BaseOS's own is harvested from, so its libnsl wants nothing that one lacks.
+SYNCTHING_VERSION=v2.1.6
+SYNCTHING_SHA=f054de02462d5d58bd126908f2f92b63aba74f162a5be85e50e96d656e7db47d
 LIBC6_DEB=libc6_2.35-0ubuntu3.15_arm64.deb
 LIBC6_SHA=dd88cc85dcfbac19c0c9b606676b7b1b87f851d75afa5c830fc5ba1293a30833
 CACHE="${SERVICES_CACHE:-$HOME/.cache/unslot-services}"
@@ -80,6 +83,14 @@ fi
 (cd "$src" && go build -trimpath -ldflags='-s -w' -o "$OUT/wireguard-go" .)
 note wireguard-go "$OUT/wireguard-go" "https://github.com/WireGuard/wireguard-go/tree/$WIREGUARD_GO_COMMIT"
 
+# Syncthing, as it releases it.
+url="https://github.com/syncthing/syncthing/releases/download/$SYNCTHING_VERSION/syncthing-linux-arm64-$SYNCTHING_VERSION.tar.gz"
+tgz="$CACHE/syncthing-linux-arm64-$SYNCTHING_VERSION.tar.gz"
+[ -f "$tgz" ] || curl -fsSL -o "$tgz" "$url"
+echo "$SYNCTHING_SHA  $tgz" | sha256sum -c - >/dev/null
+tar -xzf "$tgz" -C "$OUT" --strip-components=1 "syncthing-linux-arm64-$SYNCTHING_VERSION/syncthing"
+note syncthing "$OUT/syncthing" "$url"
+
 # Samba, prebuilt by spruceOS.
 raw="https://raw.githubusercontent.com/spruceUI/spruceOS/$SPRUCE_COMMIT/spruce/bin64/Samba"
 for f in bin/smbd bin/smbpasswd \
@@ -103,7 +114,7 @@ cp "$tmp/lib/aarch64-linux-gnu/libnsl.so.1" "$OUT/samba/lib/libnsl.so.1"
 rm -rf "$tmp"
 note samba/lib/libnsl.so.1 "$OUT/samba/lib/libnsl.so.1" "$url"
 
-for bin in "$OUT/tailscaled" "$OUT/wireguard-go" "$OUT/samba/bin/smbd"; do
+for bin in "$OUT/tailscaled" "$OUT/wireguard-go" "$OUT/syncthing" "$OUT/samba/bin/smbd"; do
 	file "$bin" | grep -q aarch64 || { echo "$bin is not aarch64" >&2; exit 1; }
 done
 mv "$manifest" "$OUT/services.manifest"

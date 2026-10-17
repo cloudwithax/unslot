@@ -27,7 +27,7 @@ make_fake() {
 }
 
 reset() {
-	rm -rf "$TMP/run" "$TMP/data" "$TMP/svc" "$TMP/bin" "$TMP/wg" "$TMP"/*.log "$TMP/tun"
+	rm -rf "$TMP/run" "$TMP/data" "$TMP/svc" "$TMP/bin" "$TMP/wg" "$TMP"/*.log "$TMP/tun" "$TMP/card"
 	mkdir -p "$TMP/run" "$TMP/data" "$TMP/bin" "$TMP/wg"
 	printf 'root:$6$old$hash:19000:0:99999:7:::\nnobody:*:19000:0:99999:7:::\n' > "$TMP/run/shadow"
 	make_fake "$TMP/bin/dropbear" "$TMP/dropbear.log" "sleep 30 & echo \$! > \"$TMP/run/dropbear.pid\""
@@ -43,6 +43,11 @@ reset() {
 		"[ \"\${TS_BE_CLI:-}\" = 1 ] && exit 0" \
 		": > \"$TMP/run/tailscale/tailscaled.sock\"" \
 		'sleep 30'
+	# syncthing writes a config with the defaults for new folders, and knows its device ID.
+	make_fake "$TMP/svc/syncthing" "$TMP/syncthing.log" \
+		"[ \"\$1\" = generate ] && cat > \"$TMP/syncthing.in\" && printf '%s\\n' '<folder id=\"\" label=\"\" path=\"\" type=\"sendreceive\" ignorePerms=\"false\">' '<folder id=\"saves\" path=\"/x\" ignorePerms=\"false\">' > \"\${2#--home=}/config.xml\"" \
+		"[ \"\$1\" = device-id ] && echo ABCDEFG-1234567" \
+		"[ \"\$1\" = serve ] && exec sleep 30"
 	make_fake "$TMP/svc/wireguard-go" "$TMP/wg.log" ": > \"$TMP/wg/wg0.sock\""
 }
 
@@ -89,6 +94,25 @@ grep -q -- "-s -a root" "$TMP/smbpasswd.log" || fail "root was not given a Samba
 grep -q -- "-s $TMP/run/slotsamba/smb.conf -D" "$TMP/smbd.log" || fail "smbd was not started on slot's config"
 run samba off
 grep -q smbd "$TMP/killall.log" || fail "samba off left the connections' smbds"
+
+# Syncthing.
+reset
+mkdir -p "$TMP/card"
+echo 'pw' | run syncthing on "$TMP/card" > "$TMP/st.out" || fail "syncthing on failed"
+[ "$(cat "$TMP/st.out")" = ABCDEFG-1234567 ] || fail "syncthing on did not print the device ID"
+grep -q -- "generate --home=$TMP/card/Config/syncthing --gui-user=root --gui-password=-" "$TMP/syncthing.log" ||
+	fail "syncthing was not set up on the card with root's login"
+[ "$(cat "$TMP/syncthing.in")" = pw ] || fail "the password did not reach syncthing generate"
+grep -q "<folder id=\"\" label=\"\" path=\"$TMP/card\" .*ignorePerms=\"true\"" "$TMP/card/Config/syncthing/config.xml" ||
+	fail "new folders do not default to the card"
+grep -q '<folder id="saves" path="/x" ignorePerms="false">' "$TMP/card/Config/syncthing/config.xml" ||
+	fail "a folder already set up was changed"
+grep -q -- "serve --home=$TMP/card/Config/syncthing --no-browser --no-restart --no-upgrade --gui-address=0.0.0.0:8384" \
+	"$TMP/syncthing.log" || fail "syncthing was not served on the network"
+kill -0 "$(cat "$TMP/run/slot-syncthing.pid")" 2>/dev/null || fail "syncthing is not running"
+run syncthing off
+[ -f "$TMP/run/slot-syncthing.pid" ] && fail "syncthing off left syncthing running"
+: | run syncthing on "$TMP/card" 2>/dev/null && fail "syncthing started with no password"
 
 # Tailscale.
 reset

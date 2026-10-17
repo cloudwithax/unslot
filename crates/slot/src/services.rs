@@ -1,5 +1,5 @@
-//! Network services: BaseOS's SSH server, sharing the card over SMB, Tailscale and a WireGuard
-//! tunnel.
+//! Network services: BaseOS's SSH server, sharing the card over SMB, Syncthing, Tailscale and a
+//! WireGuard tunnel.
 //!
 //! The app says what it wants and a thread makes it so, a whole set at a time, so the newest
 //! wish wins over any it has not got to yet. On the device `card/System/slotservices.sh` starts
@@ -22,6 +22,7 @@ const POLL: Duration = Duration::from_secs(5);
 pub struct Wanted {
     pub ssh: bool,
     pub samba: bool,
+    pub syncthing: bool,
     pub tailscale: bool,
     pub vpn: Option<String>,
     pub password: Option<String>,
@@ -43,6 +44,8 @@ pub enum Tailnet {
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct ServicesView {
     pub tailnet: Tailnet,
+    /// Syncthing's device ID, while it runs.
+    pub syncthing_id: Option<String>,
     /// The tunnel that is up.
     pub vpn: Option<String>,
     /// What is under way, said for the page.
@@ -89,6 +92,9 @@ pub trait ServicesBackend: Send {
     fn password(&mut self, password: &str) -> Result<(), String>;
     /// Shares the card to root with `password`, or stops sharing it.
     fn samba(&mut self, on: Option<&str>) -> Result<(), String>;
+    /// Starts Syncthing with root's `password` for its web page, giving back its device ID, or
+    /// stops it.
+    fn syncthing(&mut self, on: Option<&str>) -> Result<Option<String>, String>;
     fn tailscale(&mut self, on: bool) -> Result<(), String>;
     /// A tailscale command against slot's daemon, and what it printed.
     fn tailscale_cli(&mut self, args: &[&str]) -> Result<String, String>;
@@ -203,6 +209,25 @@ fn work(
             set(&mut |v| v.busy = share.map(|_| "Starting file sharing...".into()));
             if let Err(e) = services.samba(share) {
                 errors.push(format!("File sharing: {e}"));
+            }
+        }
+        // Its web page has root's password too.
+        if changed(|w| w.syncthing) || (want.syncthing && new_password) {
+            let run = match (want.syncthing, &want.password) {
+                (true, Some(password)) => Some(password.as_str()),
+                (true, None) => {
+                    errors.push("Syncthing needs a password".into());
+                    None
+                }
+                (false, _) => None,
+            };
+            set(&mut |v| {
+                v.syncthing_id = None;
+                v.busy = run.map(|_| "Starting Syncthing...".into());
+            });
+            match services.syncthing(run) {
+                Ok(id) => set(&mut |v| v.syncthing_id = id.clone()),
+                Err(e) => errors.push(format!("Syncthing: {e}")),
             }
         }
         if changed(|w| w.tailscale) {
@@ -342,6 +367,7 @@ fn backend(root: &Path) -> Box<dyn ServicesBackend> {
 pub struct SimServices {
     pub ssh: bool,
     pub samba: bool,
+    pub syncthing: bool,
     pub tailscale: bool,
     looks: u32,
     pub vpn: bool,
@@ -350,6 +376,8 @@ pub struct SimServices {
 impl SimServices {
     pub const SIGN_IN_AFTER: u32 = 2;
     pub const URL: &'static str = "https://login.tailscale.com/a/0123456789ab";
+    pub const SYNCTHING_ID: &'static str =
+        "HNF4TY4-GPW7ND5-EWCM2V2-IKMZL4Z-DABXIIY-OZ2HVF4-VB5BWG5-LCJW6Q6";
 }
 
 impl ServicesBackend for SimServices {
@@ -369,6 +397,11 @@ impl ServicesBackend for SimServices {
     fn samba(&mut self, on: Option<&str>) -> Result<(), String> {
         self.samba = on.is_some();
         Ok(())
+    }
+
+    fn syncthing(&mut self, on: Option<&str>) -> Result<Option<String>, String> {
+        self.syncthing = on.is_some();
+        Ok(on.map(|_| SimServices::SYNCTHING_ID.into()))
     }
 
     fn tailscale(&mut self, on: bool) -> Result<(), String> {
@@ -524,6 +557,17 @@ mod device {
             .map(drop)
         }
 
+        fn syncthing(&mut self, on: Option<&str>) -> Result<Option<String>, String> {
+            match on {
+                Some(password) => {
+                    let root = self.root.to_string_lossy().into_owned();
+                    let id = self.script(&["syncthing", "on", &root], Some(password))?;
+                    Ok(Some(id.trim().to_string()).filter(|id| !id.is_empty()))
+                }
+                None => self.script(&["syncthing", "off"], None).map(|_| None),
+            }
+        }
+
         fn tailscale(&mut self, on: bool) -> Result<(), String> {
             self.script(&["tailscale", if on { "on" } else { "off" }], None)
                 .map(drop)
@@ -644,6 +688,9 @@ mod tests {
         fn samba(&mut self, _: Option<&str>) -> Result<(), String> {
             Ok(())
         }
+        fn syncthing(&mut self, _: Option<&str>) -> Result<Option<String>, String> {
+            Ok(None)
+        }
         fn tailscale(&mut self, _: bool) -> Result<(), String> {
             Ok(())
         }
@@ -701,6 +748,27 @@ mod tests {
         });
         let v = settle(&s, |v| v.error.is_some());
         assert_eq!(v.error.as_deref(), Some("File sharing needs a password"));
+    }
+
+    #[test]
+    fn syncthing_waits_for_a_password_then_gives_its_device_id() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Services::spawn_polling(Box::new(SimServices::default()), d.path(), FAST);
+        s.want(Wanted {
+            syncthing: true,
+            ..Wanted::default()
+        });
+        let v = settle(&s, |v| v.error.is_some());
+        assert_eq!(v.error.as_deref(), Some("Syncthing needs a password"));
+        s.want(Wanted {
+            syncthing: true,
+            password: Some("pass".into()),
+            ..Wanted::default()
+        });
+        let v = settle(&s, |v| v.syncthing_id.is_some());
+        assert_eq!(v.syncthing_id.as_deref(), Some(SimServices::SYNCTHING_ID));
+        s.want(Wanted::default());
+        assert_eq!(settle(&s, |v| v.syncthing_id.is_none()).syncthing_id, None);
     }
 
     #[test]

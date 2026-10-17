@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Syncthing, under Network → Services. Its web page is at `http://<device>:8384`, signed in to as root, and X shows the device ID as a code for the Syncthing app to scan. Folders added there go on the card.
+- File sharing starts: the Samba it uses needed a library BaseOS does not have, which now comes with it.
+
 ## v2.2.0
 
 - Forty-two more systems, fifty-five in all: arcade (FinalBurn Neo and MAME 2003-Plus, with CPS-1, CPS-2, CPS-3 and Neo Geo on shelves of their own), Neo Geo CD, Famicom Disk System, Nintendo 64, Virtual Boy, Pokémon mini, Game & Watch, 32X, Sega CD, SG-1000, Dreamcast, PC Engine CD, SuperGrafx, PC-FX, the Atari 2600, 5200, 7800, 800 and ST, ColecoVision, Intellivision, Vectrex, Odyssey², Channel F, Supervision, Mega Duck, MSX, Commodore 64, Amiga, ZX Spectrum, Amstrad CPC, DOS, PC-98, X68000, ScummVM, PICO-8, TIC-80 and the PSP, each on its own media.

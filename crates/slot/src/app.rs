@@ -277,13 +277,16 @@ pub enum Phase {
     Devices {
         cursor: usize,
     },
-    /// SSH, file sharing, Tailscale and the VPN. `note` says why the last change went nowhere.
+    /// SSH, file sharing, Syncthing, Tailscale and the VPN. `note` says why the last change went
+    /// nowhere.
     Services {
         cursor: usize,
         note: Option<String>,
     },
     /// The code to scan to sign the device in to Tailscale.
     TailscaleLogin,
+    /// Syncthing's device ID, as a code for its phone app to scan.
+    SyncthingId,
     /// unslot's and BaseOS's releases, and whether this device is behind them.
     Updates {
         cursor: usize,
@@ -317,9 +320,9 @@ pub enum Typing {
     /// The name of a network that does not announce itself.
     HiddenName,
     HiddenPassword(String),
-    /// Root's password, for SSH and file sharing, which is turned on after if `share`.
+    /// Root's password, for SSH, file sharing and Syncthing, the row `then` turned on after.
     RootPassword {
-        share: bool,
+        then: Option<ServiceRow>,
     },
     /// The player's ScreenScraper username, then their password.
     SsUser,
@@ -332,18 +335,20 @@ pub enum Typing {
 
 /// A row on the services page.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-enum ServiceRow {
+pub enum ServiceRow {
     Ssh,
     Sharing,
+    Syncthing,
     Tailscale,
     Vpn,
     Password,
 }
 
 impl ServiceRow {
-    const ALL: [ServiceRow; 5] = [
+    const ALL: [ServiceRow; 6] = [
         ServiceRow::Ssh,
         ServiceRow::Sharing,
+        ServiceRow::Syncthing,
         ServiceRow::Tailscale,
         ServiceRow::Vpn,
         ServiceRow::Password,
@@ -2122,7 +2127,7 @@ impl App {
             | Phase::GameArt { cursor, .. } => (3, cursor.to_string()),
             Phase::Cores { cursor } | Phase::Search { cursor } => (1, cursor.to_string()),
             Phase::Keyboard { keys, .. } => (4, format!("{keys:?}")),
-            Phase::TailscaleLogin => (4, String::new()),
+            Phase::TailscaleLogin | Phase::SyncthingId => (4, String::new()),
             Phase::Polaroids { .. } => (
                 1,
                 format!("{:?}", self.polaroids.as_ref().map(Polaroids::dots)),
@@ -2330,6 +2335,7 @@ impl App {
             Phase::Devices { cursor } => self.devices_input(cursor, action),
             Phase::Services { cursor, .. } => self.services_input(cursor, action),
             Phase::TailscaleLogin => self.tailscale_login_input(action),
+            Phase::SyncthingId => self.syncthing_id_input(action),
             Phase::Updates { cursor } => self.updates_input(cursor, action),
             Phase::GameArt { cursor, .. } => self.game_art_input(cursor, action),
             Phase::Cores { cursor } => self.cores_input(cursor, action),
@@ -2343,6 +2349,7 @@ impl App {
         Wanted {
             ssh: self.state.ssh,
             samba: self.state.samba,
+            syncthing: self.state.syncthing,
             tailscale: self.state.tailscale,
             vpn: self.state.vpn.clone(),
             password: self.state.password.clone(),
@@ -2378,6 +2385,13 @@ impl App {
                 Some(note) => (cursor, note),
                 None => return,
             },
+            Action::GbaDown(Btn::X)
+                if ServiceRow::ALL[cursor] == ServiceRow::Syncthing
+                    && self.services_view.syncthing_id.is_some() =>
+            {
+                self.phase = Phase::SyncthingId;
+                return;
+            }
             Action::GbaDown(Btn::B) | Action::QuickMenu => {
                 self.phase = Phase::QuickMenu {
                     row: QuickRow::Services,
@@ -2392,18 +2406,23 @@ impl App {
     /// Changes what `row` is for. None when it has gone to another page, else the note to
     /// show, if any.
     fn change_service(&mut self, row: ServiceRow, cursor: usize) -> Option<Option<String>> {
-        let password = |share: bool| Phase::Keyboard {
+        let password = |then: Option<ServiceRow>| Phase::Keyboard {
             keys: Keyboard::new("New password for root", "", true, 4, 63),
-            typing: Typing::RootPassword { share },
+            typing: Typing::RootPassword { then },
             cursor,
         };
         match row {
             ServiceRow::Ssh => self.state.ssh = !self.state.ssh,
             ServiceRow::Sharing if !self.state.samba && self.state.password.is_none() => {
-                self.phase = password(true);
+                self.phase = password(Some(row));
                 return None;
             }
             ServiceRow::Sharing => self.state.samba = !self.state.samba,
+            ServiceRow::Syncthing if !self.state.syncthing && self.state.password.is_none() => {
+                self.phase = password(Some(row));
+                return None;
+            }
+            ServiceRow::Syncthing => self.state.syncthing = !self.state.syncthing,
             ServiceRow::Tailscale => match (self.state.tailscale, &self.services_view.tailnet) {
                 (true, Tailnet::SignIn(_)) => {
                     self.phase = Phase::TailscaleLogin;
@@ -2431,7 +2450,7 @@ impl App {
                 };
             }
             ServiceRow::Password => {
-                self.phase = password(false);
+                self.phase = password(None);
                 return None;
             }
         }
@@ -2448,6 +2467,7 @@ impl App {
                 let (label, detail) = match row {
                     ServiceRow::Ssh => ("SSH", on(self.state.ssh)),
                     ServiceRow::Sharing => ("File sharing", on(self.state.samba)),
+                    ServiceRow::Syncthing => ("Syncthing", on(self.state.syncthing)),
                     ServiceRow::Tailscale => (
                         "Tailscale",
                         match (&v.tailnet, self.state.tailscale) {
@@ -2483,7 +2503,11 @@ impl App {
                 }
             })
             .collect();
+        let row = ServiceRow::ALL[cursor.min(ServiceRow::ALL.len() - 1)];
         let address = match &self.wifi_view.ip {
+            Some(ip) if row == ServiceRow::Syncthing && v.syncthing_id.is_some() => {
+                format!("http://{ip}:8384   user root")
+            }
             Some(ip) => format!("root@{}.local   {ip}", crate::services::hostname()),
             None => "Connect to Wi-Fi to reach these".into(),
         };
@@ -2493,11 +2517,11 @@ impl App {
             (_, None, Some(error)) => error.clone(),
             _ => address,
         };
-        let row = ServiceRow::ALL[cursor.min(ServiceRow::ALL.len() - 1)];
         let turn = |on: bool| if on { "Turn Off" } else { "Turn On" };
         let action = match row {
             ServiceRow::Ssh => turn(self.state.ssh),
             ServiceRow::Sharing => turn(self.state.samba),
+            ServiceRow::Syncthing => turn(self.state.syncthing),
             ServiceRow::Tailscale => match &v.tailnet {
                 Tailnet::SignIn(_) if self.state.tailscale => "Sign In",
                 _ => turn(self.state.tailscale),
@@ -2511,12 +2535,16 @@ impl App {
                 None => "Set Password",
             },
         };
+        let mut legends = with_action(Some(action));
+        if row == ServiceRow::Syncthing && v.syncthing_id.is_some() {
+            legends.insert(1, Legend::new(ButtonLegend::X, "Show ID"));
+        }
         ListPage {
             title: "Services".into(),
             status,
             cursor: cursor.min(rows.len() - 1),
             rows,
-            legends: with_action(Some(action)),
+            legends,
         }
     }
 
@@ -2840,6 +2868,15 @@ impl App {
         }
     }
 
+    fn syncthing_id_input(&mut self, action: Action) {
+        if let Action::GbaDown(Btn::B) | Action::QuickMenu = action {
+            self.phase = Phase::Services {
+                cursor: ServiceRow::Syncthing as usize,
+                note: None,
+            };
+        }
+    }
+
     fn with_bluetooth(&self, f: impl FnOnce(&Bluetooth)) {
         if let Some(bluetooth) = &self.bluetooth {
             f(bluetooth);
@@ -3110,9 +3147,13 @@ impl App {
                     let note = self.save_ss_login(&user, &text);
                     self.phase = Phase::GameArt { cursor, note };
                 }
-                Typing::RootPassword { share } => {
+                Typing::RootPassword { then } => {
                     self.state.password = Some(text);
-                    self.state.samba |= share;
+                    match then {
+                        Some(ServiceRow::Sharing) => self.state.samba = true,
+                        Some(ServiceRow::Syncthing) => self.state.syncthing = true,
+                        _ => {}
+                    }
                     self.services_changed();
                     self.phase = Phase::Services { cursor, note: None };
                 }
@@ -3168,6 +3209,14 @@ impl App {
                 })),
                 _ => None,
             },
+            Phase::SyncthingId => self.services_view.syncthing_id.as_ref().map(|id| {
+                PageModel::Qr(QrPage {
+                    title: "Syncthing".into(),
+                    status: "Scan in the Syncthing app to add this device".into(),
+                    url: id.clone(),
+                    legends: vec![back_legend()],
+                })
+            }),
             _ => None,
         }
     }
@@ -4031,6 +4080,13 @@ impl App {
                     note: None,
                 };
             }
+            if matches!(self.phase, Phase::SyncthingId) && self.services_view.syncthing_id.is_none()
+            {
+                self.phase = Phase::Services {
+                    cursor: ServiceRow::Syncthing as usize,
+                    note: None,
+                };
+            }
         }
         self.play_hold();
         self.repeat_held_dir();
@@ -4433,6 +4489,7 @@ impl App {
             | Phase::Devices { .. }
             | Phase::Services { .. }
             | Phase::TailscaleLogin
+            | Phase::SyncthingId
             | Phase::Updates { .. }
             | Phase::GameArt { .. }
             | Phase::Cores { .. }

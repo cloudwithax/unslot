@@ -54,7 +54,7 @@ jobs:
           done
           test -f "$out/System/PPSSPP/ppge_atlas.zim"
           test -s "$out/System/licenses/cores.manifest"
-          for b in tailscaled wireguard-go samba/bin/smbd samba/bin/smbpasswd; do
+          for b in tailscaled wireguard-go syncthing samba/bin/smbd samba/bin/smbpasswd; do
             file "$out/System/services/$b" | grep -q aarch64
           done
           test -f "$out/System/services/samba/lib/libnsl.so.1"

@@ -400,6 +400,39 @@ fn file_sharing_asks_for_a_password_first_then_shares() {
 }
 
 #[test]
+fn syncthing_asks_for_a_password_then_x_shows_its_device_id() {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    let mut a = on_services(&d);
+    go_to(&mut a, "Syncthing");
+    press(&mut a, Btn::A);
+    assert!(
+        matches!(a.page_model(), Some(PageModel::Keys(_))),
+        "Syncthing began with no password: {:?}",
+        a.phase()
+    );
+    for _ in 0..4 {
+        press(&mut a, Btn::A);
+    }
+    press(&mut a, Btn::Start);
+    let saved = read_slot_state(d.path());
+    assert!(
+        saved.syncthing,
+        "Syncthing did not come on after the password"
+    );
+    assert!(!saved.samba, "the password turned file sharing on too");
+    assert_eq!(detail(&a, "Syncthing"), "On");
+    until(&mut a, |a| a.services_view().syncthing_id.is_some());
+    press(&mut a, Btn::X);
+    let Some(PageModel::Qr(qr)) = a.page_model() else {
+        panic!("no device ID to scan: {:?}", a.phase());
+    };
+    assert_eq!(qr.url, slot::services::SimServices::SYNCTHING_ID);
+    press(&mut a, Btn::B);
+    assert!(matches!(a.phase(), Phase::Services { .. }));
+    assert_eq!(action(&a), Some("Turn Off".to_string()));
+}
+
+#[test]
 fn tailscale_shows_a_code_to_sign_in_and_x_turns_it_off() {
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
     let mut a = on_services(&d);

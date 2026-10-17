@@ -27,7 +27,7 @@ thirteen systems, Wi-Fi and Bluetooth, analog sticks, network services and updat
 - **Fifty-five systems**, from arcade boards to the PSP, each on its own shelf as the media it came on: carts, cards, discs, floppies and tapes. Nintendo 64, Dreamcast and PSP draw on the GPU.
 - **Wi-Fi** with an on-screen keyboard, and **Bluetooth** controllers and headphones.
 - **Analog sticks** on the models that have them.
-- **Services:** SSH and SFTP, sharing the card over SMB, Tailscale (sign in by scanning a code) and WireGuard.
+- **Services:** SSH and SFTP, sharing the card over SMB, Syncthing (add the device by scanning its ID), Tailscale (sign in by scanning a code) and WireGuard.
 - **Updates over the air**, for unslot and for BaseOS under it, with an automatic rollback if a new version never starts.
 - **Game Art** finds a label for each game online, matched by CRC and file name. It keeps going while you play, and each label shows on the shelf as soon as it is found.
 - **Menu sounds and haptics:** recorded clicks of real buttons and switches, and a nudge of the rumble motor when a cart goes home or a setting changes. Both can be turned off in Settings → General.
@@ -160,7 +160,7 @@ unslot is a fork of **[slot](https://github.com/BrandonKowalski/slot)** by Brand
 | Operating system | [BaseOS](https://github.com/pvaibhav/BaseOS) by pvaibhav |
 | Emulation | [mGBA](https://mgba.io), [gpSP](https://github.com/libretro/gpsp), and the libretro cores in the systems table |
 | Labels | Game Art's style follows [Cart Studio](https://github.com/BrandonKowalski/slot-cart-studio). Names come from [libretro-database](https://github.com/libretro/libretro-database) and art from libretro-thumbnails and [ScreenScraper](https://www.screenscraper.fr). |
-| Services | [Tailscale](https://github.com/tailscale/tailscale), [wireguard-go](https://git.zx2c4.com/wireguard-go) and [spruceOS](https://github.com/spruceUI/spruceOS)'s Samba build |
+| Services | [Syncthing](https://syncthing.net), [Tailscale](https://github.com/tailscale/tailscale), [wireguard-go](https://git.zx2c4.com/wireguard-go) and [spruceOS](https://github.com/spruceUI/spruceOS)'s Samba build, with glibc's libnsl from Ubuntu |
 | Wallpapers | NASA, ESA, CSA and STScI; Poly Haven; ambientCG; and Luis Zuno. Each is credited in `System/licenses/wallpapers.txt`. |
 | Type | Open Sans, and Nerd Fonts Symbols by Ryan L McIntyre |
 | Sounds | The cart's sounds are slot's. The menu's are CC0 recordings from Freesound by 5ro4, Nekkowe, greatsoundstube and BenjaminNelan, credited in `System/licenses/sounds.txt`. |
