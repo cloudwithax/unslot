@@ -109,7 +109,7 @@ fn a_garbled_recent_line_is_skipped_and_the_rest_kept() {
     write_slot_state(d.path(), &s).unwrap();
     let path = d.path().join("Config/recents.txt");
     let mut text = std::fs::read_to_string(&path).unwrap();
-    text.push_str("n64/Mario\ngba/\nnothing\n");
+    text.push_str("vic20/Mario\ngba/\nnothing\n");
     std::fs::write(&path, text).unwrap();
     assert_eq!(
         read_slot_state(d.path()).recents,

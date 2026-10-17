@@ -1,7 +1,10 @@
 //! A page of rows slot fills at run time: the Wi-Fi networks in range, the Bluetooth devices
 //! nearby. Drawn whole into one picture each time it changes, like the keyboard.
 
-use crate::page::{label_into, label_left, legends_into, rounded, Legend, DIM, INK, LIT, LIT_INK};
+use crate::cart::CartFace;
+use crate::page::{
+    label_into, label_left, legends_into, over, rounded, shrink, Legend, DIM, INK, LIT, LIT_INK,
+};
 use crate::plate::UndoFace;
 
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -11,6 +14,35 @@ pub struct ListRow {
     pub detail: String,
     /// Signal strength, 0 to 3 bars, for a row that has one.
     pub bars: Option<u8>,
+    /// A small picture before the label: a game's cart, card or disc with its label on.
+    pub icon: Option<ListIcon>,
+}
+
+/// A row's picture, no taller than a row leaves room for.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct ListIcon {
+    pub rgba: Vec<u8>,
+    pub w: u32,
+    pub h: u32,
+}
+
+/// How tall a row's picture is drawn, and the room kept for it however wide it is, so the
+/// labels after it line up.
+pub const ICON_H: u32 = 38;
+const ICON_BOX: u32 = 52;
+
+impl ListIcon {
+    /// A cart's face, shrunk to a row's picture.
+    pub fn of(face: &CartFace) -> ListIcon {
+        let (rgba, w) = shrink(&face.rgba, face.w, face.h, ICON_H);
+        // Wider than the room for it, it is shrunk again to fit across.
+        if w > ICON_BOX {
+            let h = (ICON_H * ICON_BOX / w).max(1);
+            let (rgba, w) = shrink(&face.rgba, face.w, face.h, h);
+            return ListIcon { rgba, w, h };
+        }
+        ListIcon { rgba, w, h: ICON_H }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -91,11 +123,27 @@ impl ListPage {
             let right = LIST_W - ROW_PAD;
             let bars_x = right - BARS_W;
             let detail_x = bars_x - 8 - DETAIL_W;
-            let label_w = detail_x - ROW_PAD - 8;
+            let label_x = match &row.icon {
+                Some(icon) => {
+                    let x = ROW_PAD + (ICON_BOX - icon.w) / 2;
+                    over(
+                        &mut rgba,
+                        LIST_W,
+                        &icon.rgba,
+                        icon.w,
+                        icon.h,
+                        x,
+                        y + (ROW_H - icon.h) / 2,
+                    );
+                    ROW_PAD + ICON_BOX + 10
+                }
+                None => ROW_PAD,
+            };
+            let label_w = detail_x - label_x - 8;
             label_left(
                 &mut rgba,
                 LIST_W,
-                (ROW_PAD, y, label_w, ROW_H),
+                (label_x, y, label_w, ROW_H),
                 &row.label,
                 ink,
                 22.0,

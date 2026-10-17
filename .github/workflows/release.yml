@@ -15,15 +15,18 @@ jobs:
     container: rust:1-bullseye
     outputs:
       zip: ${{ steps.package.outputs.zip }}
+      pak: ${{ steps.package.outputs.pak }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install zip, cmake and Task
+      - name: Install zip, cmake, the GLES headers and Task
         run: |
           set -eu
           sed -i '/bullseye-security/d' /etc/apt/sources.list
           apt-get -o Acquire::Check-Valid-Until=false update
-          apt-get install -y --no-install-recommends zip unzip cmake
+          apt-get install -y --no-install-recommends zip unzip python3-pip             libgles-dev libegl-dev zlib1g-dev libpng-dev pkg-config
+          # Flycast wants a newer CMake than bullseye's.
+          pip3 install --no-cache-dir 'cmake>=3.27,<3.31'
           curl -fsSL https://taskfile.dev/install.sh | sh -s -- -b /usr/local/bin
 
       - name: Build the tree
@@ -41,9 +44,15 @@ jobs:
           test "$(cat "$out/System/version")" = "$GITHUB_REF_NAME"
           file "$out/System/mgba_libretro.so" | grep -q aarch64
           file "$out/System/gpsp_libretro.so" | grep -q aarch64
-          for c in fceumm snes9x genesis_plus_gx mednafen_pce_fast race mednafen_wswan handy pcsx_rearmed; do
-            file "$out/System/${c}_libretro.so" | grep -q aarch64
+          for so in "$out"/System/*_libretro.so; do
+            file "$so" | grep -q aarch64
           done
+          test "$(ls "$out"/System/*_libretro.so | wc -l)" -ge 47
+          # The GPU cores are built for GLES; one linking desktop GL would not load on BaseOS.
+          for c in parallel_n64 flycast ppsspp vecx; do
+            ! readelf -d "$out/System/${c}_libretro.so" | grep -q 'libGL\.so\|libOpenGL\|libGLX'
+          done
+          test -f "$out/System/PPSSPP/ppge_atlas.zim"
           test -s "$out/System/licenses/cores.manifest"
           for b in tailscaled wireguard-go samba/bin/smbd samba/bin/smbpasswd; do
             file "$out/System/services/$b" | grep -q aarch64
@@ -66,6 +75,9 @@ jobs:
 
       - name: Package
         id: package
+        env:
+          # The release key's secret half, which signs the .pak unslot installs.
+          UNSLOT_PAK_KEY: ${{ secrets.UNSLOT_PAK_KEY }}
         run: |
           set -eu
           out="unslot-${GITHUB_REF_NAME}"
@@ -73,14 +85,21 @@ jobs:
           zip -qry "$zip" "$out"
           # The same System folder as an update pack, which BaseOS installs from a card's root.
           sh tools/update/pack.sh "$out" MinUI.zip
-          sha256sum "$zip" MinUI.zip > SHA256SUMS
+          # And signed, as unslot-<version>.pak, which is what unslot installs.
+          test -n "$UNSLOT_PAK_KEY" || { echo "UNSLOT_PAK_KEY is not set" >&2; exit 1; }
+          task dist:pak OUT="$out" PACK=MinUI.zip
+          pak="unslot-${GITHUB_REF_NAME}.pak"
+          test -f "$pak"
+          sha256sum "$zip" "$pak" MinUI.zip > SHA256SUMS
           echo "zip=$zip" >> "$GITHUB_OUTPUT"
+          echo "pak=$pak" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v7
         with:
           name: release-files
           path: |
             ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.pak }}
             MinUI.zip
             SHA256SUMS
           if-no-files-found: error
@@ -101,14 +120,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ZIP: ${{ needs.build.outputs.zip }}
+          PAK: ${{ needs.build.outputs.pak }}
         run: |
           set -eu
           cat > notes.md <<NOTES
           **New card:** unzip and copy the contents of \`unslot-${GITHUB_REF_NAME}/\` to the root of your frontend card: BaseOS's \`BASEOS\` volume on TF1, or a card in TF2.
 
-          **Already running slot or unslot?** Copy \`MinUI.zip\` to the root of that card and restart with the power connected. BaseOS installs it before the frontend starts, replacing \`System/\` and keeping your games, saves and settings. unslot can also download it itself, from Settings, Network, Updates.
+          **Already running unslot?** Settings, Network, Updates downloads \`$PAK\` and installs it when you restart. Or copy \`$PAK\` to the root of the card and restart with the power connected. unslot installs it only if it is a signed unslot release, and replaces \`System/\`, keeping your games, saves and settings.
+
+          **Running slot?** Copy \`MinUI.zip\` to the root of the card and restart with the power connected. BaseOS installs it before the frontend starts.
 
           unslot is a fork of [slot](https://github.com/BrandonKowalski/slot) by Brandon T. Kowalski. Emulation by mGBA (MPL-2.0), gpSP (GPL-2.0) and libretro cores; every licence, and gpSP's source, is in \`System/licenses/\`.
           NOTES
-          gh release create "$GITHUB_REF_NAME" "$ZIP" MinUI.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" \
+          gh release create "$GITHUB_REF_NAME" "$ZIP" "$PAK" MinUI.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" --notes-file notes.md

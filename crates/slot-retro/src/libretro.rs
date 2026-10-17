@@ -9,6 +9,10 @@ use libloading::Library;
 
 use crate::core::{AvInfo, ButtonMask, CoreError, RetroCore, Sticks, GBA_H, GBA_W};
 use crate::ffi::*;
+use crate::hw::{
+    self, Hw, HwRenderCallback, CONTEXT_OPENGLES3, FRAME_IN_FRAMEBUFFER, GET_PREFERRED_HW_RENDER,
+    SET_HW_RENDER, SET_HW_SHARED_CONTEXT,
+};
 use crate::link::Link;
 use crate::rumble::Rumble;
 
@@ -55,6 +59,8 @@ struct Host {
     options: std::collections::HashMap<String, std::ffi::CString>,
     options_dirty: bool,
     declared: std::collections::HashMap<String, Vec<String>>,
+    /// The context of a core that draws with the GPU.
+    hw: Option<Hw>,
 }
 
 thread_local! {
@@ -85,6 +91,30 @@ unsafe fn with_host<R>(f: impl FnOnce(&mut Host) -> R) -> Option<R> {
 }
 
 unsafe extern "C" fn log_noop(_level: c_uint, _fmt: *const c_char) {}
+
+extern "C" {
+    /// csrc/log.c: formats a core's printf-like line and hands it to `slot_retro_log_line`.
+    fn slot_retro_log(level: c_uint, fmt: *const c_char, ...);
+}
+
+/// Whether the cores' own log lines go to slot's log, which SLOT_CORE_LOG asks for.
+fn core_log() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("SLOT_CORE_LOG").is_some())
+}
+
+#[no_mangle]
+extern "C" fn slot_retro_log_line(level: c_uint, line: *const c_char) {
+    if line.is_null() {
+        return;
+    }
+    // SAFETY: log.c passes a NUL-terminated buffer it owns for the length of the call.
+    let line = unsafe { std::ffi::CStr::from_ptr(line) }.to_string_lossy();
+    let level = ["debug", "info", "warn", "error"]
+        .get(level as usize)
+        .unwrap_or(&"log");
+    eprintln!("core {level}: {}", line.trim_end());
+}
 
 unsafe extern "C" fn set_rumble_state(port: c_uint, effect: c_uint, strength: u16) -> bool {
     with_host(|h| h.rumble.set(port, effect, strength)).unwrap_or(false)
@@ -209,7 +239,10 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             if data.is_null() {
                 return false;
             }
-            (*(data as *mut LogCallback)).log = log_noop as *const c_void;
+            (*(data as *mut LogCallback)).log = match core_log() {
+                true => slot_retro_log as *const c_void,
+                false => log_noop as *const c_void,
+            };
             true
         }
         SET_AUDIO_BUFFER_STATUS_CALLBACK => {
@@ -241,6 +274,9 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             }
             let av = *(data as *const SystemAvInfo);
             with_host(|h| {
+                if let Some(hw) = &mut h.hw {
+                    hw.fit(av.geometry.max_width, av.geometry.max_height);
+                }
                 h.aspect = aspect_of(&av.geometry);
                 h.timing = AvInfo {
                     fps: av.timing.fps,
@@ -250,6 +286,48 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             .is_some()
         }
         GET_INPUT_BITMASKS => true,
+        SET_HW_RENDER => {
+            if data.is_null() {
+                return false;
+            }
+            let asked = &mut *(data as *mut HwRenderCallback);
+            let (Some(gles3), Some(factory)) = (hw::wants_gles3(asked), hw::factory()) else {
+                return false;
+            };
+            let Some(gl) = factory(gles3) else {
+                return false;
+            };
+            eprintln!(
+                "slot-retro: gpu core: GLES {} context (asked for type {}), depth {} stencil {}",
+                if gles3 { 3 } else { 2 },
+                asked.context_type,
+                asked.depth,
+                asked.stencil
+            );
+            asked.get_current_framebuffer = Some(hw_framebuffer);
+            asked.get_proc_address = Some(hw_proc_address);
+            let callback = *asked;
+            with_host(|h| {
+                h.hw = Some(Hw {
+                    callback,
+                    gl,
+                    fbo: 0,
+                    readback: Vec::new(),
+                    frames: 0,
+                });
+                h.canvas = Canvas::Native;
+            })
+            .is_some()
+        }
+        GET_PREFERRED_HW_RENDER => {
+            if data.is_null() || hw::factory().is_none() {
+                return false;
+            }
+            *(data as *mut c_uint) = CONTEXT_OPENGLES3;
+            true
+        }
+        // Each GPU core has a context of its own, so it may as well be told it is shared.
+        SET_HW_SHARED_CONTEXT => true,
         SET_ROTATION => {
             if data.is_null() {
                 return false;
@@ -412,6 +490,19 @@ unsafe extern "C" fn video_refresh(
     if data.is_null() || width == 0 || height == 0 {
         return;
     }
+    if data as usize == FRAME_IN_FRAMEBUFFER {
+        with_host(|h| {
+            let Some(hw) = &mut h.hw else {
+                return;
+            };
+            if h.size != (width, height) {
+                h.size = (width, height);
+                h.video.resize((width * height * 4) as usize, 0);
+            }
+            hw.read_into(width, height, &mut h.video);
+        });
+        return;
+    }
     with_host(|h| {
         let (cw, cols, rows, ox, oy) = match h.canvas {
             Canvas::Fixed(cw, ch) => {
@@ -437,6 +528,19 @@ unsafe extern "C" fn video_refresh(
             convert_row(h.format, src, &mut h.video[at..at + cols * 4]);
         }
     });
+}
+
+// Both are asked from whatever thread the core draws on, which need not be one slot is calling
+// it from, so neither looks for the host.
+unsafe extern "C" fn hw_framebuffer() -> usize {
+    hw::current_framebuffer()
+}
+
+unsafe extern "C" fn hw_proc_address(name: *const c_char) -> *const c_void {
+    if name.is_null() {
+        return ptr::null();
+    }
+    hw::proc_address(std::ffi::CStr::from_ptr(name))
 }
 
 unsafe fn convert_row(format: PixelFormat, src: *const u8, dst: &mut [u8]) {
@@ -661,6 +765,7 @@ impl LibretroCore {
             options: std::collections::HashMap::new(),
             options_dirty: false,
             declared: std::collections::HashMap::new(),
+            hw: None,
         });
         unsafe {
             let _a = Active::bind(&mut host);
@@ -689,8 +794,18 @@ impl LibretroCore {
         if !self.loaded {
             return;
         }
+        let destroy = self
+            .host
+            .hw
+            .as_ref()
+            .and_then(|hw| hw.callback.context_destroy);
         let _a = Active::bind(&mut self.host);
-        unsafe { (self.api.unload_game)() };
+        unsafe {
+            if let Some(destroy) = destroy {
+                destroy();
+            }
+            (self.api.unload_game)()
+        };
         self.loaded = false;
     }
 
@@ -781,6 +896,13 @@ impl RetroCore for LibretroCore {
             sample_rate: av.timing.sample_rate,
         };
         self.host.aspect = aspect_of(&av.geometry);
+        if let Some(hw) = &mut self.host.hw {
+            hw.fit(av.geometry.max_width, av.geometry.max_height);
+            if let Some(reset) = hw.callback.context_reset {
+                let _a = Active::bind(&mut self.host);
+                unsafe { reset() };
+            }
+        }
         unsafe { (self.api.set_controller_port_device)(0, DEVICE_JOYPAD) };
         Ok(())
     }
@@ -965,6 +1087,7 @@ mod tests {
             options,
             options_dirty,
             declared: HashMap::new(),
+            hw: None,
         })
     }
 

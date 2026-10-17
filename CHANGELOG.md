@@ -1,6 +1,16 @@
 # Changelog
 
-## unslot (unreleased)
+## v2.2.0
+
+- Forty-two more systems, fifty-five in all: arcade (FinalBurn Neo and MAME 2003-Plus, with CPS-1, CPS-2, CPS-3 and Neo Geo on shelves of their own), Neo Geo CD, Famicom Disk System, Nintendo 64, Virtual Boy, Pokémon mini, Game & Watch, 32X, Sega CD, SG-1000, Dreamcast, PC Engine CD, SuperGrafx, PC-FX, the Atari 2600, 5200, 7800, 800 and ST, ColecoVision, Intellivision, Vectrex, Odyssey², Channel F, Supervision, Mega Duck, MSX, Commodore 64, Amiga, ZX Spectrum, Amstrad CPC, DOS, PC-98, X68000, ScummVM, PICO-8, TIC-80 and the PSP, each on its own media.
+- Nintendo 64, Dreamcast and PSP draw on the GPU: their cores are built for the Mali's OpenGL ES and get a context of their own.
+- Arcade sets show the game's name, not the zip's, and a board's BIOS zip stays off the shelf.
+- START on a game whose system has more than one core picks the core from a list.
+- X on the shelf searches every system's games by name. The results show each game's media with its label, and A turns to its shelf with it in the slot.
+- The Ko-fi link is gone: FinalBurn Neo's licence does not allow asking for donations.
+- Updates come as `unslot-<version>.pak`: the release's MinUI.zip, untouched, with its version and checksum signed by unslot's release key. unslot installs a pack from the Updates page or the card's root only when it checks out, and leaves any other as `.bad`.
+
+## v2.1.0
 
 The first unslot, forked from slot 1.7.0.
 

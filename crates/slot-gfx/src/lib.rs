@@ -13,6 +13,8 @@ mod headless;
 mod host;
 mod layout;
 mod lcd3x;
+#[cfg(target_os = "linux")]
+mod offscreen;
 mod pipeline;
 mod power;
 mod quad;
@@ -30,6 +32,8 @@ pub use headless::HeadlessSurface;
 pub use host::HostSurface;
 pub use layout::{Canvas, Layout};
 pub use lcd3x::{lcd3x_factors, lcd3x_mask, ScreenEffect};
+#[cfg(target_os = "linux")]
+pub use offscreen::OffscreenGl;
 pub use pipeline::{fit_aspect, SCALE, SRC_H, SRC_W, WHOLE_TEXTURE};
 pub use power::{screen_brightness, screen_rect_above, screen_scale, screen_width};
 pub use surface::{blit_rect, blit_rect_fit, fit_rect, fit_scale, GfxError, Surface, OUT_H, OUT_W};

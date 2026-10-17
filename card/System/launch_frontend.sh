@@ -19,6 +19,33 @@ log() {
 	echo "$(date '+%F %T') $*" >> "$LOGS/slot-session.log" 2>/dev/null
 }
 
+# An update at the card's root, unslot-<version>.pak, from the Updates page or copied there, goes
+# in only if unslot's release signed it: slot checks the signature and the MinUI.zip inside it
+# against the version and checksum it signed, and writes the zip out untouched. That is then
+# unpacked and installed as BaseOS installs a MinUI.zip. A pack that does not check out is left
+# as .bad, and System is not touched.
+SLOT_BIN="${AGS_SLOT:-/lib/ld-linux-aarch64.so.1 $SYS/slot}"
+pak="$(ls -1 "$SD"/unslot-*.pak 2>/dev/null | tail -n 1)"
+if [ -n "$pak" ]; then
+	mkdir -p "$SD/.unslot-update"
+	zip="$SD/.unslot-update/pak.zip"
+	if version="$($SLOT_BIN --unpack-pak "$pak" "$zip" 2>> "$LOGS/update.log")"; then
+		rm -rf "$SD/.tmp_update"
+		if unzip -o -q "$zip" '.tmp_update/*' -d "$SD" && sh "$SD/.tmp_update/h700.sh" > /dev/null 2>&1; then
+			rm -f "$SD"/unslot-*.pak
+		else
+			echo "$(date '+%F %T') $version did not install; left as $(basename "$pak").bad" >> "$LOGS/update.log"
+			mv -f "$pak" "$pak.bad"
+			rm -rf "$SD/.tmp_update"
+		fi
+	else
+		echo "$(date '+%F %T') $(basename "$pak") is not an update unslot signed; left as .bad" >> "$LOGS/update.log"
+		mv -f "$pak" "$pak.bad"
+	fi
+	rm -f "$zip"
+	sync
+fi
+
 # After an update pack's installer swaps System, the new one has three starts to draw a frame,
 # which slot marks by clearing the trial; on the fourth the replaced one goes back, as BaseOS
 # does with its own updates.

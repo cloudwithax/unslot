@@ -137,10 +137,18 @@ fn the_in_game_menu_darkens_the_game_and_screen_leaves_it_bare() {
         ink > 100,
         "no Shader label in the panel: {ink} bright pixels"
     );
-    let below = at(&screen, 700, OUT_H as usize - 4);
-    let above = at(&screen, 700, panel - 8);
+    // A strip of the panel between its label and value, against the game just above it. Strips,
+    // not a pixel: the test pattern moves, and one pixel of it may be a dark stripe.
+    let mean = |ys: std::ops::Range<usize>| {
+        let px: Vec<u32> = ys
+            .flat_map(|y| (430..540).map(move |x| (x, y)))
+            .map(|(x, y)| bright(at(&screen, x, y)))
+            .collect();
+        px.iter().sum::<u32>() / px.len() as u32
+    };
+    let (below, above) = (mean(panel + 4..panel + 12), mean(panel - 24..panel - 8));
     assert!(
-        bright(below) <= bright(above),
-        "the panel is not darker than the game above it"
+        below < above,
+        "the panel ({below}) is not darker than the game above it ({above})"
     );
 }

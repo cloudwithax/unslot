@@ -17,6 +17,14 @@ pub struct Cart {
 }
 
 impl Cart {
+    /// What the shelf calls the game: an arcade set's game, else the file's name.
+    pub fn shelf_name(&self) -> &str {
+        match self.platform.spec().header {
+            Header::Arcade if !self.title.is_empty() => &self.title,
+            _ => &self.stem,
+        }
+    }
+
     pub fn read_header(&mut self) {
         match self.platform.spec().header {
             Header::Gba => {
@@ -28,6 +36,11 @@ impl Cart {
             Header::Gb => {
                 if let Some(title) = crate::gb::title(&self.rom) {
                     self.title = title;
+                }
+            }
+            Header::Arcade => {
+                if let Some(name) = crate::arcade::name(&self.stem) {
+                    self.title = name.to_string();
                 }
             }
             Header::None => {}
@@ -87,6 +100,10 @@ pub fn scan(root: &Path) -> Result<Vec<Cart>, StoreError> {
             let Some(stem) = rom.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
+            let arcade = platform.spec().header == Header::Arcade;
+            if arcade && crate::arcade::is_bios(stem) {
+                continue;
+            }
             let label = labels
                 .get(&format!("{stem}.png").to_lowercase())
                 .map(|name| labels_dir.join(name));
@@ -99,6 +116,10 @@ pub fn scan(root: &Path) -> Result<Vec<Cart>, StoreError> {
                 label,
                 rom,
             });
+            if arcade {
+                // A table lookup, cheap enough for every game at boot, unlike reading a ROM.
+                carts.last_mut().map(Cart::read_header);
+            }
         }
         let listed = in_playlists(&carts[first..]);
         let mut at = first;
@@ -108,7 +129,8 @@ pub fn scan(root: &Path) -> Result<Vec<Cart>, StoreError> {
         });
     }
     carts.sort_by(|a, b| {
-        (a.platform as u8, sort_key(&a.stem)).cmp(&(b.platform as u8, sort_key(&b.stem)))
+        (a.platform as u8, sort_key(a.shelf_name()))
+            .cmp(&(b.platform as u8, sort_key(b.shelf_name())))
     });
     Ok(carts)
 }

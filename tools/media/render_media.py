@@ -60,6 +60,16 @@ class Medium:
     raised: list[tuple[Box, float]] = field(default_factory=list)
     disc: bool = False
     stipple: float = 1.0
+    # Round recesses as (cx, cy, r, depth); a depth past the medium's own goes right through.
+    circles: list[tuple[float, float, float, float]] = field(default_factory=list)
+    # Round bosses standing on the face, as (cx, cy, r, height): buttons, spools, capacitors.
+    knobs: list[tuple[float, float, float, float]] = field(default_factory=list)
+    # Patches of the face in another shade, as a factor on the plastic's grey: a metal shutter
+    # lighter, a chip or the tape behind a window darker. Rectangles, then circles.
+    shades: list[tuple[Box, float]] = field(default_factory=list)
+    round_shades: list[tuple[float, float, float, float]] = field(default_factory=list)
+    # Patches the tool leaves polished, past the label: a shutter, a screen.
+    smooth: list[Box] = field(default_factory=list)
 
     @property
     def size(self) -> tuple[int, int]:
@@ -224,7 +234,12 @@ MOTTLE = 0.28
 
 
 def plastic(
-    smooth: list[tuple[float, float, float, float]], px_per_mm: float, stipple: float = 1.0, grey: float = 0.214
+    smooth: list[tuple[float, float, float, float]],
+    px_per_mm: float,
+    stipple: float = 1.0,
+    grey: float = 0.214,
+    shades: list[tuple[tuple[float, float, float, float], float]] = (),
+    round_shades: list[tuple[float, float, float, float]] = (),
 ) -> bpy.types.Material:
     """Matte moulded plastic, stippled everywhere but the `smooth` rectangles (the label recess,
     which the label covers and the tool leaves polished). `stipple` scales the grain: a printed
@@ -254,7 +269,14 @@ def plastic(
     # Mostly pits: a grain darkens more often than it catches the light, which also keeps a dark
     # shell from looking dusty once its colour is laid over.
     wander = textured(g.math("SUBTRACT", wander, g.math("MULTIPLY", g.math("MAXIMUM", wander, 0.0), 0.45)))
-    g.link(g.math("MULTIPLY", g.math("ADD", wander, 1.0), grey), bsdf.inputs["Base Color"])
+    base = g.math("MULTIPLY", g.math("ADD", wander, 1.0), grey)
+    for box, factor in shades:
+        base = mixf(g, base, g.math("MULTIPLY", base, factor), g.inside([box]))
+    for cx, cy, r, factor in round_shades:
+        dx, dy = g.math("SUBTRACT", g.x, cx), g.math("SUBTRACT", g.y, cy)
+        within = g.math("LESS_THAN", g.math("ADD", g.math("MULTIPLY", dx, dx), g.math("MULTIPLY", dy, dy)), r * r)
+        base = mixf(g, base, g.math("MULTIPLY", base, factor), within)
+    g.link(base, bsdf.inputs["Base Color"])
     g.link(g.math("ADD", g.math("MULTIPLY", speck, 0.25), 0.45), bsdf.inputs["Roughness"])
     bsdf.inputs["Specular IOR Level"].default_value = 0.45
     return mat
@@ -354,13 +376,28 @@ def build(m: Medium) -> bpy.types.Object:
         for i, (box, tall) in enumerate(m.raised):
             shape = rounded(rect(box.x, box.y, box.w, box.h), min(box.w / 2.2, box.h / 2.2, 2.0), 4)
             unite(body, prism(f"rib {i}", m, shape, m.depth - 0.5, m.depth + tall))
+        for i, (cx, cy, r, deep) in enumerate(m.circles):
+            subtract(body, cylinder(f"well {i}", r, m.depth - deep, m.depth + 1, world(m, cx, cy)))
+        for i, (cx, cy, r, tall) in enumerate(m.knobs):
+            unite(body, cylinder(f"knob {i}", r, m.depth - 0.5, m.depth + tall, world(m, cx, cy)))
     finish(body, m.bevel)
     if m.disc:
         body.data.materials.append(disc_material(m))
     else:
-        x0, y1 = world(m, m.label.x, m.label.y)
-        x1, y0 = world(m, m.label.x + m.label.w, m.label.y + m.label.h)
-        body.data.materials.append(plastic([(x0, y0, x1, y1)], m.size[0] / m.w, m.stipple))
+        def area(b: Box) -> tuple[float, float, float, float]:
+            x0, y1 = world(m, b.x, b.y)
+            x1, y0 = world(m, b.x + b.w, b.y + b.h)
+            return (x0, y0, x1, y1)
+
+        body.data.materials.append(
+            plastic(
+                [area(b) for b in [m.label, *m.smooth]],
+                m.size[0] / m.w,
+                m.stipple,
+                shades=[(area(b), f) for b, f in m.shades],
+                round_shades=[(*world(m, cx, cy), r, f) for cx, cy, r, f in m.round_shades],
+            )
+        )
     return body
 
 
@@ -621,9 +658,515 @@ def media() -> list[Medium]:
     ]
 
 
+def recess(b: Box, pad: float = 1.5, deep: float = 0.5) -> tuple[Box, float]:
+    """The well a label sits in, `pad` round it."""
+    return (Box(b.x - pad, b.y - pad, b.w + 2 * pad, b.h + 2 * pad), deep)
+
+
+# How much darker a part is than the plastic: a chip's black epoxy, the tape behind a window.
+DARK = 0.35
+# A metal shutter or a contact, lighter than the plastic round it.
+METAL = 1.8
+
+
+def pcb() -> Medium:
+    """An arcade game board: fibreglass under solder mask, the marquee sticker on it, ROMs and
+    logic in rows, and the JAMMA edge of gold fingers along its bottom."""
+    w, h = 150.0, 112.0
+    label = Box(10, 9, 70, 44)
+    # The board, then the edge tab the cabinet's connector takes.
+    outline = rounded([(0, 0), (w, 0), (w, 100), (128, 100), (128, h), (22, h), (22, 100), (0, 100)], 2.0)
+    chips = [Box(88 + col * 16, 10 + row * 22, 12, 18) for row in range(3) for col in range(3)]
+    chips += [Box(12 + col * 14, 62, 10, 26) for col in range(5)]
+    fingers = [Box(25 + i * 4.2, 102, 2.6, 9) for i in range(24)]
+    return Medium(
+        "pcb",
+        w=w,
+        h=h,
+        depth=1.6,
+        px=360,
+        outline=outline,
+        label=label,
+        probe=Box(81, 58, 5, 20),
+        bevel=0.3,
+        stipple=0.55,
+        raised=[(b, 3.5) for b in chips] + [(b, 0.1) for b in fingers],
+        knobs=[(92, 88, 3.2, 6.0), (102, 88, 3.2, 6.0), (112, 88, 2.4, 4.0), (138, 88, 4.0, 7.0)],
+        circles=[(5, 5, 2.2, 5.0), (w - 5, 5, 2.2, 5.0), (5, 95, 2.2, 5.0), (w - 5, 95, 2.2, 5.0)],
+        shades=[(b, DARK) for b in chips] + [(b, METAL) for b in fingers],
+        round_shades=[(92, 88, 3.2, 0.7), (102, 88, 3.2, 0.7), (112, 88, 2.4, 0.7), (138, 88, 4.0, 0.7)],
+    )
+
+
+def cart(
+    name: str,
+    w: float,
+    h: float,
+    depth: float,
+    px: int,
+    label: Box,
+    probe: Box,
+    outline: list[tuple[float, float]] | None = None,
+    corner: float = 3.0,
+    grip: list[tuple[Box, float]] = (),
+    bevel: float = 1.4,
+    **more,
+) -> Medium:
+    """A moulded cartridge with its label in a shallow well and a grip of grooves."""
+    return Medium(
+        name,
+        w=w,
+        h=h,
+        depth=depth,
+        px=px,
+        outline=outline,
+        corner=corner,
+        label=label,
+        probe=probe,
+        bevel=bevel,
+        cuts=[recess(label, 1.2 if w < 80 else 1.5, 0.4 if w < 80 else 0.5)] + list(grip),
+        **more,
+    )
+
+
+def arched(w: float, h: float, rise: float, corner: float, steps: int = 12) -> list[tuple[float, float]]:
+    """A box whose top edge bows up by `rise` in the middle."""
+    top = [(w * i / steps, rise * (1 - (2 * i / steps - 1) ** 2)) for i in range(steps + 1)]
+    top = [(x, rise - y) for x, y in top]
+    pts = top + [(w, h), (0, h)]
+    return rounded(pts, corner, 4)
+
+
+def new_media() -> list[Medium]:
+    out = [pcb()]
+
+    mvs = Box(12, 26, 136, 74)
+    out.append(
+        cart(
+            "mvs",
+            160,
+            112,
+            24,
+            360,
+            mvs,
+            Box(4, 106, 30, 3),
+            corner=3,
+            grip=ridges(14, 5, 132, 15, 8, across=True, deep=0.8),
+        )
+    )
+
+    fds = Box(7, 7, 62, 38)
+    out.append(
+        Medium(
+            "fds",
+            w=76,
+            h=90,
+            depth=3.0,
+            px=272,
+            outline=rounded([(0, 0), (76, 0), (76, 84), (70, 90), (6, 90), (0, 84)], 2.5),
+            label=fds,
+            probe=Box(4, 60, 8, 12),
+            bevel=0.5,
+            cuts=[recess(fds, 1.2, 0.3), (Box(28, 52, 20, 32), 1.2)],
+            shades=[(Box(28, 52, 20, 32), DARK)],
+        )
+    )
+
+    n64 = Box(16, 24, 84, 44)
+    out.append(
+        cart(
+            "n64",
+            116,
+            76,
+            18,
+            360,
+            n64,
+            Box(4, 70, 20, 3),
+            outline=arched(116, 76, 5, 8),
+            grip=ridges(18, 8, 80, 12, 6, across=True, deep=0.6),
+        )
+    )
+
+    vb = Box(8, 24, 56, 48)
+    out.append(
+        cart(
+            "vb",
+            72,
+            80,
+            10,
+            300,
+            vb,
+            Box(8, 74, 10, 3),
+            corner=4,
+            grip=ridges(10, 5, 52, 13, 5, across=True, deep=0.5),
+        )
+    )
+
+    mini = Box(3, 8, 21, 14)
+    out.append(
+        cart(
+            "pokemini",
+            27,
+            25,
+            4.5,
+            300,
+            mini,
+            Box(9, 23.5, 8, 0.8),
+            corner=2.5,
+            bevel=0.4,
+            grip=ridges(5, 2.2, 17, 4, 3, across=True, deep=0.25),
+        )
+    )
+
+    screen = Box(30, 10, 50, 40)
+    out.append(
+        Medium(
+            "gw",
+            w=110,
+            h=67,
+            depth=11,
+            px=360,
+            outline=None,
+            corner=5,
+            label=screen,
+            probe=Box(40, 56, 30, 4),
+            bevel=1.2,
+            cuts=[recess(screen, 2.5, 0.8)],
+            knobs=[(14, 44, 6.5, 1.6), (96, 44, 6.5, 1.6), (96, 10, 2.4, 0.8), (96, 18, 2.4, 0.8), (104, 10, 2.4, 0.8)],
+            round_shades=[(14, 44, 6.5, 0.55), (96, 44, 6.5, 0.55)],
+        )
+    )
+
+    x32 = Box(12, 54, 76, 72)
+    out.append(
+        cart(
+            "32x",
+            100,
+            138,
+            20,
+            250,
+            x32,
+            Box(4, 134, 20, 2),
+            outline=arched(100, 138, 12, 5),
+            grip=ridges(14, 18, 72, 28, 8, across=True, deep=0.8),
+        )
+    )
+
+    sg = Box(10, 30, 65, 60)
+    out.append(
+        cart(
+            "sg1000",
+            85,
+            104,
+            14,
+            280,
+            sg,
+            Box(4, 99, 20, 2),
+            corner=3,
+            grip=ridges(12, 5, 61, 18, 6, across=True, deep=0.6),
+        )
+    )
+
+    a26 = Box(8, 8, 64, 50)
+    out.append(
+        cart(
+            "a2600",
+            80,
+            96,
+            22,
+            300,
+            a26,
+            Box(4, 60.5, 16, 2.5),
+            outline=rounded([(0, 0), (80, 0), (80, 64), (74, 66), (74, 96), (6, 96), (6, 66), (0, 64)], 3),
+            grip=ridges(10, 68, 60, 24, 7, across=True, deep=0.7),
+        )
+    )
+
+    a52 = Box(10, 8, 85, 56)
+    out.append(
+        cart(
+            "a5200",
+            105,
+            116,
+            22,
+            300,
+            a52,
+            Box(4, 111, 20, 2),
+            corner=4,
+            grip=ridges(12, 72, 81, 38, 9, across=True, deep=0.8),
+        )
+    )
+
+    a78 = Box(8, 6, 64, 56)
+    out.append(
+        cart(
+            "a7800",
+            80,
+            100,
+            20,
+            288,
+            a78,
+            Box(10, 95, 14, 2),
+            outline=rounded([(0, 0), (80, 0), (80, 100), (0, 100)], 6),
+            grip=ridges(10, 70, 60, 24, 5, across=True, deep=0.7),
+        )
+    )
+
+    col = Box(8, 8, 66, 58)
+    out.append(
+        cart(
+            "coleco",
+            82,
+            100,
+            18,
+            295,
+            col,
+            Box(20, 95, 20, 2),
+            corner=3,
+            grip=ridges(3, 72, 8, 24, 3, across=False, deep=0.6) + ridges(71, 72, 8, 24, 3, across=False, deep=0.6),
+        )
+    )
+
+    intv = Box(6, 8, 50, 52)
+    out.append(
+        cart(
+            "intv",
+            62,
+            126,
+            14,
+            177,
+            intv,
+            Box(4, 121, 12, 2),
+            corner=4,
+            grip=ridges(8, 68, 46, 50, 9, across=True, deep=0.6),
+        )
+    )
+
+    vec = Box(8, 10, 64, 48)
+    out.append(
+        cart(
+            "vectrex",
+            80,
+            94,
+            16,
+            300,
+            vec,
+            Box(14, 89, 14, 2),
+            outline=rounded([(0, 0), (80, 0), (80, 94), (0, 94)], 10),
+            grip=ridges(12, 64, 56, 24, 6, across=True, deep=0.6),
+        )
+    )
+
+    ody = Box(10, 28, 75, 44)
+    out.append(
+        cart(
+            "odyssey",
+            95,
+            80,
+            14,
+            340,
+            ody,
+            Box(4, 75, 14, 2),
+            corner=3,
+            # The finger hole the cartridge is pulled out by.
+            grip=[(Box(36, 6, 23, 12), 20.0)],
+        )
+    )
+
+    chf = Box(10, 10, 80, 54)
+    out.append(
+        cart(
+            "channelf",
+            100,
+            112,
+            22,
+            300,
+            chf,
+            Box(4, 106, 14, 2),
+            outline=rounded([(0, 0), (100, 0), (100, 112), (60, 112), (56, 106), (44, 106), (40, 112), (0, 112)], 3),
+            grip=ridges(12, 72, 76, 26, 7, across=True, deep=0.8),
+        )
+    )
+
+    sv = Box(6, 6, 48, 30)
+    out.append(
+        cart(
+            "supervision",
+            60,
+            56,
+            9,
+            320,
+            sv,
+            Box(14, 52.5, 20, 1.5),
+            corner=3,
+            bevel=0.9,
+            grip=ridges(8, 41, 44, 11, 4, across=True, deep=0.5),
+        )
+    )
+
+    duck = Box(6, 14, 46, 36)
+    out.append(
+        cart(
+            "megaduck",
+            58,
+            64,
+            8,
+            300,
+            duck,
+            Box(3, 60, 8, 2),
+            outline=rounded([(0, 0), (52, 0), (58, 6), (58, 64), (0, 64)], 3),
+            bevel=0.9,
+            grip=ridges(8, 3, 40, 8, 3, across=True, deep=0.4),
+        )
+    )
+
+    msx = Box(30, 8, 82, 46)
+    out.append(
+        cart(
+            "msx",
+            120,
+            64,
+            14,
+            360,
+            msx,
+            Box(30, 59, 20, 2),
+            outline=rounded([(6, 0), (114, 0), (120, 6), (120, 64), (0, 64), (0, 6)], 2.5),
+            grip=ridges(6, 8, 20, 48, 5, across=False, deep=0.6),
+        )
+    )
+
+    # 3.5" disk: the shutter along the top, the label well under it, the corner cut.
+    f35 = Box(10, 46, 70, 44)
+    shutter = Box(24, 0, 42, 38)
+    out.append(
+        Medium(
+            "floppy35",
+            w=90,
+            h=94,
+            depth=3.3,
+            px=300,
+            outline=rounded([(0, 0), (86, 0), (90, 4), (90, 94), (0, 94)], 1.5),
+            label=f35,
+            probe=Box(3, 30, 6, 10),
+            bevel=0.5,
+            # The shutter's window, where the disk shows when it slides open, sits through it.
+            cuts=[recess(f35, 1.0, 0.25), (Box(4, 84, 4, 6), 5.0), (Box(82, 84, 4, 6), 5.0), (Box(39, 5, 12, 25), 0.55)],
+            raised=[(shutter, 0.15)],
+            shades=[(shutter, 1.45), (Box(39, 5, 12, 25), DARK)],
+            smooth=[shutter],
+            stipple=0.8,
+        )
+    )
+
+    # 5.25" disk: a paper sleeve with the hub, index hole and read slot showing the disk inside.
+    f525 = Box(10, 6, 113, 22)
+    out.append(
+        Medium(
+            "floppy525",
+            w=133,
+            h=133,
+            depth=1.4,
+            px=330,
+            outline=None,
+            corner=1.5,
+            label=f525,
+            probe=Box(8, 40, 14, 14),
+            bevel=0.25,
+            stipple=0.4,
+            # The write-protect notch is cut in from the right-hand edge.
+            cuts=[(Box(59, 92, 15, 36), 0.9), (Box(127, 34, 10, 8), 5.0)],
+            circles=[(66.5, 66.5, 16.5, 0.8), (66.5, 66.5, 14.0, 1.0), (88, 64, 3.0, 0.9)],
+            shades=[(Box(59, 92, 15, 36), DARK)],
+            round_shades=[(66.5, 66.5, 14.0, 0.5), (88, 64, 3.0, DARK)],
+        )
+    )
+
+    # Compact cassette: the label across the top with the window through it, the spools, the
+    # head opening's trapezoid along the bottom.
+    tape_label = Box(8, 6, 84, 22)
+    out.append(
+        Medium(
+            "tape",
+            w=100,
+            h=64,
+            depth=12,
+            px=360,
+            outline=None,
+            corner=3,
+            label=tape_label,
+            probe=Box(2.5, 30, 3, 20),
+            bevel=1.0,
+            cuts=[
+                recess(tape_label, 1.2, 0.3),
+                (Box(30, 32, 40, 14), 1.5),
+                (Box(26, 52, 48, 12), 0.6),
+            ],
+            circles=[(22, 39, 7.5, 1.5), (78, 39, 7.5, 1.5), (4, 4, 1.3, 0.8), (96, 4, 1.3, 0.8), (50, 58, 1.3, 0.8), (4, 60, 1.3, 0.8), (96, 60, 1.3, 0.8)],
+            knobs=[(22, 39, 3.6, 0.0), (78, 39, 3.6, 0.0)],
+            shades=[(Box(30, 32, 40, 14), DARK)],
+            round_shades=[(22, 39, 7.5, 0.6), (78, 39, 7.5, 0.6)],
+        )
+    )
+
+    # Amstrad's 3" disk: a stiff case, label on top, the sliding shutter low down.
+    cpc = Box(8, 8, 64, 50)
+    cpc_shutter = Box(14, 66, 52, 30)
+    out.append(
+        Medium(
+            "cpc3",
+            w=80,
+            h=100,
+            depth=5,
+            px=288,
+            outline=None,
+            corner=3,
+            label=cpc,
+            probe=Box(3, 70, 6, 10),
+            bevel=0.7,
+            cuts=[recess(cpc, 1.2, 0.3), (Box(34, 70, 12, 22), 0.6)],
+            raised=[(cpc_shutter, 0.2)],
+            shades=[(cpc_shutter, 1.35), (Box(34, 70, 12, 22), DARK)],
+            smooth=[cpc_shutter],
+        )
+    )
+
+    # UMD: the round-topped shell with its label on the front.
+    umd = Box(8, 14, 48, 40)
+    out.append(
+        cart(
+            "umd",
+            64,
+            65,
+            4.2,
+            320,
+            umd,
+            Box(3, 61, 10, 2),
+            outline=arched(64, 65, 8, 6),
+            bevel=0.6,
+        )
+    )
+
+    fan = Box(9, 10, 52, 42)
+    out.append(
+        cart(
+            "fantasy",
+            70,
+            76,
+            12,
+            320,
+            fan,
+            Box(4, 30, 3, 20),
+            corner=8,
+            bevel=2.0,
+            grip=ridges(12, 60, 46, 12, 4, across=True, deep=0.6),
+        )
+    )
+    return out
+
+
 def main() -> None:
     wanted = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
-    for m in media():
+    for m in media() + new_media():
         if wanted and m.name not in wanted:
             continue
         render(m)

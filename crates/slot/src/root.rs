@@ -38,6 +38,52 @@ pub fn bios_dir(root: &Path) -> PathBuf {
     root.join("BIOS")
 }
 
+/// Where a core that keeps its own files in the BIOS folder finds them there: PPSSPP's fonts,
+/// atlas and shaders, which ship in System/PPSSPP and are copied over the first time a PSP game
+/// starts. An update can replace System/ but never touches BIOS/, so they go across again after
+/// one only if they went missing.
+pub fn seed_core_files(root: &Path, core: slot_store::Core) {
+    let name = match core {
+        slot_store::Core::Ppsspp => "PPSSPP",
+        _ => return,
+    };
+    let (from, to) = (root.join("System").join(name), bios_dir(root).join(name));
+    if to.join("ppge_atlas.zim").is_file() || !from.is_dir() {
+        return;
+    }
+    if let Err(e) = copy_tree(&from, &to) {
+        eprintln!("slot: {}: {e}", to.display());
+    }
+}
+
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let dest = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_tree(&entry.path(), &dest)?;
+        } else {
+            std::fs::copy(entry.path(), dest)?;
+        }
+    }
+    Ok(())
+}
+
+/// The first of a platform's BIOS files that is not on the card, as its spec names it. An entry
+/// of `a|b` is met by either; a name starting `@` is looked for in the system's own Games folder,
+/// where FinalBurn Neo also looks for neogeo.zip, rather than in BIOS.
+pub fn missing_bios(root: &Path, platform: Platform) -> Option<&'static str> {
+    let bios = bios_dir(root);
+    let games = root.join("Games").join(platform.dir_name());
+    platform.spec().bios.iter().copied().find(|entry| {
+        !entry.split('|').any(|name| match name.strip_prefix('@') {
+            Some(name) => games.join(name).is_file(),
+            None => bios.join(name).is_file(),
+        })
+    })
+}
+
 const BIOS_FILE: &str = "gba_bios.bin";
 
 const BIOS_BYTES: u64 = 16 * 1024;
@@ -60,4 +106,31 @@ pub fn logs_dir(root: &Path) -> PathBuf {
 
 pub fn saves_dir(root: &Path) -> PathBuf {
     root.join("Saves")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ppsspps_files_go_to_the_bios_folder_once() {
+        let d = tempfile::tempdir().unwrap();
+        let shipped = d.path().join("System/PPSSPP/flash0/font");
+        std::fs::create_dir_all(&shipped).unwrap();
+        std::fs::write(d.path().join("System/PPSSPP/ppge_atlas.zim"), b"atlas").unwrap();
+        std::fs::write(shipped.join("jpn0.pgf"), b"font").unwrap();
+        seed_core_files(d.path(), slot_store::Core::Ppsspp);
+        let bios = d.path().join("BIOS/PPSSPP");
+        assert_eq!(
+            std::fs::read(bios.join("flash0/font/jpn0.pgf")).unwrap(),
+            b"font"
+        );
+        // What the player changed there stays.
+        std::fs::write(bios.join("ppge_atlas.zim"), b"theirs").unwrap();
+        seed_core_files(d.path(), slot_store::Core::Ppsspp);
+        assert_eq!(
+            std::fs::read(bios.join("ppge_atlas.zim")).unwrap(),
+            b"theirs"
+        );
+    }
 }

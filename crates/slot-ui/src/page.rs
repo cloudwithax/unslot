@@ -216,10 +216,16 @@ fn row_width(font: &fontdue::Font, legends: &[Legend], scale: f32) -> f32 {
         .sum::<f32>()
 }
 
-/// A button's legend scaled down to `h` tall, each pixel the average of the ones it covers.
+/// A button's legend scaled down to `h` tall.
 fn shrunk(button: ButtonLegend, h: u32) -> (Vec<u8>, u32) {
-    const TAPS: u32 = 4;
     let (src, sw, sh) = button_legend(button);
+    shrink(src, sw, sh, h)
+}
+
+/// An RGBA picture scaled down to `h` tall and as wide as keeps its shape, each pixel the
+/// average of the ones it covers, weighted by their alpha so the edges do not darken.
+pub fn shrink(src: &[u8], sw: u32, sh: u32, h: u32) -> (Vec<u8>, u32) {
+    const TAPS: u32 = 4;
     let w = ((sw * h) as f32 / sh as f32).round().max(1.0) as u32;
     let mut out = vec![0u8; (w * h * 4) as usize];
     for y in 0..h {

@@ -3,12 +3,13 @@ use slot_store::Platform;
 #[test]
 fn every_platform_has_a_directory() {
     let names: Vec<&str> = Platform::ALL.iter().map(|p| p.dir_name()).collect();
+    // The first systems keep the folders they had; the rest follow.
     assert_eq!(
-        names,
-        vec![
-            "GBA", "GB", "GBC", "NES", "SNES", "MD", "SMS", "GG", "PCE", "NGP", "WS", "LYNX", "PS"
-        ]
+        names[..13],
+        ["GBA", "GB", "GBC", "NES", "SNES", "MD", "SMS", "GG", "PCE", "NGP", "WS", "LYNX", "PS"]
     );
+    assert_eq!(names.len(), Platform::COUNT);
+    assert!(names.iter().all(|n| !n.is_empty()));
 }
 
 #[test]

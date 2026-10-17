@@ -211,3 +211,40 @@ fn a_system_without_a_header_keeps_its_file_name_as_its_title() {
         "a headerless system read a title out of the file"
     );
 }
+
+#[test]
+fn an_arcade_set_shelves_as_its_game_and_a_bios_not_at_all() {
+    let d = tmp_root();
+    let dir = d.path().join("Games/NEOGEO");
+    std::fs::create_dir_all(&dir).unwrap();
+    for set in ["mslug", "neogeo", "kof98"] {
+        std::fs::write(dir.join(format!("{set}.zip")), b"PK").unwrap();
+    }
+    let carts = scan(d.path()).unwrap();
+    let shelved: Vec<(&str, &str)> = carts
+        .iter()
+        .filter(|c| c.platform == Platform::NeoGeo)
+        .map(|c| (c.stem.as_str(), c.shelf_name()))
+        .collect();
+    // In the order of their games' names, not their sets'.
+    assert_eq!(
+        shelved,
+        [
+            ("mslug", "Metal Slug - Super Vehicle-001"),
+            (
+                "kof98",
+                "The King of Fighters '98 - The Slugfest / King of Fighters '98 - Dream Match Never Ends (NGM-2420)"
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_set_the_databases_do_not_know_keeps_its_file_name() {
+    let d = tmp_root();
+    let dir = d.path().join("Games/ARCADE");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("myhack.zip"), b"PK").unwrap();
+    let carts = scan(d.path()).unwrap();
+    assert_eq!(carts[0].shelf_name(), "myhack");
+}

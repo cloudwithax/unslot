@@ -492,8 +492,10 @@ fn updates_offer_the_newer_releases_and_a_downloaded_one_restarts_to_install() {
     press(&mut a, Btn::A);
     until(&mut a, |a| detail(a, "unslot") == "Ready to install");
     assert!(
-        d.path().join(slot::update::PACK).exists(),
-        "the pack is not where BaseOS looks"
+        d.path()
+            .join(slot::pak::file_name(SimUpdates::UNSLOT))
+            .exists(),
+        "the signed pack is not at the card's root"
     );
     assert_eq!(
         list(&a).status,

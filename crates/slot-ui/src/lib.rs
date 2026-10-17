@@ -74,7 +74,7 @@ pub use link_art::{
     ARROW_LEFT_X, ARROW_RIGHT_X, ARROW_W, ARROW_Y, CLICKS_H, CLICKS_W, CLICKS_X, CLICKS_Y, PLUG_H,
     PLUG_TIP_X, PLUG_W, PORT_H, PORT_W, PORT_Y,
 };
-pub use list_page::{ListPage, ListRow, LIST_ROWS};
+pub use list_page::{ListIcon, ListPage, ListRow, LIST_ROWS};
 pub use media::Media;
 pub use page::Legend;
 pub use plate::{

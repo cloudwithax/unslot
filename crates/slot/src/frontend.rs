@@ -91,12 +91,23 @@ struct QuickPalette {
     shown: &'static str,
 }
 
-#[derive(Default)]
 struct BezelSync {
     tex: Option<TexId>,
     image: Option<(Console, BezelPick)>,
     labels: [String; Console::COUNT],
     faces: [(Option<TexId>, Option<TexId>); Console::COUNT],
+}
+
+// By hand: the standard library derives Default for arrays of no more than 32.
+impl Default for BezelSync {
+    fn default() -> Self {
+        BezelSync {
+            tex: None,
+            image: None,
+            labels: std::array::from_fn(|_| String::new()),
+            faces: [(None, None); Console::COUNT],
+        }
+    }
 }
 
 #[derive(Default)]
@@ -384,11 +395,12 @@ impl Frontend {
         let shadow = cart(faces.chip_shadow);
         let mut up = |f: UndoFace| (compositor.create_texture(f.w, f.h, &f.rgba), f.w, f.h);
         let lines = faces.shutdown.into_iter().map(&mut up).collect();
-        let labels = faces
+        let shared: Vec<_> = faces
             .quick_labels
             .into_iter()
             .map(|l| l.map(&mut up))
             .collect();
+        let labels = faces.quick_label_of.iter().map(|&i| shared[i]).collect();
         let pointer = up(faces.quick_pointer);
         let values = faces
             .quick_values
@@ -773,7 +785,10 @@ fn legend_faces(compositor: &mut Compositor, legend: &[(&str, &str)]) -> Vec<Tex
 struct UiFaces {
     link_badges: Vec<CartFace>,
     shutdown: Vec<UndoFace>,
+    /// One a label: the per-system rows share theirs ("Shader", "Bezel").
     quick_labels: Vec<[UndoFace; 2]>,
+    /// Which of `quick_labels` each row of `QuickRow::ALL` shows.
+    quick_label_of: Vec<usize>,
     quick_pointer: UndoFace,
     quick_values: Vec<[UndoFace; 2]>,
     quick_carets: [UndoFace; 2],
@@ -815,10 +830,12 @@ impl UiFaces {
                     })
                 })
                 .collect(),
-            quick_labels: QuickRow::ALL
+            quick_labels: quick_label_rows()
+                .0
                 .iter()
                 .map(|r| [false, true].map(|lit| quick_label_face(*r, lit)))
                 .collect(),
+            quick_label_of: quick_label_rows().1,
             quick_pointer: quick_pointer_face(),
             quick_values: QuickValue::ALL
                 .iter()
@@ -1222,4 +1239,23 @@ fn upload_rgba(
             id
         }
     }
+}
+
+/// The rows whose labels differ, one for each wording, and for each row of `QuickRow::ALL` which
+/// of them it shows.
+fn quick_label_rows() -> (Vec<QuickRow>, Vec<usize>) {
+    let mut unique: Vec<QuickRow> = Vec::new();
+    let of = QuickRow::ALL
+        .iter()
+        .map(
+            |r| match unique.iter().position(|u| u.label() == r.label()) {
+                Some(i) => i,
+                None => {
+                    unique.push(*r);
+                    unique.len() - 1
+                }
+            },
+        )
+        .collect();
+    (unique, of)
 }

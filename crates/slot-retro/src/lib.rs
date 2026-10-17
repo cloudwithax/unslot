@@ -1,5 +1,6 @@
 mod core;
 mod ffi;
+mod hw;
 mod libretro;
 mod link;
 mod mock;
@@ -10,6 +11,7 @@ pub use ffi::{
     NETPACKET_BROADCAST, NETPACKET_FLUSH_HINT, NETPACKET_RELIABLE, NETPACKET_UNRELIABLE,
     NETPACKET_UNSEQUENCED,
 };
+pub use hw::{set_gl_factory, GlContext, GlFactory};
 pub use libretro::{Canvas, LibretroCore};
 pub use link::{Link, LinkChannel, LoopbackLink};
 pub use mock::MockCore;

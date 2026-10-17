@@ -1,10 +1,10 @@
 //! Updates for unslot and for the BaseOS under it, from their GitHub releases.
 //!
-//! Each is downloaded to where BaseOS looks at boot, and restarting puts it in. BaseOS writes a
-//! `.bosupd` to its spare rootfs and boots that on trial. Before it starts a frontend it installs
-//! a pack at the card's root named `MinUI.zip`, the name NextUI's packs go by: unslot's replaces
-//! System/, and System/launch_frontend.sh gives the new one three starts to draw a frame before
-//! it puts the old one back. `confirm` is how a start says it drew one.
+//! Each is downloaded to the card's root, and restarting puts it in. BaseOS writes a `.bosupd` to
+//! its spare rootfs and boots that on trial. unslot's comes as `unslot-<version>.pak`, which
+//! System/launch_frontend.sh checks is signed by unslot (see `pak`) before it installs the
+//! `MinUI.zip` inside: that replaces System/, and the launcher gives the new one three starts to
+//! draw a frame before it puts the old one back. `confirm` is how a start says it drew one.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -14,8 +14,6 @@ use crate::json;
 
 pub const REPO: &str = "cloudwithax/unslot";
 pub const BASEOS_REPO: &str = "pvaibhav/BaseOS";
-/// The name BaseOS installs a frontend's pack under.
-pub const PACK: &str = "MinUI.zip";
 /// Each release's checksums, as `sha256sum` writes them.
 pub const SUMS: &str = "SHA256SUMS";
 const UPDATE_DIR: &str = ".unslot-update";
@@ -188,6 +186,11 @@ pub trait UpdateBackend: Send {
         dest: &Path,
         progress: &mut dyn FnMut(u64),
     ) -> Result<(), String>;
+
+    /// The key unslot's packs are signed with.
+    fn release_key(&self) -> [u8; 32] {
+        crate::pak::RELEASE_KEY
+    }
 }
 
 enum Job {
@@ -328,6 +331,18 @@ fn work(
                         }
                     });
                 });
+                // A pack is only kept if unslot signed it, as the launcher will not install it else.
+                let fetched = fetched.and_then(|()| match part {
+                    Part::Unslot => {
+                        let bytes = std::fs::read(&dest).map_err(|e| e.to_string())?;
+                        crate::pak::check(&bytes, &backend.release_key())
+                            .map(|_| ())
+                            .inspect_err(|_| {
+                                let _ = std::fs::remove_file(&dest);
+                            })
+                    }
+                    Part::BaseOs => Ok(()),
+                });
                 if let Err(e) = &fetched {
                     eprintln!("slot: updates: {} {version}: {e}", part.name());
                 }
@@ -362,7 +377,7 @@ fn look(
     ))?;
     let release = parse_release(&listing).ok_or("GitHub's answer could not be read")?;
     let name = match (part, baseos) {
-        (Part::Unslot, _) => PACK.to_string(),
+        (Part::Unslot, _) => crate::pak::file_name(&release.tag),
         (Part::BaseOs, Some(b)) => format!(
             "baseos-{}-{}.bosupd",
             b.target,
@@ -440,13 +455,20 @@ impl UpdateBackend for SimUpdates {
             SimUpdates::BASEOS.trim_start_matches('v')
         );
         Ok(match url {
-            u if u.ends_with(SUMS) => {
-                format!("{}  {PACK}\n{}  {bosupd}\n", "a".repeat(64), "b".repeat(64))
-            }
+            u if u.ends_with(SUMS) => format!(
+                "{}  {}\n{}  {bosupd}\n",
+                "a".repeat(64),
+                crate::pak::file_name(SimUpdates::UNSLOT),
+                "b".repeat(64)
+            ),
             u if u.contains(BASEOS_REPO) => {
                 SimUpdates::listing(BASEOS_REPO, SimUpdates::BASEOS, &bosupd)
             }
-            _ => SimUpdates::listing(REPO, SimUpdates::UNSLOT, PACK),
+            _ => SimUpdates::listing(
+                REPO,
+                SimUpdates::UNSLOT,
+                &crate::pak::file_name(SimUpdates::UNSLOT),
+            ),
         })
     }
 
@@ -458,7 +480,20 @@ impl UpdateBackend for SimUpdates {
         progress: &mut dyn FnMut(u64),
     ) -> Result<(), String> {
         progress(2048);
-        std::fs::write(dest, b"pretend").map_err(|e| e.to_string())
+        let pretend = match dest.extension().is_some_and(|e| e == "pak") {
+            true => crate::pak::build::pack(
+                SimUpdates::UNSLOT,
+                b"pretend",
+                crate::pak::build::TEST_SEED,
+                |_| {},
+            ),
+            false => b"pretend".to_vec(),
+        };
+        std::fs::write(dest, pretend).map_err(|e| e.to_string())
+    }
+
+    fn release_key(&self) -> [u8; 32] {
+        crate::pak::build::test_key()
     }
 }
 
@@ -647,8 +682,10 @@ mod tests {
         u.download(Part::Unslot);
         settle(&u, |v| matches!(v.unslot.stage, Stage::Ready(_)));
         assert!(
-            d.path().join(PACK).exists(),
-            "the pack is not where BaseOS looks"
+            d.path()
+                .join(crate::pak::file_name(SimUpdates::UNSLOT))
+                .exists(),
+            "the pack is not on the card"
         );
         u.download(Part::BaseOs);
         settle(&u, |v| {
@@ -657,6 +694,58 @@ mod tests {
                 .is_some_and(|b| matches!(b.stage, Stage::Ready(_)))
         });
         assert!(d.path().join("baseos-rg35xxsp-1.5.0.bosupd").exists());
+    }
+
+    /// The pretend releases, held to unslot's own key, which did not sign them.
+    struct Unsigned(SimUpdates);
+
+    impl UpdateBackend for Unsigned {
+        fn get(&mut self, url: &str) -> Result<String, String> {
+            self.0.get(url)
+        }
+
+        fn fetch(
+            &mut self,
+            url: &str,
+            sha256: &str,
+            dest: &Path,
+            progress: &mut dyn FnMut(u64),
+        ) -> Result<(), String> {
+            self.0.fetch(url, sha256, dest, progress)
+        }
+    }
+
+    #[test]
+    fn a_pack_unslot_did_not_sign_is_not_kept() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("System")).unwrap();
+        std::fs::write(
+            d.path().join(VERSION_FILE),
+            "v2.0.0
+",
+        )
+        .unwrap();
+        let u = Updates::spawn(Box::new(Unsigned(SimUpdates)), d.path(), None);
+        u.check();
+        settle(&u, |v| matches!(v.unslot.stage, Stage::Available(_)));
+        u.download(Part::Unslot);
+        let v = settle(&u, |v| v.error.is_some());
+        assert!(
+            matches!(v.unslot.stage, Stage::Available(_)),
+            "{:?}",
+            v.unslot.stage
+        );
+        assert!(
+            v.error
+                .as_deref()
+                .is_some_and(|e| e.contains("not signed by unslot")),
+            "{:?}",
+            v.error
+        );
+        assert!(!d
+            .path()
+            .join(crate::pak::file_name(SimUpdates::UNSLOT))
+            .exists());
     }
 
     #[test]

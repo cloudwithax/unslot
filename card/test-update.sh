@@ -115,6 +115,41 @@ boot || fail "installing onto an empty card failed"
 [ "$(cat "$CARD/System/slot")" = "new slot" ] || fail "an empty card got no System"
 [ ! -e "$CARD/.unslot-update/trial" ] || fail "a first install was put on trial with nothing to go back to"
 
+# unslot's own packs: the launcher installs unslot-<version>.pak from the card's root when slot
+# says it is signed, and leaves one that is not as .bad. A pretend slot stands in for the check:
+# a pack holding the word "signed" passes and gives up the zip built above.
+cat > "$TMP/fake-slot" <<EOF
+#!/bin/sh
+[ "\$1" = --unpack-pak ] || exit 2
+grep -q signed "\$2" || { echo "not signed by unslot" >&2; exit 1; }
+cp "$TMP/MinUI.zip" "\$3" && echo v9.9.9
+EOF
+launch() {
+	SLOT_ROOT="$CARD" AGS_RUN="$TMP/run" AGS_SLOT="sh $TMP/fake-slot" 		sh "$HERE/System/launch_frontend.sh" > /dev/null 2>&1 || true
+}
+mkdir -p "$TMP/run"
+card
+rm -f "$CARD/MinUI.zip"
+echo signed > "$CARD/unslot-v9.9.9.pak"
+: > "$CARD/System/led.sh"
+launch
+[ "$(cat "$CARD/System/slot")" = "new slot" ] || fail "a signed .pak was not installed"
+[ ! -e "$CARD/unslot-v9.9.9.pak" ] || fail "an installed .pak was left to install again"
+[ ! -e "$CARD/.tmp_update" ] || fail "the .pak's unpacked files were left"
+[ ! -e "$CARD/.unslot-update/pak.zip" ] || fail "the .pak's zip was left"
+[ "$(cat "$CARD/.unslot-update/trial")" = 1 ] || fail "the start after a .pak install was not counted"
+[ "$(cat "$CARD/Saves/GBA/Emerald.sav")" = "save" ] || fail "a .pak install touched a save"
+
+card
+rm -f "$CARD/MinUI.zip"
+echo "made up" > "$CARD/unslot-v9.9.9.pak"
+: > "$CARD/System/led.sh"
+launch
+[ "$(cat "$CARD/System/slot")" = "old slot" ] || fail "an unsigned .pak replaced System"
+[ -f "$CARD/unslot-v9.9.9.pak.bad" ] || fail "an unsigned .pak was not set aside"
+[ ! -e "$CARD/unslot-v9.9.9.pak" ] || fail "an unsigned .pak would be tried at every start"
+grep -q "not an update unslot signed" "$CARD/Logs/update.log" || fail "an unsigned .pak was not logged"
+
 # slotupdate.sh fetches through curl and checks what it got.
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/curl" <<'EOF'

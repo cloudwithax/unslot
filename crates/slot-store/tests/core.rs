@@ -200,12 +200,17 @@ fn a_line_naming_a_core_the_platform_cannot_run_is_dropped() {
 
 #[test]
 fn the_picker_board_has_exactly_two_sockets() {
+    // Other systems with more than one core pick from a list, not the GBA's board.
     assert_eq!(Platform::Gba.spec().cores, [Core::Mgba, Core::Gpsp]);
-    for p in Platform::ALL.into_iter().filter(|p| *p != Platform::Gba) {
-        assert_eq!(
-            p.spec().cores.len(),
-            1,
-            "{p:?} would open a picker with no board for it"
-        );
+}
+
+#[test]
+fn every_system_has_a_core_and_no_core_twice() {
+    for p in Platform::ALL {
+        let cores = p.spec().cores;
+        assert!(!cores.is_empty(), "{p:?} has no core");
+        for (i, c) in cores.iter().enumerate() {
+            assert!(!cores[i + 1..].contains(c), "{p:?} lists {c:?} twice");
+        }
     }
 }

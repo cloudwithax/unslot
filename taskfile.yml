@@ -6,7 +6,19 @@ vars:
   MGBA_COMMIT: e31759b24e7a4e3899285ff720d7b573ac328ae7
   GPSP_COMMIT: 7b2dd37394e2822110cacef321e9bb291a305b77
   # The cores past the Game Boy family, fetched prebuilt from the libretro buildbot.
-  FETCHED: fceumm snes9x genesis_plus_gx mednafen_pce_fast race mednafen_wswan handy pcsx_rearmed
+  FETCHED: >-
+    fceumm snes9x genesis_plus_gx mednafen_pce_fast race mednafen_wswan handy pcsx_rearmed fbneo
+    mame2003_plus neocd mednafen_vb pokemini gw picodrive gearsystem
+    mednafen_supergrafx mednafen_pcfx stella2014 a5200 prosystem gearcoleco freeintv o2em
+    freechaf potator sameduck fmsx bluemsx vice_x64 puae2021 fuse cap32 hatarib atari800 dosbox_pure
+    np2kai px68k scummvm retro8 tic80
+  # The cores built from source against OpenGL ES, as core:commit: the GPU cores, whose buildbot
+  # builds want desktop GL, and vecx, whose buildbot build links it.
+  GLES_CORES: >-
+    vecx:8f671cc9d737f2890c3ce19e177e2984dcae121f
+    parallel_n64:a8280501a71c1bcd4c85c5b8bfe75cfa62cd6127
+    flycast:6bb0fc3e18dac4b01694f488c7a71f5930e8a648
+    ppsspp:5f2d4afbdced51ac056af25a05fd182a1175b558
   SLOT_IN_PROCESS: >-
     --test bios --test core --test core_options --test e2e --test emu --test gb_palette_recolour --test gpsp
     --test link_ui --test mgba_gb_link --test mgba_link --test render_colour_correction
@@ -304,6 +316,34 @@ tasks:
       - rm -f vendor/cores.manifest
       - task: core:fetch
 
+  core:gles:
+    desc: >-
+      Build the GPU cores (ParaLLEl N64, Flycast, PPSSPP) and vecx against OpenGL ES from their
+      pinned commits, natively on an aarch64 Linux box or cross-compiled in cores/gles/Dockerfile
+    status:
+      - |
+        for spec in {{.GLES_CORES}}; do
+          c="${spec%%:*}" commit="${spec#*:}"
+          grep -q "^commit=$commit$" "vendor/${c}_libretro.so.meta" 2>/dev/null || exit 1
+        done
+      - test -f vendor/PPSSPP/ppge_atlas.zim
+    cmds:
+      - |
+        set -eu
+        native=0
+        [ "$(uname -s)-$(uname -m)" = "Linux-aarch64" ] && native=1
+        [ "$native" = 1 ] || docker build -q -t unslot-gles cores/gles > /dev/null
+        for spec in {{.GLES_CORES}}; do
+          c="${spec%%:*}" commit="${spec#*:}"
+          run="sh cores/gles/build.sh $c $commit target-device/gles/$c vendor/${c}_libretro.so"
+          if [ "$native" = 1 ]; then
+            sh -c "$run"
+          else
+            docker run --rm -v "$PWD":/src -w /src unslot-gles sh -c "$run"
+          fi
+          file "vendor/${c}_libretro.so" | grep -q aarch64
+        done
+
   core:gpsp:update:
     desc: Refetch gpSP's source archive and rebuild the core from it, even if the set is current
     cmds:
@@ -356,7 +396,7 @@ tasks:
 
   dist:device:
     desc: Build the SD2 tree for an H700 device, OUT defaults to ./dist-device
-    deps: [core:device, core:gpsp, core:fetch, services, build:device]
+    deps: [core:device, core:gpsp, core:fetch, core:gles, services, build:device]
     vars:
       OUT: '{{.OUT | default "dist-device"}}'
     cmds:
@@ -371,7 +411,16 @@ tasks:
       - cp vendor/mgba_libretro.so {{.OUT}}/System/
       - cp vendor/gpsp_libretro.so {{.OUT}}/System/
       - for c in {{.FETCHED}}; do cp "vendor/${c}_libretro.so" {{.OUT}}/System/; done
+      - for spec in {{.GLES_CORES}}; do cp "vendor/${spec%%:*}_libretro.so" {{.OUT}}/System/; done
+      - cp -R vendor/PPSSPP {{.OUT}}/System/PPSSPP
       - cp -r licenses {{.OUT}}/System/licenses
+      - |
+        set -eu
+        # Where each source-built core came from, for its licence's source offer.
+        for spec in {{.GLES_CORES}}; do
+          c="${spec%%:*}"
+          cp "vendor/${c}_libretro.so.meta" "{{.OUT}}/System/licenses/${c}-${spec#*:}.meta"
+        done
       - cp vendor/cores.manifest {{.OUT}}/System/licenses/cores.manifest
       - cp -R vendor/services {{.OUT}}/System/services
       - mkdir -p {{.OUT}}/System/Wallpapers
@@ -416,8 +465,9 @@ tasks:
 
   dist:update:
     desc: >-
-      Build the update pack PACK (default ./MinUI.zip) from a fresh device tree. At the root of a
-      card running slot or unslot, BaseOS installs it at the next start, replacing System/ only
+      Build the update from a fresh device tree: PACK (default ./MinUI.zip), which BaseOS installs
+      at the root of a card running slot, and unslot-<version>.pak, the same zip signed with the
+      release key in UNSLOT_PAK_KEY, which is what unslot itself installs
     vars:
       OUT: '{{.OUT | default "dist-device"}}'
       PACK: '{{.PACK | default "MinUI.zip"}}'
@@ -427,6 +477,27 @@ tasks:
           OUT: '{{.OUT}}'
           VERSION: '{{.VERSION | default ""}}'
       - sh tools/update/pack.sh {{.OUT}} {{.PACK}}
+      - task: dist:pak
+        vars:
+          OUT: '{{.OUT}}'
+          PACK: '{{.PACK}}'
+
+  dist:pak:
+    desc: >-
+      Sign the update zip PACK as unslot-<version>.pak, the version from the tree OUT, with the
+      release key: UNSLOT_PAK_KEY, the key's 32-byte seed in hex
+    vars:
+      OUT: '{{.OUT | default "dist-device"}}'
+      PACK: '{{.PACK | default "MinUI.zip"}}'
+    requires:
+      vars: [UNSLOT_PAK_KEY]
+    env:
+      UNSLOT_PAK_KEY: '{{.UNSLOT_PAK_KEY}}'
+    cmds:
+      - |
+        set -eu
+        v="$(cat "{{.OUT}}/System/version")"
+        cargo run -q --release -p slot --no-default-features --example make_pak --           "{{.PACK}}" "$v" "unslot-$v.pak"
 
   deploy:device:
     desc: Build and push onto a device over adb, then restart it. SD defaults to /mnt/sdcard

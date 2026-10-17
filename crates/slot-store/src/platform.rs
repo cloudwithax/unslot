@@ -19,6 +19,48 @@ pub enum Platform {
     WonderSwan,
     Lynx,
     PlayStation,
+    Arcade,
+    Cps1,
+    Cps2,
+    Cps3,
+    NeoGeo,
+    NeoGeoCd,
+    Fds,
+    Nintendo64,
+    VirtualBoy,
+    PokemonMini,
+    GameAndWatch,
+    Sega32x,
+    SegaCd,
+    Sg1000,
+    Dreamcast,
+    PcEngineCd,
+    SuperGrafx,
+    PcFx,
+    Atari2600,
+    Atari5200,
+    Atari7800,
+    Atari800,
+    AtariSt,
+    ColecoVision,
+    Intellivision,
+    Vectrex,
+    Odyssey2,
+    ChannelF,
+    Supervision,
+    MegaDuck,
+    Msx,
+    Commodore64,
+    Amiga,
+    ZxSpectrum,
+    AmstradCpc,
+    Dos,
+    Pc98,
+    X68000,
+    ScummVm,
+    Pico8,
+    Tic80,
+    Psp,
 }
 
 /// How the scanner finds a game's title, and for the GBA its four-letter code, in the ROM.
@@ -26,6 +68,9 @@ pub enum Platform {
 pub enum Header {
     Gba,
     Gb,
+    /// An arcade set: the zip's name is the set's, and the shelf shows the game the arcade
+    /// databases say it is.
+    Arcade,
     /// No title worth reading in the file; the shelf shows the file's name.
     None,
 }
@@ -35,6 +80,9 @@ pub enum Header {
 #[derive(Debug)]
 pub struct Spec {
     pub name: &'static str,
+    /// A shorter name where the whole one will not fit, as in a list's right-hand column; empty
+    /// when the name is short enough already.
+    pub short: &'static str,
     /// The folder under Games, Labels, Saves, States and Bezels, and the key in config files.
     pub dir: &'static str,
     pub extensions: &'static [&'static str],
@@ -75,6 +123,7 @@ const TV_SHADERS: &[Shader] = &[Shader::Off, Shader::Grid, Shader::Lcd3x];
 /// What a system drawn at its own size shares unless its row says otherwise.
 const CONSOLE: Spec = Spec {
     name: "",
+    short: "",
     dir: "",
     extensions: &[],
     native: true,
@@ -147,6 +196,7 @@ const SPECS: [Spec; Platform::COUNT] = [
     },
     Spec {
         name: "Nintendo Entertainment System",
+        short: "NES",
         dir: "NES",
         extensions: &["nes", "unf", "unif"],
         cores: &[Core::Fceumm],
@@ -226,11 +276,416 @@ const SPECS: [Spec; Platform::COUNT] = [
         turbo: false,
         rewind: false,
         ..CONSOLE
+    },    Spec {
+        name: "Arcade",
+        dir: "ARCADE",
+        header: Header::Arcade,
+        extensions: &["zip", "7z"],
+        cores: &[Core::Fbneo, Core::Mame2003Plus],
+        shoulders: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "CPS-1",
+        dir: "CPS1",
+        header: Header::Arcade,
+        extensions: &["zip", "7z"],
+        cores: &[Core::Fbneo, Core::Mame2003Plus],
+        shoulders: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "CPS-2",
+        dir: "CPS2",
+        header: Header::Arcade,
+        extensions: &["zip", "7z"],
+        cores: &[Core::Fbneo, Core::Mame2003Plus],
+        shoulders: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "CPS-3",
+        dir: "CPS3",
+        header: Header::Arcade,
+        extensions: &["zip", "7z"],
+        cores: &[Core::Fbneo],
+        shoulders: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "Neo Geo",
+        dir: "NEOGEO",
+        header: Header::Arcade,
+        extensions: &["zip", "7z"],
+        cores: &[Core::Fbneo, Core::Mame2003Plus],
+        turbo: false,
+        rewind: false,
+        bios: &["fbneo/neogeo.zip|neogeo.zip|@neogeo.zip"],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Neo Geo CD",
+        dir: "NEOCD",
+        extensions: &["cue", "chd"],
+        cores: &[Core::Neocd],
+        turbo: false,
+        rewind: false,
+        bios: &["neocd/neocd_f.rom|neocd/neocd_sf.rom|neocd/neocd_t.rom|neocd/neocd_st.rom|neocd/neocd_z.rom|neocd/neocd_sz.rom|neocd/front-sp1.bin|neocd/top-sp1.bin|neocd/neocd.bin|neocd/uni-bioscd.rom",
+            "neocd/ng-lo.rom|neocd/000-lo.lo",
+        ],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Famicom Disk System",
+        short: "Famicom Disk",
+        dir: "FDS",
+        extensions: &["fds"],
+        cores: &[Core::Fceumm],
+        bios: &["disksys.rom"],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Nintendo 64",
+        dir: "N64",
+        extensions: &["n64", "v64", "z64", "bin", "u1", "ndd"],
+        cores: &[Core::ParallelN64],
+        shoulders: true,
+        triggers: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "Virtual Boy",
+        dir: "VB",
+        extensions: &["vb", "vboy"],
+        cores: &[Core::MednafenVb],
+        shoulders: true,
+        turbo: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "Pokémon mini",
+        dir: "POKEMINI",
+        extensions: &["min"],
+        cores: &[Core::Pokemini],
+        ..HANDHELD
+    },
+    Spec {
+        name: "Game & Watch",
+        dir: "GW",
+        extensions: &["mgw"],
+        cores: &[Core::Gw],
+        ..HANDHELD
+    },
+    Spec {
+        name: "Sega 32X",
+        dir: "32X",
+        extensions: &["32x"],
+        cores: &[Core::Picodrive],
+        shoulders: true,
+        turbo: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "Sega CD",
+        dir: "SEGACD",
+        extensions: &["cue", "chd", "iso", "m3u"],
+        cores: &[Core::GenesisPlusGx, Core::Picodrive],
+        shoulders: true,
+        turbo: false,
+        rewind: false,
+        bios: &["bios_CD_U.bin|bios_CD_E.bin|bios_CD_J.bin"],
+        ..CONSOLE
+    },
+    Spec {
+        name: "SG-1000",
+        dir: "SG1000",
+        extensions: &["sg"],
+        cores: &[Core::GenesisPlusGx, Core::Gearsystem],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Dreamcast",
+        dir: "DC",
+        extensions: &["chd", "cdi", "gdi", "cue", "m3u"],
+        cores: &[Core::Flycast],
+        shoulders: true,
+        triggers: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "PC Engine CD",
+        dir: "PCECD",
+        extensions: &["cue", "ccd", "chd", "toc", "m3u"],
+        cores: &[Core::MednafenPceFast],
+        rewind: false,
+        bios: &["syscard3.pce"],
+        ..CONSOLE
+    },
+    Spec {
+        name: "SuperGrafx",
+        dir: "SGFX",
+        extensions: &["sgx", "pce", "cue", "ccd", "chd"],
+        cores: &[Core::MednafenSupergrafx],
+        ..CONSOLE
+    },
+    Spec {
+        name: "PC-FX",
+        dir: "PCFX",
+        extensions: &["cue", "ccd", "toc", "chd"],
+        cores: &[Core::MednafenPcfx],
+        shoulders: true,
+        turbo: false,
+        rewind: false,
+        bios: &["pcfx.rom"],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Atari 2600",
+        dir: "A2600",
+        extensions: &["a26", "bin"],
+        cores: &[Core::Stella2014],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Atari 5200",
+        dir: "A5200",
+        extensions: &["a52", "bin"],
+        cores: &[Core::A5200],
+        shoulders: true,
+        turbo: false,
+        bios: &["5200.rom"],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Atari 7800",
+        dir: "A7800",
+        extensions: &["a78", "bin", "cdf"],
+        cores: &[Core::Prosystem],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Atari 800",
+        dir: "A800",
+        extensions: &["atr", "xex", "xfd", "cas", "bin", "car"],
+        cores: &[Core::Atari800],
+        shoulders: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "Atari ST",
+        dir: "ATARIST",
+        extensions: &["st", "msa", "stx", "dim", "ipf"],
+        cores: &[Core::Hatarib],
+        shoulders: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "ColecoVision",
+        dir: "COLECO",
+        extensions: &["col", "cv", "bin", "rom"],
+        cores: &[Core::Gearcoleco],
+        shoulders: true,
+        turbo: false,
+        bios: &["colecovision.rom"],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Intellivision",
+        dir: "INTV",
+        extensions: &["int", "bin", "rom"],
+        cores: &[Core::Freeintv],
+        shoulders: true,
+        turbo: false,
+        bios: &["exec.bin", "grom.bin"],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Vectrex",
+        dir: "VECTREX",
+        extensions: &["vec", "bin"],
+        cores: &[Core::Vecx],
+        turbo: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "Odyssey²",
+        dir: "ODYSSEY",
+        extensions: &["bin"],
+        cores: &[Core::O2em],
+        bios: &["o2rom.bin"],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Channel F",
+        dir: "CHANNELF",
+        extensions: &["bin", "chf"],
+        cores: &[Core::Freechaf],
+        shoulders: true,
+        turbo: false,
+        bios: &["sl31254.bin", "sl31253.bin|sl90025.bin"],
+        ..CONSOLE
+    },
+    Spec {
+        name: "Supervision",
+        dir: "SUPERVISION",
+        extensions: &["sv", "bin"],
+        cores: &[Core::Potator],
+        ..HANDHELD
+    },
+    Spec {
+        name: "Mega Duck",
+        dir: "MEGADUCK",
+        extensions: &["bin", "duck"],
+        cores: &[Core::Sameduck],
+        ..HANDHELD
+    },
+    Spec {
+        name: "MSX",
+        dir: "MSX",
+        extensions: &["rom", "mx1", "mx2", "dsk", "cas"],
+        cores: &[Core::Fmsx, Core::Bluemsx],
+        bios: &["MSX.ROM", "MSX2.ROM", "MSX2EXT.ROM"],
+        shoulders: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "Commodore 64",
+        dir: "C64",
+        extensions: &["d64", "t64", "prg", "crt", "tap", "d81", "m3u"],
+        cores: &[Core::ViceX64],
+        shoulders: true,
+        triggers: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "Amiga",
+        dir: "AMIGA",
+        extensions: &["adf", "hdf", "lha", "ipf", "m3u", "zip"],
+        cores: &[Core::Puae2021],
+        shoulders: true,
+        triggers: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "ZX Spectrum",
+        dir: "ZXS",
+        extensions: &["tzx", "tap", "z80", "sna", "dsk", "scl", "trd"],
+        cores: &[Core::Fuse],
+        shoulders: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "Amstrad CPC",
+        dir: "CPC",
+        extensions: &["dsk", "cdt", "sna", "m3u"],
+        cores: &[Core::Cap32],
+        shoulders: true,
+        triggers: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "DOS",
+        dir: "DOS",
+        extensions: &["zip", "dosz", "exe", "com", "bat", "iso", "cue", "img", "conf"],
+        cores: &[Core::DosboxPure],
+        shoulders: true,
+        triggers: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "PC-98",
+        dir: "PC98",
+        extensions: &["d98", "fdi", "hdi", "hdm", "fdd", "nhd", "thd", "m3u"],
+        cores: &[Core::Np2kai],
+        shoulders: true,
+        triggers: true,
+        turbo: false,
+        rewind: false,
+        bios: &["np2kai/font.bmp|np2kai/FONT.ROM"],
+        ..CONSOLE
+    },
+    Spec {
+        name: "X68000",
+        dir: "X68000",
+        extensions: &["dim", "xdf", "hdm", "hdf", "2hd", "m3u"],
+        cores: &[Core::Px68k],
+        shoulders: true,
+        triggers: true,
+        turbo: false,
+        rewind: false,
+        bios: &["keropi/iplrom.dat", "keropi/cgrom.dat"],
+        ..CONSOLE
+    },
+    Spec {
+        name: "ScummVM",
+        dir: "SCUMMVM",
+        extensions: &["scummvm"],
+        cores: &[Core::Scummvm],
+        shoulders: true,
+        triggers: true,
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "PICO-8",
+        dir: "PICO8",
+        extensions: &["p8", "png"],
+        cores: &[Core::Retro8],
+        turbo: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "TIC-80",
+        dir: "TIC80",
+        extensions: &["tic"],
+        cores: &[Core::Tic80],
+        turbo: false,
+        ..CONSOLE
+    },
+    Spec {
+        name: "PlayStation Portable",
+        short: "PSP",
+        dir: "PSP",
+        extensions: &["iso", "cso", "pbp", "chd", "elf", "prx"],
+        cores: &[Core::Ppsspp],
+        shoulders: true,
+        turbo: false,
+        rewind: false,
+        ..HANDHELD
     },
 ];
 
 impl Platform {
-    pub const COUNT: usize = 13;
+    pub const COUNT: usize = 55;
     pub const ALL: [Platform; Platform::COUNT] = [
         Platform::Gba,
         Platform::Gb,
@@ -245,6 +700,48 @@ impl Platform {
         Platform::WonderSwan,
         Platform::Lynx,
         Platform::PlayStation,
+        Platform::Arcade,
+        Platform::Cps1,
+        Platform::Cps2,
+        Platform::Cps3,
+        Platform::NeoGeo,
+        Platform::NeoGeoCd,
+        Platform::Fds,
+        Platform::Nintendo64,
+        Platform::VirtualBoy,
+        Platform::PokemonMini,
+        Platform::GameAndWatch,
+        Platform::Sega32x,
+        Platform::SegaCd,
+        Platform::Sg1000,
+        Platform::Dreamcast,
+        Platform::PcEngineCd,
+        Platform::SuperGrafx,
+        Platform::PcFx,
+        Platform::Atari2600,
+        Platform::Atari5200,
+        Platform::Atari7800,
+        Platform::Atari800,
+        Platform::AtariSt,
+        Platform::ColecoVision,
+        Platform::Intellivision,
+        Platform::Vectrex,
+        Platform::Odyssey2,
+        Platform::ChannelF,
+        Platform::Supervision,
+        Platform::MegaDuck,
+        Platform::Msx,
+        Platform::Commodore64,
+        Platform::Amiga,
+        Platform::ZxSpectrum,
+        Platform::AmstradCpc,
+        Platform::Dos,
+        Platform::Pc98,
+        Platform::X68000,
+        Platform::ScummVm,
+        Platform::Pico8,
+        Platform::Tic80,
+        Platform::Psp,
     ];
 
     pub fn spec(self) -> &'static Spec {
@@ -258,6 +755,14 @@ impl Platform {
 
     pub fn name(self) -> &'static str {
         self.spec().name
+    }
+
+    /// The name, or its short form where it has one.
+    pub fn short_name(self) -> &'static str {
+        match self.spec().short {
+            "" => self.name(),
+            short => short,
+        }
     }
 
     pub fn dir_name(self) -> &'static str {

@@ -522,7 +522,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut colour_correction = None;
     let mut colour_corrections: [Option<bool>; Platform::COUNT] = [None; Platform::COUNT];
     let mut shaders: [Option<Shader>; Platform::COUNT] = [None; Platform::COUNT];
-    let mut bezels: [Option<BezelPick>; Platform::COUNT] = Default::default();
+    let mut bezels: [Option<BezelPick>; Platform::COUNT] = std::array::from_fn(|_| None);
     let mut eject_save = None;
     let mut turbo = None;
     let mut rewind = None;

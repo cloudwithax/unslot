@@ -21,7 +21,7 @@ use crate::json;
 /// The databases fetched once and kept, under the card's System folder with the label cache.
 pub const CACHE: &str = "System/Cache/Scraper";
 pub const SS_CONF: &str = "Config/screenscraper.conf";
-const DATS: &str = "https://raw.githubusercontent.com/libretro/libretro-database/master/metadat";
+const DATS: &str = "https://raw.githubusercontent.com/libretro/libretro-database/master";
 const THUMBS: &str = "https://thumbnails.libretro.com";
 const SS_API: &str = "https://www.screenscraper.fr/api2/jeuInfos.php";
 /// Bigger than any cartridge; a disc is matched by name instead of read whole.
@@ -61,16 +61,85 @@ pub fn source(platform: Platform, rom: &Path) -> (Vec<&'static str>, u32) {
         Platform::WonderSwan => (vec!["Bandai - WonderSwan Color", "Bandai - WonderSwan"], 46),
         Platform::Lynx => (vec!["Atari - Lynx"], 28),
         Platform::PlayStation => (vec!["Sony - PlayStation"], 57),
+        Platform::Arcade => (vec!["FBNeo - Arcade Games", "MAME"], 75),
+        Platform::Cps1 => (vec!["FBNeo - Arcade Games", "MAME"], 6),
+        Platform::Cps2 => (vec!["FBNeo - Arcade Games", "MAME"], 7),
+        Platform::Cps3 => (vec!["FBNeo - Arcade Games", "MAME"], 8),
+        Platform::NeoGeo => (vec!["SNK - Neo Geo", "FBNeo - Arcade Games"], 142),
+        Platform::NeoGeoCd => (vec!["SNK - Neo Geo CD"], 70),
+        Platform::Fds => (vec!["Nintendo - Family Computer Disk System"], 106),
+        Platform::Nintendo64 => (vec!["Nintendo - Nintendo 64"], 14),
+        Platform::VirtualBoy => (vec!["Nintendo - Virtual Boy"], 11),
+        Platform::PokemonMini => (vec!["Nintendo - Pokemon Mini"], 211),
+        Platform::GameAndWatch => (vec!["Handheld Electronic Game"], 52),
+        Platform::Sega32x => (vec!["Sega - 32X"], 19),
+        Platform::SegaCd => (vec!["Sega - Mega-CD - Sega CD"], 20),
+        Platform::Sg1000 => (vec!["Sega - SG-1000"], 109),
+        Platform::Dreamcast => (vec!["Sega - Dreamcast"], 23),
+        Platform::PcEngineCd => (vec!["NEC - PC Engine CD - TurboGrafx-CD"], 114),
+        Platform::SuperGrafx => (vec!["NEC - PC Engine SuperGrafx"], 105),
+        Platform::PcFx => (vec!["NEC - PC-FX"], 72),
+        Platform::Atari2600 => (vec!["Atari - 2600"], 26),
+        Platform::Atari5200 => (vec!["Atari - 5200"], 40),
+        Platform::Atari7800 => (vec!["Atari - 7800"], 41),
+        Platform::Atari800 => (vec!["Atari - 8-bit Family"], 43),
+        Platform::AtariSt => (vec!["Atari - ST"], 42),
+        Platform::ColecoVision => (vec!["Coleco - ColecoVision"], 48),
+        Platform::Intellivision => (vec!["Mattel - Intellivision"], 115),
+        Platform::Vectrex => (vec!["GCE - Vectrex"], 102),
+        Platform::Odyssey2 => (vec!["Magnavox - Odyssey2"], 104),
+        Platform::ChannelF => (vec!["Fairchild - Channel F"], 80),
+        Platform::Supervision => (vec!["Watara - Supervision"], 207),
+        Platform::MegaDuck => (vec!["Welback - Mega Duck"], 90),
+        Platform::Msx => (vec!["Microsoft - MSX", "Microsoft - MSX2"], 113),
+        Platform::Commodore64 => (vec!["Commodore - 64"], 66),
+        Platform::Amiga => (vec!["Commodore - Amiga"], 64),
+        Platform::ZxSpectrum => (vec!["Sinclair - ZX Spectrum"], 76),
+        Platform::AmstradCpc => (vec!["Amstrad - CPC"], 65),
+        Platform::Dos => (vec!["DOS"], 135),
+        Platform::Pc98 => (vec!["NEC - PC-98"], 208),
+        Platform::X68000 => (vec!["Sharp - X68000"], 79),
+        Platform::ScummVm => (vec!["ScummVM"], 123),
+        Platform::Pico8 => (vec!["PICO-8"], 234),
+        Platform::Tic80 => (vec!["TIC-80"], 222),
+        Platform::Psp => (vec!["Sony - PlayStation Portable"], 61),
     }
 }
 
+/// The disc systems', whose databases libretro keeps from redump rather than no-intro.
+const REDUMP: &[&str] = &[
+    "Sony - PlayStation",
+    "Sony - PlayStation Portable",
+    "Sega - Mega-CD - Sega CD",
+    "Sega - Dreamcast",
+    "NEC - PC Engine CD - TurboGrafx-CD",
+    "NEC - PC-FX",
+    "SNK - Neo Geo CD",
+];
+
+/// The systems no-intro and redump do not cover, whose databases libretro keeps in its own `dat`.
+const OWN_DATS: &[&str] = &[
+    "SNK - Neo Geo",
+    "Handheld Electronic Game",
+    "DOS",
+    "NEC - PC-98",
+    "ScummVM",
+    "PICO-8",
+    "TIC-80",
+    "Sinclair - ZX Spectrum",
+    "Amstrad - CPC",
+];
+
 fn dat_url(set: &str) -> String {
-    let dir = if set == "Sony - PlayStation" {
-        "redump"
-    } else {
-        "no-intro"
+    // The arcade sets are named in the databases of the cores that run them.
+    let path = match set {
+        "FBNeo - Arcade Games" => "metadat/fbneo-split/FBNeo - Arcade Games".to_string(),
+        "MAME" => "metadat/mame-nonmerged/MAME 2003-Plus".to_string(),
+        _ if REDUMP.contains(&set) => format!("metadat/redump/{set}"),
+        _ if OWN_DATS.contains(&set) => format!("dat/{set}"),
+        _ => format!("metadat/no-intro/{set}"),
     };
-    format!("{DATS}/{dir}/{}.dat", encode(set))
+    format!("{DATS}/{}.dat", encode(&path).replace("%2F", "/"))
 }
 
 /// libretro-thumbnails names a picture after the game, with what its filesystem forbids made `_`.
@@ -517,9 +586,12 @@ fn label_for(
             break;
         }
         let dat = load_dat(fetch, root, dats, set)?;
-        let mut names = dat.names_for(crc, &cart.stem);
-        if !names.iter().any(|n| n == &cart.stem) {
-            names.push(cart.stem.clone());
+        // An arcade set is looked for by its game's name, which is what the databases and
+        // libretro-thumbnails call it, not by the zip's.
+        let stem = cart.shelf_name();
+        let mut names = dat.names_for(crc, stem);
+        if !names.iter().any(|n| n == stem) {
+            names.push(stem.to_string());
         }
         for name in names.iter().take(NAMES + 2) {
             logo = png(fetch.get(&thumb_url(set, "Named_Logos", name))?);
@@ -714,6 +786,10 @@ game (
         );
         assert!(dat_url("Sony - PlayStation").contains("/redump/Sony%20-%20PlayStation.dat"));
         assert!(dat_url("Atari - Lynx").contains("/no-intro/"));
+        assert!(dat_url("Sega - Dreamcast").contains("/redump/Sega%20-%20Dreamcast.dat"));
+        assert!(dat_url("DOS").ends_with("/master/dat/DOS.dat"));
+        assert!(dat_url("FBNeo - Arcade Games")
+            .ends_with("/metadat/fbneo-split/FBNeo%20-%20Arcade%20Games.dat"));
     }
 
     #[test]

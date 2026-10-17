@@ -95,6 +95,8 @@ fn open_named(
     link: Option<u8>,
     paths: &[PathBuf],
 ) -> Option<Box<dyn RetroCore>> {
+    crate::gpu::install();
+    root::seed_core_files(root, core);
     let bios = root::bios_dir(root);
     let saves = root::saves_dir(root);
     for path in paths {
@@ -189,6 +191,86 @@ pub fn apply_link_options(core: &mut LibretroCore, which: Core, player: u8) {
     eprintln!("slot: core: link mode on, player {player}");
 }
 
+/// Settings for the cores past the Game Boy family that suit the H700's four Cortex-A53s and
+/// Mali-G31, after the defaults Knulli and ROCKNIX give the same cores on the same chip. A core
+/// that does not declare a key ignores it.
+pub const H700_OPTIONS: &[(Core, &str, &str)] = &[
+    (Core::ParallelN64, "parallel-n64-gfxplugin", "gln64"),
+    (Core::ParallelN64, "parallel-n64-screensize", "320x240"),
+    (
+        Core::ParallelN64,
+        "parallel-n64-cpucore",
+        "dynamic_recompiler",
+    ),
+    (Core::ParallelN64, "parallel-n64-rspplugin", "hle"),
+    (Core::ParallelN64, "parallel-n64-framerate", "automatic"),
+    (Core::ParallelN64, "parallel-n64-pak1", "memory"),
+    (Core::ParallelN64, "parallel-n64-astick-deadzone", "15"),
+    (Core::Flycast, "reicast_internal_resolution", "640x480"),
+    (Core::Flycast, "reicast_threaded_rendering", "enabled"),
+    (Core::Flycast, "reicast_synchronous_rendering", "disabled"),
+    (Core::Flycast, "reicast_enable_dsp", "disabled"),
+    (
+        Core::Flycast,
+        "reicast_alpha_sorting",
+        "per-strip (fast, least accurate)",
+    ),
+    (Core::Flycast, "reicast_per_content_vmus", "All VMUs"),
+    (Core::Flycast, "reicast_analog_stick_deadzone", "15%"),
+    (Core::Ppsspp, "ppsspp_internal_resolution", "480x272"),
+    (Core::Ppsspp, "ppsspp_cpu_core", "JIT"),
+    (Core::Ppsspp, "ppsspp_fast_memory", "enabled"),
+    (Core::Ppsspp, "ppsspp_auto_frameskip", "enabled"),
+    (Core::Ppsspp, "ppsspp_skip_gpu_readbacks", "enabled"),
+    (Core::Ppsspp, "ppsspp_texture_scaling_level", "disabled"),
+    (Core::Ppsspp, "ppsspp_io_timing_method", "Fast"),
+    (Core::Fbneo, "fbneo-frameskip-type", "disabled"),
+    (Core::Fbneo, "fbneo-diagnostic-input", "Start + L + R"),
+    (Core::Fbneo, "fbneo-memcard-mode", "per-game"),
+    (Core::Fbneo, "fbneo-hiscores", "enabled"),
+    (Core::Fbneo, "fbneo-samplerate", "44100"),
+    (
+        Core::Mame2003Plus,
+        "mame2003-plus_skip_disclaimer",
+        "enabled",
+    ),
+    (Core::Mame2003Plus, "mame2003-plus_skip_warnings", "enabled"),
+    (Core::Mame2003Plus, "mame2003-plus_sample_rate", "44100"),
+    (
+        Core::Mame2003Plus,
+        "mame2003-plus_input_interface",
+        "retropad",
+    ),
+    (Core::Neocd, "neocd_per_content_saves", "On"),
+    (Core::Picodrive, "picodrive_sprlim", "enabled"),
+    (Core::Picodrive, "picodrive_input1", "6 button pad"),
+    (Core::MednafenPcfx, "pcfx_nospritelimit", "enabled"),
+    (Core::MednafenVb, "vb_color_mode", "black & red"),
+    (Core::DosboxPure, "dosbox_pure_cycles", "auto"),
+    (Core::DosboxPure, "dosbox_pure_cpu_core", "auto"),
+    (Core::DosboxPure, "dosbox_pure_machine", "svga"),
+    (Core::DosboxPure, "dosbox_pure_memory_size", "16"),
+    (Core::DosboxPure, "dosbox_pure_auto_mapping", "true"),
+    (Core::Puae2021, "puae_model", "auto"),
+    (Core::Puae2021, "puae_cpu_compatibility", "normal"),
+    (Core::Puae2021, "puae_video_resolution", "hires"),
+    (Core::Puae2021, "puae_use_whdload_prefs", "config"),
+    (Core::ViceX64, "vice_autoloadwarp", "enabled"),
+    (Core::ViceX64, "vice_joyport", "2"),
+    (Core::ViceX64, "vice_external_palette", "colodore"),
+    (Core::Fuse, "fuse_machine", "Spectrum 128K"),
+    (Core::Cap32, "cap32_model", "6128"),
+    (Core::Cap32, "cap32_ram", "128"),
+    (Core::Atari800, "atari800_system", "800XL (64K)"),
+    (Core::Atari800, "atari800_sioaccel", "enabled"),
+    (Core::Np2kai, "np2kai_model", "PC-9801VX"),
+    (Core::Np2kai, "np2kai_clk_mult", "4"),
+    (Core::Px68k, "px68k_cpuspeed", "33Mhz (OC)"),
+    (Core::Px68k, "px68k_ramsize", "12MB"),
+    (Core::Scummvm, "scummvm_analog_deadzone", "15"),
+    (Core::Scummvm, "scummvm_speed_hack", "enabled"),
+];
+
 pub fn apply_core_options(
     core: &mut LibretroCore,
     which: Core,
@@ -198,6 +280,9 @@ pub fn apply_core_options(
     colour: bool,
     palette: Option<GbPalette>,
 ) {
+    for (_, key, value) in H700_OPTIONS.iter().filter(|(c, ..)| *c == which) {
+        core.set_option(key, value);
+    }
     // The two GBA cores read the audio buffer's state to skip frames; the rest have no such key.
     if matches!(which, Core::Mgba | Core::Gpsp) {
         core.set_option(&format!("{}_frameskip", which.as_str()), "auto");

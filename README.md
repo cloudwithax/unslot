@@ -24,13 +24,14 @@ thirteen systems, Wi-Fi and Bluetooth, analog sticks, network services and updat
 
 ## What it does
 
-- **Thirteen systems**, each on its own shelf as the media it came on: carts, HuCards and discs.
+- **Fifty-five systems**, from arcade boards to the PSP, each on its own shelf as the media it came on: carts, cards, discs, floppies and tapes. Nintendo 64, Dreamcast and PSP draw on the GPU.
 - **Wi-Fi** with an on-screen keyboard, and **Bluetooth** controllers and headphones.
 - **Analog sticks** on the models that have them.
 - **Services:** SSH and SFTP, sharing the card over SMB, Tailscale (sign in by scanning a code) and WireGuard.
 - **Updates over the air**, for unslot and for BaseOS under it, with an automatic rollback if a new version never starts.
 - **Game Art** finds a label for each game online, matched by CRC and file name. It keeps going while you play, and each label shows on the shelf as soon as it is found.
 - **Menu sounds and haptics:** recorded clicks of real buttons and switches, and a nudge of the rumble motor when a cart goes home or a setting changes. Both can be turned off in Settings → General.
+- **Search:** X on the shelf finds a game by name on every system's shelf, with each result's cart, card or disc beside it, and A takes the slot to it.
 - **Wallpapers:** a bundled set, or any PNG or JPG of your own.
 
 Everything slot does is still here: the carts, the shelves, the link cable, the in-game menu and the save handling.
@@ -41,10 +42,14 @@ unslot runs on BaseOS, so it needs BaseOS on the card in TF1 first.
 
 **New card.** Flash your model's BaseOS image to TF1 and boot it once; it grows its `BASEOS` volume to fill the card. Then copy the contents of a release's `unslot-<version>` folder onto that volume (or onto a card in TF2), add games and restart.
 
-**Already running slot?** Copy the release's `MinUI.zip` to the root of the card and restart with the power connected. BaseOS installs it before the frontend starts: `System/` is replaced, and your games, saves, labels and settings stay. This is also how unslot updates, and Settings → Network → Updates can download it for you.
+**Already running unslot?** Settings → Network → Updates downloads the new release's `unslot-<version>.pak` and installs it when you restart. Or copy the `.pak` to the root of the card yourself and restart with the power connected. `System/` is replaced, and your games, saves, labels and settings stay.
+
+A `.pak` is the release's `MinUI.zip`, untouched, with its version and checksum signed by unslot's release key. unslot installs one only if the signature, version and zip all check out. Anything else is renamed `.bad`, logged in `Logs/update.log`, and never installed.
+
+**Already running slot?** Copy the release's `MinUI.zip` to the root of the card and restart with the power connected. BaseOS installs it before the frontend starts.
 
 > [!IMPORTANT]
-> ROMs must be unzipped. unslot does not read `.zip` or `.7z` files.
+> Unzip your ROMs, except for the systems whose games are zips: arcade, Neo Geo and CPS sets as the cores name them (FinalBurn Neo's sets, or MAME 2003-Plus's), and DOS and Amiga games packed that way.
 
 ## Systems
 
@@ -63,6 +68,48 @@ unslot runs on BaseOS, so it needs BaseOS on the card in TF1 first.
 | WonderSwan (Color) | `WS` | `.ws`, `.wsc` | Beetle Cygne | |
 | Atari Lynx | `LYNX` | `.lnx` | Handy | `lynxboot.img` (required) |
 | PlayStation | `PS` | `.cue`, `.chd`, `.pbp`, `.m3u` | PCSX ReARMed | `scph5501.bin` etc. (optional) |
+| Arcade | `ARCADE` | `.zip`, `.7z` | FinalBurn Neo, MAME 2003-Plus | board BIOS zips beside the games, e.g. `pgm.zip` |
+| Capcom CPS-1 | `CPS1` | `.zip`, `.7z` | FinalBurn Neo, MAME 2003-Plus |  |
+| Capcom CPS-2 | `CPS2` | `.zip`, `.7z` | FinalBurn Neo, MAME 2003-Plus |  |
+| Capcom CPS-3 | `CPS3` | `.zip`, `.7z` | FinalBurn Neo |  |
+| Neo Geo | `NEOGEO` | `.zip`, `.7z` | FinalBurn Neo, MAME 2003-Plus | `neogeo.zip` beside the games or in `BIOS/fbneo` (required) |
+| Neo Geo CD | `NEOCD` | `.cue`, `.chd` | NeoCD | in `BIOS/neocd`: one of `neocd_f.rom`, `neocd_sf.rom`, `neocd_t.rom`, `neocd_st.rom`, `neocd_z.rom`, `neocd_sz.rom`, `front-sp1.bin`, `top-sp1.bin`, `neocd.bin`, `uni-bioscd.rom`, and `ng-lo.rom` or `000-lo.lo` (required) |
+| Famicom Disk System | `FDS` | `.fds` | FCEUmm | `disksys.rom` (required) |
+| Nintendo 64 | `N64` | `.n64`, `.v64`, `.z64` | ParaLLEl N64 |  |
+| Virtual Boy | `VB` | `.vb`, `.vboy` | Beetle VB |  |
+| Pokémon mini | `POKEMINI` | `.min` | PokeMini |  |
+| Game & Watch | `GW` | `.mgw` | Game & Watch |  |
+| Sega 32X | `32X` | `.32x` | PicoDrive |  |
+| Sega CD / Mega-CD | `SEGACD` | `.cue`, `.chd`, `.iso`, `.m3u` | Genesis Plus GX, PicoDrive | one of `bios_CD_U.bin`, `bios_CD_E.bin`, `bios_CD_J.bin` (required) |
+| SG-1000 | `SG1000` | `.sg` | Genesis Plus GX, Gearsystem |  |
+| Dreamcast | `DC` | `.chd`, `.cdi`, `.gdi`, `.cue`, `.m3u` | Flycast | `dc/dc_boot.bin`, `dc/dc_flash.bin` (optional) |
+| PC Engine CD | `PCECD` | `.cue`, `.ccd`, `.chd`, `.toc`, `.m3u` | Beetle PCE Fast | `syscard3.pce` (required) |
+| SuperGrafx | `SGFX` | `.sgx`, `.pce` | Beetle SuperGrafx |  |
+| PC-FX | `PCFX` | `.cue`, `.ccd`, `.toc`, `.chd` | Beetle PC-FX | `pcfx.rom` (required) |
+| Atari 2600 | `A2600` | `.a26`, `.bin` | Stella 2014 |  |
+| Atari 5200 | `A5200` | `.a52`, `.bin` | a5200 | `5200.rom` (required) |
+| Atari 7800 | `A7800` | `.a78`, `.bin` | ProSystem | `7800 BIOS (U).rom` (optional) |
+| Atari 800 / XL / XE | `A800` | `.atr`, `.xex`, `.xfd`, `.cas`, `.bin`, `.car` | Atari800 | `ATARIXL.ROM`, `ATARIBAS.ROM` (optional) |
+| Atari ST | `ATARIST` | `.st`, `.msa`, `.stx`, `.dim`, `.ipf` | Hatari B | `tos.img` (optional; EmuTOS is built in) |
+| ColecoVision | `COLECO` | `.col`, `.cv`, `.bin`, `.rom` | Gearcoleco | `colecovision.rom` (required) |
+| Intellivision | `INTV` | `.int`, `.bin`, `.rom` | FreeIntv | `exec.bin` and `grom.bin` (required) |
+| Vectrex | `VECTREX` | `.vec`, `.bin` | vecx |  |
+| Odyssey² / Videopac | `ODYSSEY` | `.bin` | O2EM | `o2rom.bin` (required) |
+| Channel F | `CHANNELF` | `.bin`, `.chf` | FreeChaF | `sl31254.bin`, and `sl31253.bin` or `sl90025.bin` (required) |
+| Watara Supervision | `SUPERVISION` | `.sv`, `.bin` | Potator |  |
+| Mega Duck | `MEGADUCK` | `.bin`, `.duck` | SameDuck |  |
+| MSX / MSX2 | `MSX` | `.rom`, `.mx1`, `.mx2`, `.dsk`, `.cas` | fMSX, blueMSX | `MSX.ROM`, `MSX2.ROM`, `MSX2EXT.ROM` (required by fMSX); blueMSX wants its `Machines` and `Databases` folders |
+| Commodore 64 | `C64` | `.d64`, `.t64`, `.prg`, `.crt`, `.tap`, `.d81`, `.m3u` | VICE x64 |  |
+| Amiga | `AMIGA` | `.adf`, `.hdf`, `.lha`, `.ipf`, `.m3u`, `.zip` | PUAE 2021 | `kick34005.A500` etc. (optional; AROS is built in) |
+| ZX Spectrum | `ZXS` | `.tzx`, `.tap`, `.z80`, `.sna`, `.dsk`, `.scl`, `.trd` | Fuse |  |
+| Amstrad CPC | `CPC` | `.dsk`, `.cdt`, `.sna`, `.m3u` | Caprice32 |  |
+| DOS | `DOS` | `.zip`, `.dosz`, `.exe`, `.com`, `.bat`, `.iso`, `.cue`, `.img`, `.conf` | DOSBox Pure |  |
+| PC-98 | `PC98` | `.d98`, `.fdi`, `.hdi`, `.hdm`, `.fdd`, `.nhd`, `.thd`, `.m3u` | Neko Project II Kai | `np2kai/font.bmp` or `np2kai/FONT.ROM` (required), `np2kai/bios.rom` etc. |
+| Sharp X68000 | `X68000` | `.dim`, `.xdf`, `.hdm`, `.hdf`, `.2hd`, `.m3u` | PX68k | `keropi/iplrom.dat` and `keropi/cgrom.dat` (required) |
+| ScummVM | `SCUMMVM` | `.scummvm` | ScummVM |  |
+| PICO-8 | `PICO8` | `.p8`, `.png` | Retro8 |  |
+| TIC-80 | `TIC80` | `.tic` | TIC-80 |  |
+| PlayStation Portable | `PSP` | `.iso`, `.cso`, `.pbp`, `.chd` | PPSSPP |  |
 
 ## On the card
 
@@ -70,7 +117,7 @@ unslot runs on BaseOS, so it needs BaseOS on the card in TF1 first.
 |---|---|
 | `Games/<Folder>` | Your games, by the folder in the table above. A multi-disc game goes in once, as an `.m3u` playlist; swap discs from Gameplay in the game menu. |
 | `Labels/<Folder>` | A label for a game, as `<game>.png`. Game Art fills these in for you. |
-| `BIOS` | BIOS files. |
+| `BIOS` | BIOS files, by the names in the table above, some in a folder of the core's. |
 | `Wallpapers` | Your own wallpapers, PNG or JPG. |
 | `Config/wireguard` | WireGuard tunnels, as wg-quick `.conf` files. |
 | `Config/screenscraper.conf` | Your ScreenScraper login (`ssid=`, `sspassword=`), which you can also enter from Game Art's ScreenScraper row, and optionally a developer ID (`devid=`, `devpassword=`) to use in place of the one built into the release. With both, Game Art asks ScreenScraper first. |

@@ -110,11 +110,14 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Haptics"
         ]
     );
+    let screens: Vec<&str> = QuickRow::screen_page()
+        .into_iter()
+        .map(QuickRow::label)
+        .collect();
+    // The Game Boy family first, then every other system in the order of the shelves.
+    assert_eq!(screens.len(), Platform::COUNT);
     assert_eq!(
-        QuickRow::screen_page()
-            .into_iter()
-            .map(QuickRow::label)
-            .collect::<Vec<_>>(),
+        screens[..13],
         [
             "Game Boy Advance",
             "Game Boy Color",

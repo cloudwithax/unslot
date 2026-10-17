@@ -15,10 +15,10 @@ use slot_ui::{
     board_from, board_zoom, draw_empty_slot, draw_footer, draw_ground, draw_slot_name,
     draw_sticker, ease, footer_ink, grown, lid_at, lid_from, lift_of, on_board, repeat_gap,
     shelf_cart_at, ButtonLegend, ClockPicker, Draw, FfState, Hud, HudKind, Icon, KeyInput,
-    KeyOutcome, Keyboard, Legend, LinkBadge, ListPage, ListRow, Millis, Mould, Placed, Polaroids,
-    PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow, QuickValue, Refusal, Shelf,
-    SlotChrome, TexId, Toast, CART_W, CHIP_H, CHIP_U, CHIP_V, CHIP_W, HINT_EDGE, HOP_LIFT, MOUTH_H,
-    REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W, TURN_PAD,
+    KeyOutcome, Keyboard, Legend, LinkBadge, ListIcon, ListPage, ListRow, Millis, Mould, Placed,
+    Polaroids, PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow, QuickValue, Refusal,
+    Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H, CHIP_U, CHIP_V, CHIP_W, HINT_EDGE, HOP_LIFT,
+    MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W, TURN_PAD,
 };
 
 use crate::audio::Sfx;
@@ -293,6 +293,15 @@ pub enum Phase {
         cursor: usize,
         note: Option<String>,
     },
+    /// The cores that run the game on the shelf, for a system other than the GBA, whose cores
+    /// are picked on its board instead.
+    Cores {
+        cursor: usize,
+    },
+    /// The games a search found, from X on the shelf.
+    Search {
+        cursor: usize,
+    },
     /// Typing for the network or services page, which it goes back to at `cursor`.
     Keyboard {
         keys: Keyboard,
@@ -315,6 +324,10 @@ pub enum Typing {
     /// The player's ScreenScraper username, then their password.
     SsUser,
     SsPassword(String),
+    /// A game's name to look for, from the shelf or, `again`, from the last search's results.
+    Search {
+        again: bool,
+    },
 }
 
 /// A row on the services page.
@@ -512,6 +525,10 @@ pub struct App {
     updates_view: UpdatesView,
     scraper: Option<Scraper>,
     scrape_view: ScrapeView,
+    /// The last search: what was typed, and the games it found by system and file name.
+    search: Option<Search>,
+    /// Each found game's picture for the results page, made as its row comes into view.
+    search_icons: HashMap<(Platform, String), ListIcon>,
     /// How many of the scraper's new labels the shelves already show.
     labelled: usize,
     /// Carts given a label since their face was built, by shelf and index, for the face workers
@@ -520,6 +537,13 @@ pub struct App {
     /// Whether Game Art can ask ScreenScraper, read at boot and after a sign in.
     ss_state: SsState,
     page_face: Option<(TexId, u32, u32)>,
+}
+
+/// What a search was for and what it found.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Search {
+    pub query: String,
+    pub found: Vec<(Platform, String)>,
 }
 
 /// A nudge of the rumble motor for something done in the menus: on at `at`, for `ms`.
@@ -719,6 +743,8 @@ impl App {
             updates_view: UpdatesView::default(),
             scraper: None,
             scrape_view: ScrapeView::default(),
+            search: None,
+            search_icons: HashMap::new(),
             labelled: 0,
             relabelled: Vec::new(),
             ss_state: SsState::Off,
@@ -864,7 +890,9 @@ impl App {
             | Phase::Devices { .. }
             | Phase::Services { .. }
             | Phase::Updates { .. }
-            | Phase::GameArt { .. } => vertical,
+            | Phase::GameArt { .. }
+            | Phase::Cores { .. }
+            | Phase::Search { .. } => vertical,
             Phase::Shelf => vertical && self.core_picker.is_none(),
             Phase::Polaroids { .. } => !vertical,
             Phase::Playing { .. } => vertical && self.in_game_menu.is_some(),
@@ -2092,6 +2120,7 @@ impl App {
             | Phase::Services { cursor, .. }
             | Phase::Updates { cursor }
             | Phase::GameArt { cursor, .. } => (3, cursor.to_string()),
+            Phase::Cores { cursor } | Phase::Search { cursor } => (1, cursor.to_string()),
             Phase::Keyboard { keys, .. } => (4, format!("{keys:?}")),
             Phase::TailscaleLogin => (4, String::new()),
             Phase::Polaroids { .. } => (
@@ -2139,6 +2168,8 @@ impl App {
                 | Phase::Services { .. }
                 | Phase::Updates { .. }
                 | Phase::GameArt { .. }
+                | Phase::Cores { .. }
+                | Phase::Search { .. }
         );
         let sfx = match () {
             _ if after.depth > before.depth => Sfx::Open,
@@ -2258,6 +2289,7 @@ impl App {
                 Action::GbaDown(Btn::L1) => self.switch_shelf(-1),
                 Action::GbaDown(Btn::R1) => self.switch_shelf(1),
                 Action::GbaDown(Btn::Y) => self.toggle_favorite(),
+                Action::GbaDown(Btn::X) => self.open_search(false),
                 _ => {}
             },
             Phase::Inserting { .. } if action == Action::Eject => self.eject(),
@@ -2300,6 +2332,8 @@ impl App {
             Phase::TailscaleLogin => self.tailscale_login_input(action),
             Phase::Updates { cursor } => self.updates_input(cursor, action),
             Phase::GameArt { cursor, .. } => self.game_art_input(cursor, action),
+            Phase::Cores { cursor } => self.cores_input(cursor, action),
+            Phase::Search { cursor } => self.search_input(cursor, action),
             Phase::Keyboard { .. } => self.keyboard_input(action),
             _ => {}
         }
@@ -2445,6 +2479,7 @@ impl App {
                     label: label.into(),
                     detail,
                     bars: None,
+                    icon: None,
                 }
             })
             .collect();
@@ -2600,11 +2635,13 @@ impl App {
             label: "All systems".into(),
             detail: count(None),
             bars: None,
+            icon: None,
         })
         .chain(platforms.iter().map(|&p| ListRow {
             label: p.name().into(),
             detail: count(Some(p)),
             bars: None,
+            icon: None,
         }))
         .chain(std::iter::once(ListRow {
             label: "ScreenScraper".into(),
@@ -2613,6 +2650,7 @@ impl App {
                 SsState::NoDevId(user) | SsState::On(Some(user)) => user.clone(),
             },
             bars: None,
+            icon: None,
         }))
         .collect();
         let on_ss = cursor >= rows.len() - 1;
@@ -2726,6 +2764,7 @@ impl App {
                 label: p.name().into(),
                 detail: detail(t),
                 bars: None,
+                icon: None,
             })
             .collect();
         let stages: Vec<(Part, &Stage)> = parts
@@ -2866,6 +2905,7 @@ impl App {
                     },
                 },
                 bars: None,
+                icon: None,
             })
             .collect();
         let status = match (&v.busy, &v.error) {
@@ -3040,12 +3080,15 @@ impl App {
             KeyOutcome::Typing => {}
             KeyOutcome::Cancelled => {
                 self.phase = match typing {
+                    Typing::Search { again: true } => Phase::Search { cursor },
+                    Typing::Search { again: false } => Phase::Shelf,
                     Typing::RootPassword { .. } => Phase::Services { cursor, note: None },
                     Typing::SsUser | Typing::SsPassword(_) => Phase::GameArt { cursor, note: None },
                     _ => Phase::Networks { cursor, note: None },
                 };
             }
             KeyOutcome::Done(text) => match typing {
+                Typing::Search { .. } => self.search_for(&text),
                 Typing::SsUser if text.is_empty() => {
                     let note = self.save_ss_login("", "");
                     self.phase = Phase::GameArt { cursor, note };
@@ -3111,6 +3154,8 @@ impl App {
                 self.services_page(*cursor, note.as_deref()),
             )),
             Phase::Updates { cursor } => Some(PageModel::List(self.updates_page(*cursor))),
+            Phase::Cores { cursor } => self.cores_page(*cursor).map(PageModel::List),
+            Phase::Search { cursor } => Some(PageModel::List(self.search_page(*cursor))),
             Phase::GameArt { cursor, note } => Some(PageModel::List(
                 self.game_art_page(*cursor, note.as_deref()),
             )),
@@ -3167,6 +3212,7 @@ impl App {
                     },
                     bars: Some(net.bars()),
                     label: net.ssid,
+                    icon: None,
                 },
             })
             .collect();
@@ -4389,6 +4435,8 @@ impl App {
             | Phase::TailscaleLogin
             | Phase::Updates { .. }
             | Phase::GameArt { .. }
+            | Phase::Cores { .. }
+            | Phase::Search { .. }
             | Phase::Keyboard { .. } => {
                 slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
                 if let Some((tex, w, h)) = self.page_face {
@@ -5065,16 +5113,10 @@ impl App {
         };
     }
 
-    /// The first file a platform's core cannot start without that is not in the BIOS folder.
+    /// The first file a platform's core cannot start without that is not on the card.
     fn missing_bios(&self, platform: Platform) -> Option<&'static str> {
         let root = self.root.as_ref()?;
-        let dir = crate::root::bios_dir(root);
-        platform
-            .spec()
-            .bios
-            .iter()
-            .copied()
-            .find(|name| !dir.join(name).is_file())
+        crate::root::missing_bios(root, platform)
     }
 
     pub fn starting_clean(&self) -> bool {
@@ -5229,7 +5271,17 @@ impl App {
         let Some(cart) = self.shelf().carts.get(self.shelf().index) else {
             return;
         };
-        if cart.platform.spec().cores.len() < 2 {
+        let cores = cart.platform.spec().cores;
+        if cores.len() < 2 {
+            return;
+        }
+        if cart.platform != Platform::Gba {
+            let chosen = slot_store::core_for_platform(&root, &cart.stem, cart.platform);
+            self.phase = Phase::Cores {
+                cursor: cores.iter().position(|c| *c == chosen).unwrap_or(0),
+            };
+            self.shelf_mut().release_hold();
+            self.play_held = None;
             return;
         }
         let seat = slot_store::core_for(&root, &cart.stem);
@@ -5241,6 +5293,225 @@ impl App {
         self.core_picker = Some(picker);
         self.shelf_mut().release_hold();
         self.play_held = None;
+    }
+
+    /// The game on the shelf and the cores its system has.
+    fn shelf_cores(&self) -> Option<(&Cart, &'static [slot_store::Core])> {
+        let cart = self.shelf().carts.get(self.shelf().index)?;
+        Some((cart, cart.platform.spec().cores))
+    }
+
+    fn cores_input(&mut self, cursor: usize, action: Action) {
+        let Some((cart, cores)) = self.shelf_cores() else {
+            self.phase = Phase::Shelf;
+            return;
+        };
+        let (stem, n) = (cart.stem.clone(), cores.len());
+        let cursor = cursor.min(n - 1);
+        self.phase = match action {
+            Action::GbaDown(Btn::Up) => Phase::Cores {
+                cursor: (cursor + n - 1) % n,
+            },
+            Action::GbaDown(Btn::Down) => Phase::Cores {
+                cursor: (cursor + 1) % n,
+            },
+            Action::GbaDown(Btn::A) => {
+                if let Some(root) = &self.root {
+                    if let Err(e) = slot_store::write_selected_core(root, &stem, cores[cursor]) {
+                        eprintln!("slot: core for {stem}: {e}");
+                    }
+                }
+                Phase::Shelf
+            }
+            Action::GbaDown(Btn::B | Btn::Start) | Action::QuickMenu => Phase::Shelf,
+            _ => return,
+        };
+    }
+
+    fn cores_page(&self, cursor: usize) -> Option<ListPage> {
+        let (cart, cores) = self.shelf_cores()?;
+        let chosen = self.root.as_deref().map_or(cores[0], |root| {
+            slot_store::core_for_platform(root, &cart.stem, cart.platform)
+        });
+        let cursor = cursor.min(cores.len() - 1);
+        let rows = cores
+            .iter()
+            .map(|c| ListRow {
+                label: c.text().into(),
+                detail: match () {
+                    _ if *c == chosen => "In use".into(),
+                    _ if *c == cores[0] => "Default".into(),
+                    _ => String::new(),
+                },
+                bars: None,
+                icon: None,
+            })
+            .collect();
+        Some(ListPage {
+            title: "Core".into(),
+            status: slot_ui::label_text(cart),
+            cursor,
+            rows,
+            legends: with_action((cores[cursor] != chosen).then_some("Use This Core")),
+        })
+    }
+
+    /// The keyboard, for a game's name: the last search's to start from.
+    fn open_search(&mut self, again: bool) {
+        let query = self.search.as_ref().map_or("", |s| s.query.as_str());
+        self.phase = Phase::Keyboard {
+            keys: Keyboard::new("Search for a game", query, false, 1, 48),
+            typing: Typing::Search { again },
+            cursor: 0,
+        };
+        self.shelf_mut().release_hold();
+        self.play_held = None;
+    }
+
+    /// Looks for `query` on every system's shelf and shows what it found.
+    fn search_for(&mut self, query: &str) {
+        let carts: Vec<&Cart> = self.carts().collect();
+        let names: Vec<String> = carts.iter().map(|c| slot_ui::label_text(c)).collect();
+        let found = crate::search::matches(names.iter().map(String::as_str), query)
+            .into_iter()
+            .map(|i| (carts[i].platform, carts[i].stem.clone()))
+            .collect();
+        self.search = Some(Search {
+            query: query.trim().to_string(),
+            found,
+        });
+        self.phase = Phase::Search { cursor: 0 };
+        self.make_search_icons(0);
+    }
+
+    fn found_cart(&self, (platform, stem): &(Platform, String)) -> Option<&Cart> {
+        self.carts()
+            .find(|c| c.platform == *platform && c.stem == *stem)
+    }
+
+    /// Makes the pictures for the rows in view around `cursor` that do not have one yet: the
+    /// game's cart, card or disc with its label, as the shelf shows it, shrunk.
+    fn make_search_icons(&mut self, cursor: usize) {
+        let (Some(search), Some(root)) = (&self.search, &self.root) else {
+            return;
+        };
+        let page = ListPage {
+            rows: vec![ListRow::default(); search.found.len()],
+            cursor,
+            ..ListPage::default()
+        };
+        let first = page.first_shown();
+        let wanted: Vec<(Platform, String)> = search
+            .found
+            .iter()
+            .skip(first)
+            .take(slot_ui::LIST_ROWS)
+            .filter(|key| !self.search_icons.contains_key(*key))
+            .cloned()
+            .collect();
+        let root = root.clone();
+        for key in wanted {
+            let Some(cart) = self.found_cart(&key) else {
+                continue;
+            };
+            let face = slot_ui::cart_face_with(cart, crate::label_cache::label_art(&root, cart));
+            self.search_icons.insert(key, ListIcon::of(&face));
+        }
+    }
+
+    fn search_input(&mut self, cursor: usize, action: Action) {
+        let n = self.search.as_ref().map_or(0, |s| s.found.len());
+        let cursor = cursor.min(n.saturating_sub(1));
+        let cursor = match action {
+            Action::GbaDown(Btn::Up) if n > 0 => (cursor + n - 1) % n,
+            Action::GbaDown(Btn::Down) if n > 0 => (cursor + 1) % n,
+            Action::GbaDown(Btn::A) if n > 0 => {
+                let key = self.search.as_ref().map(|s| s.found[cursor].clone());
+                if let Some(key) = key {
+                    self.go_to_game(&key);
+                }
+                return;
+            }
+            Action::GbaDown(Btn::Y) => return self.open_search(true),
+            Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                self.phase = Phase::Shelf;
+                return;
+            }
+            _ => return,
+        };
+        self.make_search_icons(cursor);
+        self.phase = Phase::Search { cursor };
+    }
+
+    /// Turns to the game's own system's shelf with the game in the slot.
+    fn go_to_game(&mut self, (platform, stem): &(Platform, String)) {
+        let at = self
+            .shelves
+            .iter()
+            .position(|(rack, _)| *rack == Rack::Of(*platform));
+        let Some(at) = at else {
+            return;
+        };
+        let Some(i) = self.shelves[at]
+            .1
+            .carts
+            .iter()
+            .position(|c| c.stem == *stem)
+        else {
+            return;
+        };
+        self.phase = Phase::Shelf;
+        if at != self.shelf_at {
+            self.shelf_mut().release_hold();
+            self.shelf_at = at;
+            self.shelf_platform = slot_ui::Printed::default();
+            self.slot_letter = None;
+            self.shelf_named = None;
+            self.name_pending = true;
+        }
+        self.shelves[at].1.select(i);
+        self.remember_shelf();
+    }
+
+    fn search_page(&self, cursor: usize) -> ListPage {
+        let Some(search) = &self.search else {
+            return ListPage::default();
+        };
+        let rows: Vec<ListRow> = search
+            .found
+            .iter()
+            .filter_map(|key| {
+                let cart = self.found_cart(key)?;
+                Some(ListRow {
+                    label: slot_ui::label_text(cart),
+                    detail: cart.platform.short_name().into(),
+                    bars: None,
+                    icon: self.search_icons.get(key).cloned(),
+                })
+            })
+            .collect();
+        let status = match rows.len() {
+            0 => format!("No games match \u{201c}{}\u{201d}", search.query),
+            1 => format!("1 game matches \u{201c}{}\u{201d}", search.query),
+            n if n == crate::search::MOST => {
+                format!(
+                    "The first {n} games matching \u{201c}{}\u{201d}",
+                    search.query
+                )
+            }
+            n => format!("{n} games match \u{201c}{}\u{201d}", search.query),
+        };
+        let mut legends = vec![back_legend(), Legend::new(ButtonLegend::Y, "New Search")];
+        if !rows.is_empty() {
+            legends.push(Legend::new(ButtonLegend::A, "Go to Game"));
+        }
+        ListPage {
+            title: "Search".into(),
+            status,
+            cursor: cursor.min(rows.len().saturating_sub(1)),
+            rows,
+            legends,
+        }
     }
 
     fn core_faces_ready(&self) -> bool {
