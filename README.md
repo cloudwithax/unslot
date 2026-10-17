@@ -40,7 +40,7 @@ Everything slot does is still here: the carts, the shelves, the link cable, the 
 
 unslot runs on BaseOS, so it needs BaseOS on the card in TF1 first.
 
-**New card.** Flash your model's BaseOS image to TF1 and boot it once; it grows its `BASEOS` volume to fill the card. Then copy the contents of a release's `unslot-<version>` folder onto that volume (or onto a card in TF2), add games and restart.
+**New card.** Flash the release's `unslot-<version>-<model>.img.zip` for your model to TF1: it is BaseOS with unslot already on it. Boot it once and it grows to fill the card. Or flash your model's BaseOS image yourself, boot it once, and copy the contents of a release's `unslot-<version>` folder onto its `BASEOS` volume (or onto a card in TF2), add games and restart.
 
 **Already running unslot?** Settings → Network → Updates downloads the new release's `unslot-<version>.pak` and installs it when you restart. Or copy the `.pak` to the root of the card yourself and restart with the power connected. `System/` is replaced, and your games, saves, labels and settings stay.
 

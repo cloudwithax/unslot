@@ -124,7 +124,7 @@ jobs:
         run: |
           set -eu
           cat > notes.md <<NOTES
-          **New card:** unzip and copy the contents of \`unslot-${GITHUB_REF_NAME}/\` to the root of your frontend card: BaseOS's \`BASEOS\` volume on TF1, or a card in TF2.
+          **New card:** flash \`unslot-${GITHUB_REF_NAME}-<model>.img.zip\` to TF1 with any card flasher; it is BaseOS with unslot already on it, and its images follow a few minutes after the release. Or flash BaseOS yourself and copy the contents of \`unslot-${GITHUB_REF_NAME}/\` to its \`BASEOS\` volume, or to a card in TF2.
 
           **Already running unslot?** Settings, Network, Updates downloads \`$PAK\` and installs it when you restart. Or copy \`$PAK\` to the root of the card and restart with the power connected. unslot installs it only if it is a signed unslot release, and replaces \`System/\`, keeping your games, saves and settings.
 
@@ -134,3 +134,12 @@ jobs:
           NOTES
           gh release create "$GITHUB_REF_NAME" "$ZIP" "$PAK" MinUI.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" --notes-file notes.md
+
+  images:
+    name: card images
+    needs: publish
+    permissions:
+      contents: write
+    uses: ./.github/workflows/images.yml
+    with:
+      tag: ${{ github.ref_name }}

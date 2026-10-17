@@ -1,0 +1,90 @@
+name: images
+
+# Card images to flash, one a model BaseOS has a release for: BaseOS with a release's unslot
+# already on its BASEOS partition (tools/image/build.sh). Runs after a release is published, and
+# can be run by hand to add images to one that already is.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release to make card images for, e.g. v2.2.0
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  image:
+    name: image (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - rg28xx
+          - rg34xx
+          - rg34xxsp
+          - rg35xxh
+          - rg35xxplus
+          - rg35xxpro
+          - rg35xxsp
+          - rg40xxh
+          - rg40xxv
+          - rgcubexx
+          - rgsp
+    env:
+      TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install the disk tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends e2fsprogs dosfstools mtools zip unzip
+
+      - name: Fetch the release's card tree
+        run: |
+          set -eu
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p "unslot-$TAG-h700.zip"
+          unzip -q "unslot-$TAG-h700.zip"
+          test -f "unslot-$TAG/System/slot"
+
+      - name: Build the image
+        run: sh tools/image/build.sh "${{ matrix.target }}" "unslot-$TAG" "unslot-$TAG-${{ matrix.target }}.img.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: image-${{ matrix.target }}
+          path: unslot-${{ inputs.tag }}-${{ matrix.target }}.img.zip
+          if-no-files-found: error
+
+  attach:
+    name: attach
+    needs: image
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: image-*
+          merge-multiple: true
+
+      - name: Attach the images and their checksums
+        run: |
+          set -eu
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p SHA256SUMS
+          # Images from an earlier run are replaced, with their checksums.
+          grep -v '\.img\.zip$' SHA256SUMS > sums || true
+          sha256sum *.img.zip >> sums
+          mv sums SHA256SUMS
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber *.img.zip SHA256SUMS
