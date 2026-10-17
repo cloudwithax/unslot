@@ -118,8 +118,11 @@ if "$work/gptgrow" "$img" > /dev/null 2>&1; then
 fi
 
 mkdir -p "$(dirname "$OUT")"
+# Where OUT is from here, before zip runs in $work, which a relative OUT would land in and the
+# trap would then delete.
+out="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
 name="$(basename "$OUT" .zip)"
 mv "$img" "$work/$name"
-rm -f "$OUT"
-(cd "$work" && zip -q -9 "$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")" "$name")
+rm -f "$out"
+(cd "$work" && zip -q -9 "$out" "$name")
 echo "$OUT: BaseOS $BASEOS_VERSION for $TARGET with unslot $(cat "$TREE/System/version") on a ${data_mib} MiB BASEOS partition"
