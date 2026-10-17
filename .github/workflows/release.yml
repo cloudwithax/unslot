@@ -24,7 +24,7 @@ jobs:
           set -eu
           sed -i '/bullseye-security/d' /etc/apt/sources.list
           apt-get -o Acquire::Check-Valid-Until=false update
-          apt-get install -y --no-install-recommends zip unzip python3-pip             libgles-dev libegl-dev zlib1g-dev libpng-dev pkg-config
+          apt-get install -y --no-install-recommends zip unzip zstd python3-pip             libgles-dev libegl-dev zlib1g-dev libpng-dev pkg-config
           # Flycast wants a newer CMake than bullseye's.
           pip3 install --no-cache-dir 'cmake>=3.27,<3.31'
           curl -fsSL https://taskfile.dev/install.sh | sh -s -- -b /usr/local/bin
@@ -57,6 +57,7 @@ jobs:
           for b in tailscaled wireguard-go samba/bin/smbd samba/bin/smbpasswd; do
             file "$out/System/services/$b" | grep -q aarch64
           done
+          test -f "$out/System/services/samba/lib/libnsl.so.1"
           test -s "$out/System/licenses/services.manifest"
           ls "$out"/System/Wallpapers/*.jpg > /dev/null
           test -s "$out/System/licenses/wallpapers.txt"

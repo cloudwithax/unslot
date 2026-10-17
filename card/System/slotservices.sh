@@ -122,7 +122,8 @@ EOF
 }
 
 samba_off() {
-	stop_pid "$SMB/smbd.pid"
+	# Samba 3.6 names its pidfile after the config it was given.
+	stop_pid "$SMB/smbd-smb.conf.pid"
 	# Each connection has its own smbd, which outlives the one that listens.
 	$KILLALL smbd 2>/dev/null || true
 	return 0

@@ -4,11 +4,12 @@
 #   tailscaled         Tailscale, daemon and CLI in one small binary (the CLI runs with
 #                      TS_BE_CLI=1), built from a pinned tag with only the features slot uses
 #   wireguard-go       WireGuard in userspace, built from a pinned commit, fully static
-#   samba/             spruceOS's prebuilt Samba 3.6.23 for aarch64 glibc, from a pinned commit
+#   samba/             spruceOS's prebuilt Samba 3.6.23 for aarch64 glibc, from a pinned commit,
+#                      with the libnsl.so.1 it needs and BaseOS lacks, from Ubuntu jammy's libc6
 #   services.manifest  where each came from and its sha256
 #
 # Go is downloaded, pinned and checked, unless a new enough one is already on PATH. Everything
-# is cross-compiled, so any Linux host with curl, tar and sha256sum will do.
+# is cross-compiled, so any Linux host with curl, tar, sha256sum, ar and zstd will do.
 set -eu
 
 OUT="${1:-vendor/services}"
@@ -18,6 +19,9 @@ GO_SHA_ARM64=94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8
 TAILSCALE_TAG=v1.104.1
 WIREGUARD_GO_COMMIT=2631ce99a06f27120d581611cf125d68bc6aa565
 SPRUCE_COMMIT=590ebbb2e2ccf066ced623e2405710c1483b2558
+# The glibc BaseOS's own is harvested from, so its libnsl wants nothing that one lacks.
+LIBC6_DEB=libc6_2.35-0ubuntu3.15_arm64.deb
+LIBC6_SHA=dd88cc85dcfbac19c0c9b606676b7b1b87f851d75afa5c830fc5ba1293a30833
 CACHE="${SERVICES_CACHE:-$HOME/.cache/unslot-services}"
 
 mkdir -p "$OUT" "$CACHE"
@@ -87,6 +91,17 @@ for f in bin/smbd bin/smbpasswd \
 	note "samba/$f" "$OUT/samba/$f" "$raw/$f"
 done
 chmod 755 "$OUT/samba/bin/smbd" "$OUT/samba/bin/smbpasswd"
+# Launchpad keeps every published version, where the ports pool drops superseded ones.
+url="https://launchpad.net/ubuntu/+archive/primary/+files/$LIBC6_DEB"
+deb="$CACHE/$LIBC6_DEB"
+[ -f "$deb" ] || curl -fsSL -o "$deb" "$url"
+echo "$LIBC6_SHA  $deb" | sha256sum -c - >/dev/null
+tmp="$(mktemp -d)"
+(cd "$tmp" && ar x "$deb" data.tar.zst && zstd -dcq data.tar.zst |
+	tar -x ./lib/aarch64-linux-gnu/libnsl.so.1)
+cp "$tmp/lib/aarch64-linux-gnu/libnsl.so.1" "$OUT/samba/lib/libnsl.so.1"
+rm -rf "$tmp"
+note samba/lib/libnsl.so.1 "$OUT/samba/lib/libnsl.so.1" "$url"
 
 for bin in "$OUT/tailscaled" "$OUT/wireguard-go" "$OUT/samba/bin/smbd"; do
 	file "$bin" | grep -q aarch64 || { echo "$bin is not aarch64" >&2; exit 1; }

@@ -303,7 +303,7 @@ tasks:
   services:
     desc: >-
       Build Tailscale and wireguard-go for the H700 from pinned sources and fetch spruceOS's
-      prebuilt Samba, into vendor/services, noting where each came from in services.manifest.
+      prebuilt Samba (with libnsl from Ubuntu jammy), into vendor/services, noting where each came from in services.manifest.
       Needs a Linux host; Go is fetched and checked if a new enough one is not on PATH
     status:
       - test -f vendor/services/services.manifest
