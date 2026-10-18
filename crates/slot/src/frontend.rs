@@ -139,6 +139,8 @@ struct Clocks {
     title: String,
     title_tex: Option<TexId>,
     ink: [u8; 3],
+    sync: Option<String>,
+    sync_tex: Option<TexId>,
 }
 
 struct ShelfLook {
@@ -942,6 +944,16 @@ fn sync_clock(app: &mut App, compositor: &mut Compositor, clocks: &mut Clocks) {
         let w = face.w;
         let id = upload(compositor, &mut clocks.shelf, face);
         app.set_shelf_clock_face(id, w);
+    }
+    let sync = app.sync_text();
+    if sync != clocks.sync {
+        clocks.sync = sync.clone();
+        let face = sync.map(|line| {
+            let f = slot_ui::line_toast_face(&line);
+            let id = upload_rgba(compositor, &mut clocks.sync_tex, f.w, f.h, &f.rgba);
+            (id, f.w, f.h)
+        });
+        app.set_sync_face(face);
     }
     let platform_shown = app.slot_text().unwrap_or_default();
     if platform_shown != clocks.platform {

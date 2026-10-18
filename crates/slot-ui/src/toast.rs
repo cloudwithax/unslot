@@ -170,6 +170,27 @@ pub fn toast_face(toast: Toast) -> CartFace {
     haloed(&cov, s.w, s.h + detail_h(toast), HUD_INK)
 }
 
+/// Wide enough for a line such as Syncthing's progress.
+const LINE_W: u32 = 440;
+
+/// A line in the toasts' look that is not one of them, such as how far Syncthing has got.
+pub fn line_toast_face(line: &str) -> CartFace {
+    let Some(font) = text::label_font() else {
+        return CartFace {
+            rgba: Vec::new(),
+            w: 0,
+            h: 0,
+        };
+    };
+    let layout = text::fit(font, line, LINE_W as f32, 1, TOAST_PX, TOAST_MIN_PX);
+    haloed(
+        &text::coverage(LINE_W, TOAST_H, &layout),
+        LINE_W,
+        TOAST_H,
+        HUD_INK,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

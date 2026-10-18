@@ -11,6 +11,8 @@ mod headless;
 mod headless;
 #[cfg(feature = "host")]
 mod host;
+#[cfg(target_os = "linux")]
+mod ion;
 mod layout;
 mod lcd3x;
 #[cfg(target_os = "linux")]

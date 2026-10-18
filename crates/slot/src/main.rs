@@ -35,6 +35,15 @@ fn main() {
             }
             return;
         }
+        #[cfg(feature = "device")]
+        Some("--core-host") => {
+            let args: Vec<String> = args.collect();
+            if let Err(e) = slot::core::host(&args) {
+                eprintln!("slot: core host: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
         _ => {}
     }
     slot::crash::install();

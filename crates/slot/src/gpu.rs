@@ -14,6 +14,19 @@ impl slot_retro::GlContext for Offscreen {
     fn read(&mut self, w: u32, h: u32, out: &mut Vec<u8>) {
         self.0.read(w, h, out)
     }
+
+    fn read_xrgb(&mut self, w: u32, h: u32, bottom_left_origin: bool, out: &mut [u8]) -> bool {
+        self.0.read_xrgb(w, h, bottom_left_origin, out)
+    }
+
+    fn share_xrgb(
+        &mut self,
+        w: u32,
+        h: u32,
+        bottom_left_origin: bool,
+    ) -> Option<(usize, Option<Vec<std::os::fd::OwnedFd>>)> {
+        self.0.share_xrgb(w, h, bottom_left_origin)
+    }
 }
 
 /// Lets GPU cores have a context. Safe to call again; the first call is the one that counts.

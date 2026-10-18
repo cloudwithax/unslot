@@ -13,6 +13,7 @@ test-support = []
 
 [dependencies]
 gl = { workspace = true }
+libc = { workspace = true }
 libloading = { workspace = true }
 glutin = { workspace = true, optional = true }
 glutin-winit = { workspace = true, optional = true }

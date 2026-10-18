@@ -74,6 +74,10 @@ fi
 
 echo "|/bin/sh $SYS/coresave.sh %p %s %e %t" > /proc/sys/kernel/core_pattern 2>/dev/null
 
+# BaseOS runs the CPU flat out but leaves the Mali on its lowest clock, 420 MHz, which its
+# governor never raises; the driver's performance scene holds it at 648 MHz.
+echo 1 > /sys/class/devfreq/gpu/device/scenectrl/command 2>/dev/null
+
 [ -f "$LOGS/slot.log" ] && mv -f "$LOGS/slot.log" "$LOGS/slot.log.1"
 log "exec $SYS/slot"
 

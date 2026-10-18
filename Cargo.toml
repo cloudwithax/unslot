@@ -27,6 +27,13 @@ usvg = { version = "0.48", default-features = false }
 qrcode = { version = "0.14", default-features = false }
 jpeg-decoder = { version = "0.3", default-features = false }
 
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.device]
 inherits = "release"
 lto = "fat"

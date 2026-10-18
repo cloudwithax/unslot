@@ -110,4 +110,4 @@ pub use sticker::{
     draw_sticker, head_rows, sticker_face, sticker_lines, sticker_rect, StickerFields, COPYRIGHT,
     CREDITS, DC, FORK, HOME, ORIGIN, STICKER_H, STICKER_W,
 };
-pub use toast::{toast_box, toast_face, toast_rect, Toast};
+pub use toast::{line_toast_face, toast_box, toast_face, toast_rect, Toast};

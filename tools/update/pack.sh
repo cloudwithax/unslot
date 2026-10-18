@@ -13,6 +13,12 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 [ -f "$TREE/System/slot" ] || { echo "$TREE has no System/slot" >&2; exit 1; }
 [ -s "$TREE/System/version" ] || { echo "$TREE has no System/version" >&2; exit 1; }
 version="$(cat "$TREE/System/version")"
+# FAT makes every file executable, but a flashed image's ext4 keeps the zip's modes, and Services
+# runs these directly.
+for bin in syncthing tailscaled wireguard-go samba/bin/smbd samba/bin/smbpasswd; do
+	f="$TREE/System/services/$bin"
+	[ ! -e "$f" ] || [ -x "$f" ] || { echo "$f is not executable" >&2; exit 1; }
+done
 
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT HUP INT TERM

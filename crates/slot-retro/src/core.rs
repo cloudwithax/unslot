@@ -1,4 +1,5 @@
 use std::fmt;
+use std::os::fd::OwnedFd;
 use std::path::Path;
 
 use crate::link::Link;
@@ -50,6 +51,24 @@ impl ButtonMask {
 /// -0x8000..=0x7fff with up and left negative.
 pub type Sticks = [i16; 4];
 
+/// A setting a core declares, for the player to change from the core options page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CoreOption {
+    pub key: String,
+    /// What the core calls it.
+    pub label: String,
+    /// What it may be set to, the core's default first.
+    pub values: Vec<String>,
+    pub value: String,
+}
+
+/// A frame's picture left where the GPU put it, in memory another process can map: which of the
+/// buffers it is in, and the buffers, XRGB8888 top row first, when they are new.
+pub struct SharedFrame {
+    pub index: usize,
+    pub buffers: Option<Vec<OwnedFd>>,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct AvInfo {
     pub fps: f64,
@@ -86,12 +105,26 @@ impl From<std::io::Error> for CoreError {
 pub trait RetroCore: Send {
     fn load(&mut self, rom: &Path) -> Result<(), CoreError>;
     fn run_frame(&mut self, input: ButtonMask);
+    /// Runs a frame, letting a core that can go on with it while slot shows the last one do so:
+    /// its picture, sound and state are then the frame before's until the next call.
+    fn run_frame_overlapped(&mut self, input: ButtonMask) {
+        self.run_frame(input);
+    }
     fn run_frame_linked(&mut self, p1: ButtonMask, _p2: ButtonMask) {
         self.run_frame(p1);
     }
     fn set_option(&mut self, _key: &str, _value: &str) {}
+    /// The settings the core declares, as they stand, in the order it gave them.
+    fn core_options(&self) -> Vec<CoreOption> {
+        Vec::new()
+    }
     fn set_frame_skip(&mut self, _skip: bool) {}
     fn video_xrgb8888(&self) -> &[u8];
+    /// Where the last frame's picture is, for a core that can leave it in memory another process
+    /// maps rather than copy it into `video_xrgb8888`; asking has it do so from the next frame on.
+    fn shared_frame(&mut self) -> Option<SharedFrame> {
+        None
+    }
     /// The width and height of what `video_xrgb8888` holds.
     fn video_size(&self) -> (u32, u32) {
         (GBA_W, GBA_H)

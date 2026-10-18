@@ -36,6 +36,7 @@ pub enum Action {
     VolumeDown,
     QuickMenu,
     GameMenu,
+    CoreOptions,
     MuteToggle,
     ColourCorrectionToggle,
     PaletteNext,
@@ -466,6 +467,7 @@ fn chord(b: Btn) -> Option<(u16, Action)> {
         Btn::B => (1024, Action::ShaderPrev),
         Btn::VolUp => (2048, Action::MuteToggle),
         Btn::VolDown => (4096, Action::MuteToggle),
+        Btn::X => (8192, Action::CoreOptions),
         _ => return None,
     })
 }

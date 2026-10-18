@@ -169,7 +169,7 @@ impl Session {
             actions.extend(self.gestures.feed(ev, now));
         }
         actions.extend(self.gestures.tick(now));
-        if !latched && self.app.in_game_menu().is_some() {
+        if !latched && (self.app.in_game_menu().is_some() || self.app.core_options_open()) {
             actions.extend(self.gestures.drop_ff_latch());
         }
         for action in actions {
@@ -184,6 +184,7 @@ impl Session {
             return;
         };
         let to_game = self.playing() && self.app.in_game_menu().is_none();
+        let to_game = to_game && !self.app.core_options_open();
         emu.set_sticks(if to_game { sticks } else { [0; 4] });
     }
 
@@ -214,7 +215,7 @@ impl Session {
         if trace() {
             eprintln!("slot: {action:?} in {:?}", self.app.phase());
         }
-        let menu_open = self.app.in_game_menu().is_some();
+        let menu_open = self.app.in_game_menu().is_some() || self.app.core_options_open();
         match action {
             Action::RewindStart if !menu_open => self.rewinding = true,
             Action::RewindStop => self.rewinding = false,
@@ -263,6 +264,23 @@ impl Session {
             if let Some(emu) = &self.emu {
                 emu.set_option("mgba_gb_colors", p.core_name());
                 recoloured = true;
+            }
+        }
+        if self.app.take_core_options_wanted() {
+            let options = self.emu.as_ref().and_then(|emu| {
+                emu.request_options()
+                    .recv_timeout(std::time::Duration::from_secs(1))
+                    .ok()
+            });
+            self.app.show_core_options(options.unwrap_or_default());
+        }
+        if let Some((key, value)) = self.app.take_core_option() {
+            if let Some(emu) = &self.emu {
+                emu.set_option(&key, &value);
+            }
+            let file = crate::core::options_file(self.app.core());
+            if let Err(e) = slot_store::ini::write(&self.root, &file, &key, &value) {
+                eprintln!("slot: {file}: {e}");
             }
         }
         if let Some(on) = self.app.take_colour_correction() {
@@ -408,7 +426,10 @@ impl Session {
     }
 
     fn held(&self) -> bool {
-        self.app.game_menu_open() || self.app.in_game_menu().is_some() || self.app.shutting_down()
+        self.app.game_menu_open()
+            || self.app.in_game_menu().is_some()
+            || self.app.core_options_open()
+            || self.app.shutting_down()
     }
 
     fn dozing(&self) -> bool {
@@ -461,6 +482,9 @@ impl Session {
             _ => return,
         };
         if self.emu.is_none() {
+            if !self.app.may_spawn_core() {
+                return;
+            }
             let (_, serial) = self.app.link_mode(&stem);
             self.spawn_core(&stem, serial);
         }
@@ -497,6 +521,8 @@ impl Session {
         self.app
             .set_video_mode(crate::video_mode::video_mode_for(&self.root, stem));
         self.app.set_link_loaded(serial);
+        // An eject's state may still be on its way to the card.
+        self.app.settle_saves();
         let resume = (!self.app.starting_clean())
             .then(|| persist::read_resume(&self.root, platform, core, stem))
             .flatten();

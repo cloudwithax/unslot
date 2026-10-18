@@ -29,6 +29,9 @@ IP="${AGS_IP:-ip}"
 TUN="${AGS_TUN:-/dev/net/tun}"
 WG_RUN="${AGS_WG_RUN:-/var/run/wireguard}"
 WAIT_S="${AGS_SERVICES_WAIT_S:-5}"
+# Samba and Syncthing move files in the background; at the lowest priority they take only the
+# CPU a game leaves, rather than a core of the four a Dreamcast keeps busy.
+IDLE="nice -n 19"
 
 DROPBEAR_PID="$RUN/dropbear.pid"
 SMB="$RUN/slotsamba"
@@ -122,7 +125,7 @@ EOF
 	printf '%s\n%s\n' "$pw" "$pw" |
 		LD_LIBRARY_PATH="$SVC/samba/lib" "$SVC/samba/bin/smbpasswd" -c "$SMB/smb.conf" -s -a root \
 			>/dev/null || return 1
-	LD_LIBRARY_PATH="$SVC/samba/lib" "$SVC/samba/bin/smbd" -s "$SMB/smb.conf" -D \
+	LD_LIBRARY_PATH="$SVC/samba/lib" $IDLE "$SVC/samba/bin/smbd" -s "$SMB/smb.conf" -D \
 		< /dev/null > "$SMB/smbd.out" 2>&1 || { echo "smbd did not start" >&2; return 1; }
 }
 
@@ -149,7 +152,7 @@ syncthing_on() {
 	# card's FAT has no permissions to keep in step.
 	sed -i "/<folder id=\"\" label=\"\"/{s|path=\"[^\"]*\"|path=\"$root\"|;s|ignorePerms=\"false\"|ignorePerms=\"true\"|}" \
 		"$home/config.xml"
-	"$SVC/syncthing" serve --home="$home" --no-browser --no-restart --no-upgrade \
+	$IDLE "$SVC/syncthing" serve --home="$home" --no-browser --no-restart --no-upgrade \
 		--gui-address=0.0.0.0:8384 --log-file="$RUN/slot-syncthing.log" \
 		--log-max-size=1048576 --log-max-old-files=0 < /dev/null > /dev/null 2>&1 &
 	echo $! > "$ST_PID"

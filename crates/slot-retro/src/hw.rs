@@ -4,6 +4,7 @@
 //! buffer a software core fills, so everything past the core is the same for both.
 
 use std::ffi::{c_char, c_uint, c_void, CStr};
+use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::OnceLock;
 
@@ -46,6 +47,23 @@ pub trait GlContext: Send {
     fn framebuffer(&mut self, w: u32, h: u32, depth: bool, stencil: bool) -> u32;
     /// The bottom-left `w` by `h` of the framebuffer as RGBA, its bottom row first.
     fn read(&mut self, w: u32, h: u32, out: &mut Vec<u8>);
+    /// The same frame straight into `out` as XRGB8888, top row first, turned over when
+    /// `bottom_left_origin`, when the context can have the GPU lay it out so; false leaves it to
+    /// `read`.
+    fn read_xrgb(&mut self, _w: u32, _h: u32, _bottom_left_origin: bool, _out: &mut [u8]) -> bool {
+        false
+    }
+    /// As `read_xrgb`, leaving the frame where the GPU put it, in memory another process can
+    /// map: which of the buffers it is in, with the buffers when they are new since last asked.
+    /// None leaves it to `read_xrgb`.
+    fn share_xrgb(
+        &mut self,
+        _w: u32,
+        _h: u32,
+        _bottom_left_origin: bool,
+    ) -> Option<(usize, Option<Vec<OwnedFd>>)> {
+        None
+    }
 }
 
 /// Makes a context on the calling thread: GLES 3 when asked and to be had, else GLES 2.
@@ -105,6 +123,12 @@ pub(crate) struct Hw {
     pub readback: Vec<u8>,
     /// Frames read back, for SLOT_GL_DEBUG's occasional word on them.
     pub frames: u64,
+    /// Set once frames are to be left where the GPU puts them, for another process to map.
+    pub share: bool,
+    /// Which buffer the last frame was left in, while they are.
+    pub shared: Option<usize>,
+    /// The buffers, when they are new since last handed out.
+    pub buffers: Option<Vec<OwnedFd>>,
 }
 
 impl Hw {
@@ -118,8 +142,27 @@ impl Hw {
     /// The core's last frame into `video` as XRGB8888, top row first, the way a software core's
     /// frames are kept.
     pub fn read_into(&mut self, w: u32, h: u32, video: &mut [u8]) {
-        self.gl.read(w, h, &mut self.readback);
         self.frames += 1;
+        if self.share {
+            let origin = self.callback.bottom_left_origin;
+            if let Some((index, buffers)) = self.gl.share_xrgb(w, h, origin) {
+                self.shared = Some(index);
+                if buffers.is_some() {
+                    self.buffers = buffers;
+                }
+                return;
+            }
+            self.share = false;
+        }
+        self.shared = None;
+        let size = (w * h * 4) as usize;
+        if self
+            .gl
+            .read_xrgb(w, h, self.callback.bottom_left_origin, &mut video[..size])
+        {
+            return;
+        }
+        self.gl.read(w, h, &mut self.readback);
         if self.frames % 120 == 1 && std::env::var_os("SLOT_GL_DEBUG").is_some() {
             let lit: u64 = self.readback.iter().map(|&b| u64::from(b)).sum();
             eprintln!(
@@ -143,12 +186,14 @@ impl Hw {
     }
 }
 
-/// Whether slot can give a core the context `c` asks for, and if so whether it is GLES 3.
+/// Whether slot can give a core the context `c` asks for, and if so whether it is GLES 3. A core
+/// asking for GLES 2 is given 3 all the same, as RetroArch built for GLES 3 does: GLES 3 is GLES
+/// 2 and more, the cores look at what they got to use the more, and on the Mali the RGBA8
+/// framebuffer it brings reads back four times as fast as GLES 2's RGB565 one. N64 went from 28
+/// fps to 101, PSP from 14 to 68.
 pub(crate) fn wants_gles3(c: &HwRenderCallback) -> Option<bool> {
     match c.context_type {
-        CONTEXT_OPENGLES2 => Some(false),
-        CONTEXT_OPENGLES3 => Some(true),
-        CONTEXT_OPENGLES_VERSION => Some(c.version_major >= 3),
+        CONTEXT_OPENGLES2 | CONTEXT_OPENGLES3 | CONTEXT_OPENGLES_VERSION => Some(true),
         _ => None,
     }
 }
@@ -198,6 +243,9 @@ mod tests {
             fbo: 0,
             readback: Vec::new(),
             frames: 0,
+            share: false,
+            shared: None,
+            buffers: None,
         };
         let mut video = vec![0u8; 8];
         hw.read_into(1, 2, &mut video);
@@ -207,11 +255,11 @@ mod tests {
     #[test]
     fn only_gles_is_offered() {
         let mut c = callback(true);
-        assert_eq!(wants_gles3(&c), Some(false));
+        assert_eq!(wants_gles3(&c), Some(true), "GLES 2 is given 3");
         c.context_type = CONTEXT_OPENGLES3;
         assert_eq!(wants_gles3(&c), Some(true));
         c.context_type = CONTEXT_OPENGLES_VERSION;
-        c.version_major = 3;
+        c.version_major = 2;
         assert_eq!(wants_gles3(&c), Some(true));
         // Desktop GL, its core profile and Vulkan are not to be had on the device.
         for t in [1, 3, 6] {

@@ -3,9 +3,11 @@
 //! through pointers of its own, not the `gl` crate's, which belong to the compositor's context.
 
 use std::ffi::{c_char, c_void, CStr};
+use std::os::fd::OwnedFd;
 
 use libloading::Library;
 
+use crate::ion::IonFrames;
 use crate::surface::GfxError;
 
 const EGL_NONE: i32 = 0x3038;
@@ -39,6 +41,9 @@ const GL_DEPTH_COMPONENT16: u32 = 0x81A5;
 const GL_RGBA: u32 = 0x1908;
 const GL_UNSIGNED_BYTE: u32 = 0x1401;
 const GL_PACK_ALIGNMENT: u32 = 0x0D05;
+const GL_PIXEL_PACK_BUFFER: u32 = 0x88EB;
+const GL_STREAM_READ: u32 = 0x88E1;
+const GL_MAP_READ_BIT: u32 = 0x0001;
 
 type Ptr = *mut c_void;
 
@@ -56,6 +61,20 @@ struct Gl {
     pixel_storei: unsafe extern "C" fn(u32, i32),
     clear_color: unsafe extern "C" fn(f32, f32, f32, f32),
     clear: unsafe extern "C" fn(u32),
+    pack: Option<Pack>,
+}
+
+/// GLES 3's pixel buffers, which a frame is read into by the GPU while the CPU takes the one
+/// before. Reading the framebuffer straight into client memory instead makes the CPU wait for the
+/// GPU to finish first: on the Mali a 320x240 frame takes 5 ms this way and 10 that, 640x480 29
+/// and 37, most of it the CPU reading memory the driver does not cache.
+struct Pack {
+    gen_buffers: unsafe extern "C" fn(i32, *mut u32),
+    delete_buffers: unsafe extern "C" fn(i32, *const u32),
+    bind_buffer: unsafe extern "C" fn(u32, u32),
+    buffer_data: unsafe extern "C" fn(u32, isize, *const c_void, u32),
+    map_buffer_range: unsafe extern "C" fn(u32, isize, isize, u32) -> *mut c_void,
+    unmap_buffer: unsafe extern "C" fn(u32) -> u8,
 }
 
 /// A GLES context current on the thread that made it, with no surface to show.
@@ -72,6 +91,14 @@ pub struct OffscreenGl {
     fbo: u32,
     buffers: [u32; 2],
     size: (u32, u32),
+    /// Two pixel buffers taking turns, and the size of the frame read into each, if any.
+    pbos: [u32; 2],
+    pending: [Option<(u32, u32)>; 2],
+    turn: usize,
+    /// Cached buffers frames go out through when the kernel and driver have them, made at the
+    /// first frame; `ion_tried` once that has been tried.
+    ion: Option<IonFrames>,
+    ion_tried: bool,
     gles: Library,
     _egl: Library,
 }
@@ -196,6 +223,20 @@ impl OffscreenGl {
                 pixel_storei: sym(&gles, "glPixelStorei")?,
                 clear_color: sym(&gles, "glClearColor")?,
                 clear: sym(&gles, "glClear")?,
+                pack: match gles3 {
+                    true => (|| {
+                        Ok::<_, GfxError>(Pack {
+                            gen_buffers: sym(&gles, "glGenBuffers")?,
+                            delete_buffers: sym(&gles, "glDeleteBuffers")?,
+                            bind_buffer: sym(&gles, "glBindBuffer")?,
+                            buffer_data: sym(&gles, "glBufferData")?,
+                            map_buffer_range: sym(&gles, "glMapBufferRange")?,
+                            unmap_buffer: sym(&gles, "glUnmapBuffer")?,
+                        })
+                    })()
+                    .ok(),
+                    false => None,
+                },
             };
             let made = OffscreenGl {
                 display,
@@ -210,6 +251,11 @@ impl OffscreenGl {
                 fbo: 0,
                 buffers: [0; 2],
                 size: (0, 0),
+                pbos: [0; 2],
+                pending: [None; 2],
+                turn: 0,
+                ion: None,
+                ion_tried: false,
                 gles,
                 _egl: egl,
             };
@@ -298,13 +344,34 @@ impl OffscreenGl {
         self.fbo
     }
 
-    /// The bottom-left `w` by `h` of the framebuffer as RGBA rows, the bottom one first.
+    /// The bottom-left `w` by `h` of the framebuffer as RGBA rows, the bottom one first. With
+    /// GLES 3 it is the frame before this one, as the GPU copies this one out while the CPU
+    /// takes that; the first frame, and one of a new size, is read as it is.
     pub fn read(&mut self, w: u32, h: u32, out: &mut Vec<u8>) {
         out.resize((w * h * 4) as usize, 0);
         let gl = &self.gl;
         unsafe {
             (gl.bind_framebuffer)(GL_FRAMEBUFFER, self.fbo);
             (gl.pixel_storei)(GL_PACK_ALIGNMENT, 1);
+            let Some(pack) = &gl.pack else {
+                (gl.read_pixels)(
+                    0,
+                    0,
+                    w as i32,
+                    h as i32,
+                    GL_RGBA,
+                    GL_UNSIGNED_BYTE,
+                    out.as_mut_ptr() as *mut c_void,
+                );
+                return;
+            };
+            if self.pbos[0] == 0 {
+                (pack.gen_buffers)(2, self.pbos.as_mut_ptr());
+            }
+            let len = out.len() as isize;
+            let this = self.turn;
+            (pack.bind_buffer)(GL_PIXEL_PACK_BUFFER, self.pbos[this]);
+            (pack.buffer_data)(GL_PIXEL_PACK_BUFFER, len, std::ptr::null(), GL_STREAM_READ);
             (gl.read_pixels)(
                 0,
                 0,
@@ -312,9 +379,72 @@ impl OffscreenGl {
                 h as i32,
                 GL_RGBA,
                 GL_UNSIGNED_BYTE,
-                out.as_mut_ptr() as *mut c_void,
+                std::ptr::null_mut(),
             );
+            self.pending[this] = Some((w, h));
+            let last = 1 - this;
+            let from = match self.pending[last] {
+                Some(size) if size == (w, h) => last,
+                _ => this,
+            };
+            (pack.bind_buffer)(GL_PIXEL_PACK_BUFFER, self.pbos[from]);
+            let mapped = (pack.map_buffer_range)(GL_PIXEL_PACK_BUFFER, 0, len, GL_MAP_READ_BIT);
+            if !mapped.is_null() {
+                std::ptr::copy_nonoverlapping(mapped as *const u8, out.as_mut_ptr(), out.len());
+                (pack.unmap_buffer)(GL_PIXEL_PACK_BUFFER);
+            }
+            (pack.bind_buffer)(GL_PIXEL_PACK_BUFFER, 0);
+            self.turn = last;
         }
+    }
+
+    /// The bottom-left `w` by `h` of the framebuffer into `out` as XRGB8888, top row first, turned
+    /// over when `flip`, the GPU laying it out and the CPU reading it from cached memory; the
+    /// frame before this one, as `read` gives. False when that cannot be had here, and `read` is
+    /// the way.
+    pub fn read_xrgb(&mut self, w: u32, h: u32, flip: bool, out: &mut [u8]) -> bool {
+        let fbo = self.fbo;
+        let Some(ion) = self.ion() else {
+            return false;
+        };
+        if ion.read(fbo, w, h, flip, out) {
+            return true;
+        }
+        self.ion = None;
+        false
+    }
+
+    /// As `read_xrgb`, leaving the frame where the GPU put it, in memory another process can map:
+    /// which of the buffers it is in, with the buffers' fds when they are new since last asked.
+    /// None when that cannot be had here.
+    pub fn share_xrgb(
+        &mut self,
+        w: u32,
+        h: u32,
+        flip: bool,
+    ) -> Option<(usize, Option<Vec<OwnedFd>>)> {
+        let fbo = self.fbo;
+        let shared = self.ion()?.share(fbo, w, h, flip);
+        if shared.is_none() {
+            self.ion = None;
+        }
+        shared
+    }
+
+    /// The cached frames, made the first time they are asked for; None on GLES 2 or if they
+    /// cannot be had.
+    fn ion(&mut self) -> Option<&mut IonFrames> {
+        if !self.gles3 {
+            return None;
+        }
+        if !self.ion_tried {
+            self.ion_tried = true;
+            match IonFrames::new(self.display, |name| self.proc_address(name)) {
+                Ok(ion) => self.ion = Some(ion),
+                Err(e) => eprintln!("slot: gpu core: no cached frames: {e}"),
+            }
+        }
+        self.ion.as_mut()
     }
 
     /// Makes the context current again, for a thread that has used another since.
@@ -325,10 +455,14 @@ impl OffscreenGl {
 
 impl Drop for OffscreenGl {
     fn drop(&mut self) {
+        self.ion = None;
         unsafe {
             if self.fbo != 0 {
                 (self.gl.delete_framebuffers)(1, &self.fbo);
                 (self.gl.delete_renderbuffers)(2, self.buffers.as_ptr());
+            }
+            if let (Some(pack), true) = (&self.gl.pack, self.pbos[0] != 0) {
+                (pack.delete_buffers)(2, self.pbos.as_ptr());
             }
             (self.make_current)(
                 self.display,

@@ -2,7 +2,7 @@
 # Builds the cores that draw with the GPU for the H700's Mali, against OpenGL ES. The buildbot's
 # aarch64 builds of these are made for desktop GL, which BaseOS does not have.
 #
-#   build.sh CORE COMMIT WORK OUT        CORE is parallel_n64, flycast, ppsspp or vecx
+#   build.sh CORE COMMIT WORK OUT        CORE is parallel_n64, flycast, flycast_xtreme, ppsspp or vecx
 #
 # Runs on an aarch64 Debian bullseye box, as the release does, or cross-compiles from an amd64 one
 # (cores/gles/Dockerfile); bullseye's glibc is older than the device's, so what it builds loads
@@ -65,6 +65,17 @@ flycast)
 		-DUSE_VULKAN=OFF -DUSE_OPENMP=OFF
 	cmake --build "$work/build" -j"$jobs"
 	built="$work/build/flycast_libretro.so"
+	;;
+flycast_xtreme)
+	# KMFDManic's Flycast Xtreme, which muOS ships: libretro's Flycast of 2021 tuned for ARM.
+	fetch KMFDManic/morpheuscast_xtreme
+	# Its GLdouble is a float, which bullseye's gl2ext.h has already declared a double.
+	sed -i 's/^typedef GLfloat GLdouble;/typedef double GLdouble;/' \
+		"$work/core/libretro-common/include/glsm/glsm.h"
+	# CPUFLAGS from the environment, which the arm64 platform's own add to.
+	CPUFLAGS="$cpu" make -C "$work" -j"$jobs" platform=arm64 ARCH=arm64 HAVE_OPENMP=0 \
+		CC=${cross}gcc CXX=${cross}g++ CC_AS=${cross}gcc
+	built="$work/km_flycast_xtreme_libretro.so"
 	;;
 ppsspp)
 	fetch hrydgard/ppsspp

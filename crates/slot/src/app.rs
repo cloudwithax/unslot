@@ -5,7 +5,7 @@ use std::sync::Arc;
 use slot_gfx::{Canvas, Layout, OUT_H, OUT_W};
 use slot_input::{Action, Btn, MENU_DOUBLE_TAP_MS, MUTE_CHORD_MS};
 use slot_power::{Battery, Charge, LedState, LidPolicy, Power};
-use slot_retro::LinkChannel;
+use slot_retro::{CoreOption, LinkChannel};
 use slot_store::{
     format_stamp, parse_stamp, read_slot_state, scan, write_slot_state, BezelPick, Cart, Core,
     GbPalette, Platform, Recent, Shader, SlotState, StateEntry, StateRing, WallpaperPick,
@@ -15,10 +15,11 @@ use slot_ui::{
     board_from, board_zoom, draw_empty_slot, draw_footer, draw_ground, draw_slot_name,
     draw_sticker, ease, footer_ink, grown, lid_at, lid_from, lift_of, on_board, repeat_gap,
     shelf_cart_at, ButtonLegend, ClockPicker, Draw, FfState, Hud, HudKind, Icon, KeyInput,
-    KeyOutcome, Keyboard, Legend, LinkBadge, ListIcon, ListPage, ListRow, Millis, Mould, Placed,
-    Polaroids, PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow, QuickValue, Refusal,
-    Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H, CHIP_U, CHIP_V, CHIP_W, HINT_EDGE, HOP_LIFT,
-    MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W, TURN_PAD,
+    KeyOutcome, Keyboard, Legend, LinkBadge, ListIcon, ListPage, ListRow, Media, Millis, Mould,
+    Placed, Polaroids, PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow, QuickValue,
+    Refusal, Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H, CHIP_U, CHIP_V, CHIP_W, HINT_EDGE,
+    HOP_LIFT, MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W,
+    TURN_PAD,
 };
 
 use crate::audio::Sfx;
@@ -30,7 +31,7 @@ use crate::link_screen::LinkSprites;
 use crate::link_start::{link_port, LinkFail, LinkProgress, LinkStarter, LinkStep};
 use crate::persist::{self, Snapshot};
 use crate::scrape::{ScrapeView, Scraper, SsState};
-use crate::services::{Services, ServicesView, Tailnet, Wanted};
+use crate::services::{Services, ServicesView, SyncProgress, Tailnet, Wanted};
 use crate::update::{Part, Stage, Track, Updates, UpdatesView};
 use crate::video_mode::{self, VideoMode};
 use crate::wifi::{Busy, Network, Security, Wifi, WifiView};
@@ -41,6 +42,13 @@ const INSERT_HOLD_S: f32 = 0.28;
 pub const SEATED_AT: f32 = INSERT_S - INSERT_HOLD_S;
 
 pub const EJECT_S: f32 = SEATED_AT;
+
+/// A disc spins up once it seats and the screen goes black before its core starts, so the
+/// heavier systems' cores do not load over the animation.
+const SPIN_S: f32 = 0.9;
+const SPIN_UP_S: f32 = 0.5;
+const SPIN_RAD_S: f32 = 4.0 * std::f32::consts::PI;
+const DARK_S: f32 = 0.35;
 
 const EJECT_HOLD_S: f32 = 0.35;
 
@@ -474,6 +482,10 @@ pub struct App {
     quick_bezel_faces: [Option<[(TexId, u32, u32); 2]>; Platform::COUNT],
     game_bezel: Option<TexId>,
     in_game_menu: Option<QuickRow>,
+    /// The running core's own settings and the one picked, while Select+X has them over the game.
+    core_options: Option<(Vec<CoreOption>, usize)>,
+    core_options_wanted: bool,
+    core_option_pending: Option<(String, String)>,
     /// 0 while the pause footer is off the bottom, 1 when it sits in the carousel's place.
     footer: f32,
     footer_row: Option<QuickRow>,
@@ -498,6 +510,8 @@ pub struct App {
     shelf_clock: slot_ui::Printed,
     hud: Hud,
     screen: f32,
+    /// The game opens out of black, after a disc's launch went dark.
+    launched_dark: bool,
     lift: f32,
     eject_overlay: f32,
     panel: (u32, u32),
@@ -542,6 +556,15 @@ pub struct App {
     /// Whether Game Art can ask ScreenScraper, read at boot and after a sign in.
     ss_state: SsState,
     page_face: Option<(TexId, u32, u32)>,
+    /// How many files Syncthing had in step when the card's games were last looked through.
+    synced_seen: u64,
+    /// A look through the card's games under way, whether another is wanted when it is done,
+    /// and what one found, waiting for the shelf to be showing.
+    rescan: Option<std::sync::mpsc::Receiver<Vec<Cart>>>,
+    rescan_again: bool,
+    rescanned: Option<Vec<Cart>>,
+    /// The line saying how far Syncthing has got.
+    sync_face: Option<(TexId, u32, u32)>,
 }
 
 /// What a search was for and what it found.
@@ -599,6 +622,24 @@ fn shelves_of(carts: Vec<Cart>) -> Vec<(Rack, Shelf)> {
     rows.into_iter()
         .map(|(rack, carts)| (rack, Shelf::new(carts)))
         .collect()
+}
+
+/// "Syncing 42% · 1.2 GB left · 35 min".
+pub fn sync_line(p: SyncProgress) -> String {
+    let done = p.total.saturating_sub(p.need);
+    let percent = (done * 100).checked_div(p.total).unwrap_or(0).min(99);
+    let left = match p.need {
+        n if n >= 1 << 30 => format!("{:.1} GB", n as f64 / (1u64 << 30) as f64),
+        n => format!("{} MB", n.div_ceil(1 << 20)),
+    };
+    let mut line = format!("Syncing {percent}% \u{b7} {left} left");
+    match p.secs_left {
+        Some(s) if s < 60 => line.push_str(" \u{b7} under a minute"),
+        Some(s) if s < 90 * 60 => line.push_str(&format!(" \u{b7} {} min", s.div_ceil(60))),
+        Some(s) => line.push_str(&format!(" \u{b7} {} h {} min", s / 3600, s % 3600 / 60)),
+        None => {}
+    }
+    line
 }
 
 fn shift_down(draws: &mut [Draw], dy: f32) {
@@ -696,6 +737,9 @@ impl App {
             quick_bezel_faces: [None; Platform::COUNT],
             game_bezel: None,
             in_game_menu: None,
+            core_options: None,
+            core_options_wanted: false,
+            core_option_pending: None,
             footer: 0.0,
             footer_row: None,
             states_from_menu: false,
@@ -718,6 +762,7 @@ impl App {
             shelf_clock: slot_ui::Printed::default(),
             hud: Hud::new(),
             screen: 0.0,
+            launched_dark: false,
             lift: 1.0,
             eject_overlay: 0.0,
             panel: (0, 0),
@@ -754,6 +799,11 @@ impl App {
             relabelled: Vec::new(),
             ss_state: SsState::Off,
             page_face: None,
+            synced_seen: 0,
+            rescan: None,
+            rescan_again: false,
+            rescanned: None,
+            sync_face: None,
         }
     }
 
@@ -2019,6 +2069,74 @@ impl App {
         self.link_player
     }
 
+    pub fn core_options_open(&self) -> bool {
+        self.core_options.is_some()
+    }
+
+    /// Whether the player asked for the core's options, for the session to fetch them.
+    pub fn take_core_options_wanted(&mut self) -> bool {
+        std::mem::take(&mut self.core_options_wanted)
+    }
+
+    /// Opens the core options page on what the core declared, or refuses when it declared none.
+    pub fn show_core_options(&mut self, options: Vec<CoreOption>) {
+        if options.is_empty() || !matches!(self.phase, Phase::Playing { .. }) {
+            return self.refuse();
+        }
+        self.core_options = Some((options, 0));
+    }
+
+    /// The option the player last changed, for the session to hand the core and keep.
+    pub fn take_core_option(&mut self) -> Option<(String, String)> {
+        self.core_option_pending.take()
+    }
+
+    fn core_options_input(&mut self, action: Action) {
+        let Some((options, cursor)) = &mut self.core_options else {
+            return;
+        };
+        let step = match action {
+            Action::GbaDown(Btn::Up) => {
+                *cursor = (*cursor + options.len() - 1) % options.len();
+                return;
+            }
+            Action::GbaDown(Btn::Down) => {
+                *cursor = (*cursor + 1) % options.len();
+                return;
+            }
+            Action::GbaDown(Btn::Left) | Action::ShelfLeft => -1,
+            Action::GbaDown(Btn::Right) | Action::ShelfRight | Action::GbaDown(Btn::A) => 1,
+            Action::GbaDown(Btn::B) | Action::CoreOptions | Action::QuickMenu => {
+                self.core_options = None;
+                return;
+            }
+            _ => return,
+        };
+        let o = &mut options[*cursor];
+        let at = o.values.iter().position(|v| *v == o.value).unwrap_or(0) as isize;
+        let n = o.values.len() as isize;
+        o.value = o.values[(at + step).rem_euclid(n) as usize].clone();
+        self.core_option_pending = Some((o.key.clone(), o.value.clone()));
+    }
+
+    fn core_options_page(&self, options: &[CoreOption], cursor: usize) -> ListPage {
+        ListPage {
+            title: "Core Options".into(),
+            status: self.core().text().into(),
+            cursor,
+            rows: options
+                .iter()
+                .map(|o| ListRow {
+                    label: o.label.clone(),
+                    detail: o.value.clone(),
+                    bars: None,
+                    icon: None,
+                })
+                .collect(),
+            legends: vec![back_legend(), Legend::new(ButtonLegend::Right, "Change")],
+        }
+    }
+
     pub fn take_colour_correction(&mut self) -> Option<bool> {
         self.colour_pending.take()
     }
@@ -2157,6 +2275,7 @@ impl App {
                 | Action::ShelfRight
                 | Action::QuickMenu
                 | Action::GameMenu
+                | Action::CoreOptions
                 | Action::Polaroids
         );
         let (true, Some(before), Some(after)) = (menu_button, before, self.feel()) else {
@@ -2265,6 +2384,12 @@ impl App {
         if self.game_menu.is_some() {
             return self.game_menu_input(action);
         }
+        if self.core_options.is_some() && matches!(self.phase, Phase::Playing { .. }) {
+            if action != Action::Eject {
+                return self.core_options_input(action);
+            }
+            self.core_options = None;
+        }
         if let (Some(row), Phase::Playing { .. }) = (self.in_game_menu, &self.phase) {
             if action != Action::Eject {
                 return self.in_game_menu_input(row, action);
@@ -2307,6 +2432,7 @@ impl App {
                 }
                 Action::Eject => self.eject(),
                 Action::GameMenu => self.game_menu_shortcut(),
+                Action::CoreOptions => self.core_options_wanted = true,
                 Action::QuickMenu => self.tap_in_game_menu(Some(QuickRow::PLAY[0])),
                 Action::Polaroids => self.double_tap_states(),
                 Action::SaveState => self.save_state(),
@@ -3185,6 +3311,10 @@ impl App {
 
     /// The page the frontend should draw for the phase, if it is one slot lays out whole.
     pub fn page_model(&self) -> Option<PageModel> {
+        if let (Some((options, cursor)), Phase::Playing { .. }) = (&self.core_options, &self.phase)
+        {
+            return Some(PageModel::List(self.core_options_page(options, *cursor)));
+        }
         match &self.phase {
             Phase::Networks { cursor, note } => Some(PageModel::List(
                 self.networks_page(*cursor, note.as_deref()),
@@ -3828,6 +3958,7 @@ impl App {
         let mut touched = false;
         let mut stepped = false;
         let at = self.shelf_at;
+        let spawn_at = self.spawn_at();
         let next = match &mut self.phase {
             Phase::Shelf => {
                 let shelf = &mut self.shelves[at].1;
@@ -3848,7 +3979,7 @@ impl App {
                 *t += dt;
                 let at = SEATED_AT - Sfx::Insert.lead();
                 touched = !*resumed && was < at && *t >= at;
-                (*t >= INSERT_S && *core_ready).then(|| Phase::Playing {
+                (*t >= INSERT_S.max(spawn_at) && *core_ready).then(|| Phase::Playing {
                     cart: std::mem::take(cart),
                 })
             }
@@ -3879,6 +4010,7 @@ impl App {
         }
         if let Some(phase) = next {
             self.phase = phase;
+            self.launched_dark = spawn_at > 0.0;
             self.refused_from = None;
             let seated = match &self.phase {
                 Phase::Playing { cart } => Some(cart.clone()),
@@ -4087,7 +4219,13 @@ impl App {
                     note: None,
                 };
             }
+            // Games Syncthing brings go on the shelves as they land.
+            if self.services_view.synced != self.synced_seen {
+                self.synced_seen = self.services_view.synced;
+                self.rescan();
+            }
         }
+        self.take_rescan();
         self.play_hold();
         self.repeat_held_dir();
         let offer = self.undo_label();
@@ -4224,7 +4362,8 @@ impl App {
         self.mark_stars();
     }
 
-    fn restock(&mut self, at: usize, carts: Vec<Cart>) {
+    /// Whether the shelf's carts changed.
+    fn restock(&mut self, at: usize, carts: Vec<Cart>) -> bool {
         let stocked = &self.shelves[at].1.carts;
         if stocked.len() == carts.len()
             && stocked
@@ -4232,7 +4371,7 @@ impl App {
                 .zip(&carts)
                 .all(|(a, b)| a.platform == b.platform && a.stem == b.stem)
         {
-            return;
+            return false;
         }
         let old = self.shelves[at].1.restock(carts);
         self.orphaned.extend(old);
@@ -4240,6 +4379,97 @@ impl App {
         if self.shelf_at == at && empty {
             self.shelf_at = self.next_shelf(1).unwrap_or(0);
         }
+        true
+    }
+
+    /// Looks through the card's games again, on a thread of its own.
+    fn rescan(&mut self) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        if self.rescan.is_some() {
+            self.rescan_again = true;
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("slot-rescan".into())
+            .spawn(move || {
+                if let Ok(carts) = scan(&root) {
+                    let _ = tx.send(carts);
+                }
+            });
+        match spawned {
+            Ok(_) => self.rescan = Some(rx),
+            Err(e) => eprintln!("slot: rescan: {e}"),
+        }
+    }
+
+    /// Puts what a rescan found on the shelves once the shelf is what is showing.
+    fn take_rescan(&mut self) {
+        if let Some(rx) = &self.rescan {
+            match rx.try_recv() {
+                Ok(carts) => {
+                    self.rescanned = Some(carts);
+                    self.rescan = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.rescan = None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+            if self.rescan.is_none() && std::mem::take(&mut self.rescan_again) {
+                self.rescan();
+            }
+        }
+        if self.on_shelf() && self.core_picker.is_none() {
+            if let Some(carts) = self.rescanned.take() {
+                self.restock_games(carts);
+            }
+        }
+    }
+
+    /// Gives each system's shelf the games now on the card, each staying on the cart it was on.
+    fn restock_games(&mut self, carts: Vec<Cart>) {
+        let shelf_at = self.shelf_at;
+        for (at, (rack, fresh)) in shelves_of(carts).into_iter().enumerate() {
+            if rack.platform().is_none() {
+                continue;
+            }
+            let shelf = &self.shelves[at].1;
+            let (was, picked) = (
+                shelf.index,
+                shelf.carts.get(shelf.index).map(|c| c.rom.clone()),
+            );
+            if !self.restock(at, fresh.carts) {
+                continue;
+            }
+            let shelf = &mut self.shelves[at].1;
+            let i = picked
+                .and_then(|rom| shelf.carts.iter().position(|c| c.rom == rom))
+                .unwrap_or_else(|| was.min(shelf.carts.len().saturating_sub(1)));
+            shelf.select(i);
+        }
+        if self.shelf().carts.is_empty() {
+            if let Some(at) = self.next_shelf(1) {
+                self.shelf_at = at;
+            }
+        }
+        self.restock_recents();
+        self.restock_favorites();
+        if self.shelf_at != shelf_at {
+            self.shelf_platform = slot_ui::Printed::default();
+            self.slot_letter = None;
+            self.shelf_named = None;
+            self.name_pending = true;
+        }
+    }
+
+    /// The line at the top of the shelf while Syncthing is fetching.
+    pub fn sync_text(&self) -> Option<String> {
+        self.services_view.syncing.map(sync_line)
+    }
+
+    pub fn set_sync_face(&mut self, face: Option<(TexId, u32, u32)>) {
+        self.sync_face = face;
     }
 
     fn toggle_favorite(&mut self) {
@@ -4365,6 +4595,68 @@ impl App {
         self.refusal.is_some_and(|r| r.active(now))
     }
 
+    /// When into the insert its core may start: at once, but for a disc, once it has spun and
+    /// the screen has gone black.
+    fn spawn_at(&self) -> f32 {
+        let Phase::Inserting {
+            cart,
+            resumed: false,
+            ..
+        } = &self.phase
+        else {
+            return 0.0;
+        };
+        match self.shelf().find(cart) {
+            Some((c, _)) if Media::of(c.platform) == Some(Media::Disc) => {
+                INSERT_S + SPIN_S + DARK_S
+            }
+            _ => 0.0,
+        }
+    }
+
+    pub fn may_spawn_core(&self) -> bool {
+        match &self.phase {
+            Phase::Inserting { t, .. } => *t >= self.spawn_at(),
+            _ => true,
+        }
+    }
+
+    /// How far round the seated disc has turned, spinning up from when it seats.
+    fn disc_turn(&self) -> f32 {
+        let Phase::Inserting { t, .. } = &self.phase else {
+            return 0.0;
+        };
+        if self.spawn_at() == 0.0 {
+            return 0.0;
+        }
+        let s = (t - SEATED_AT).max(0.0);
+        match s < SPIN_UP_S {
+            true => SPIN_RAD_S * s * s / (2.0 * SPIN_UP_S),
+            false => SPIN_RAD_S * (s - SPIN_UP_S / 2.0),
+        }
+    }
+
+    /// How black the screen has gone over a disc's spin, ahead of its core starting.
+    fn launch_dark(&self) -> f32 {
+        let (Phase::Inserting { t, .. }, at) = (&self.phase, self.spawn_at()) else {
+            return 0.0;
+        };
+        if at == 0.0 {
+            return 0.0;
+        }
+        ((t - (at - DARK_S)) / DARK_S).clamp(0.0, 1.0)
+    }
+
+    fn black(&self, alpha: f32, out: &mut Vec<Draw>) {
+        out.push(Draw::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: self.canvas().w,
+            h: OUT_H as f32,
+            colour: [0.0, 0.0, 0.0, alpha],
+        });
+    }
+
     pub fn seat(&self) -> f32 {
         match &self.phase {
             Phase::Shelf => 0.0,
@@ -4478,6 +4770,17 @@ impl App {
                     footer_ink(self.light()),
                     out,
                 );
+                if let Some((tex, w, h)) = self.sync_face {
+                    let (w, h) = (w as f32, h as f32);
+                    out.push(Draw::Tex {
+                        x: self.canvas().centred(w).floor(),
+                        y: ((slot_ui::PLATE_H - h) / 2.0).floor(),
+                        w,
+                        h,
+                        tex,
+                        alpha: 1.0,
+                    });
+                }
             }
             Phase::About => {
                 slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
@@ -4516,6 +4819,14 @@ impl App {
                         .draw_row(self.canvas(), Some(cart), 0.0, self.seat(), 1.0, out);
                 }
                 self.chrome(cart, 0.0, out);
+                let dark = self.launch_dark();
+                if dark > 0.0 {
+                    self.black(dark, out);
+                }
+            }
+            Phase::Playing { .. } if self.launched_dark && self.screen < 1.0 => {
+                self.push_game(out);
+                self.black(1.0 - self.screen, out);
             }
             Phase::Ejecting { .. }
                 if self.framed_panel()
@@ -4590,6 +4901,19 @@ impl App {
                     out,
                 );
             }
+        }
+        if let (Some(_), Phase::Playing { .. }, Some((tex, w, h))) =
+            (&self.core_options, &self.phase, self.page_face)
+        {
+            slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
+            out.push(Draw::Tex {
+                x: self.canvas().centred(w as f32).round(),
+                y: ((OUT_H - h) / 2) as f32,
+                w: w as f32,
+                h: h as f32,
+                tex,
+                alpha: 1.0,
+            });
         }
         self.draw_menu_footer(out);
         self.draw_close_footer(out);
@@ -4696,6 +5020,7 @@ impl App {
             rest,
             scale,
             seat: 1.0,
+            turn: 0.0,
             alert: None,
             dim: 0.0,
             screen: 0.0,
@@ -4766,6 +5091,7 @@ impl App {
             rest,
             scale,
             seat: self.seat(),
+            turn: self.disc_turn(),
             alert: self.alert_face.filter(|_| alpha > 0.0).map(|t| (t, alpha)),
             dim,
             screen: self.screen,
@@ -5229,24 +5555,33 @@ impl App {
         };
         let (state, sav) = trusted_write(snapshot.as_ref(), state, "eject");
         let state = state.filter(|_| self.state.eject_save);
-        match persist::eject(
-            root,
-            self.platform,
-            self.core,
-            stem,
-            state.as_deref(),
-            sav.as_deref(),
-        ) {
-            Ok(()) => {
-                self.state.cart = None;
-                self.state.cart_platform = None;
-                self.card_writes.ok();
-            }
-            Err(e) => {
+        // The card write runs beside the eject, which a disc's tens of MB held up otherwise.
+        let (root, platform, core, stem) =
+            (root.clone(), self.platform, self.core, stem.to_owned());
+        let failing = self.card_writes.clone();
+        let write = move || {
+            let written = persist::eject(
+                &root,
+                platform,
+                core,
+                &stem,
+                state.as_deref(),
+                sav.as_deref(),
+            );
+            if let Err(e) = &written {
                 eprintln!("slot: eject: {e}");
-                self.card_writes.failed("eject", &e);
             }
+            failing.wrote("eject", &written);
+        };
+        match std::thread::Builder::new()
+            .name("slot-eject-save".into())
+            .spawn(write)
+        {
+            Ok(h) => self.pending_save = Some(h),
+            Err(e) => eprintln!("slot: eject: no writer thread: {e}"),
         }
+        self.state.cart = None;
+        self.state.cart_platform = None;
     }
 
     fn doze(&mut self) {

@@ -529,10 +529,10 @@ fn a_and_b_on_their_own_are_untouched_by_the_shader_chord() {
 }
 
 #[test]
-fn x_under_select_reaches_the_game() {
+fn x_under_select_opens_the_core_options() {
     let mut g = Gestures::new();
     assert!(g.feed(Down(Select), 0).is_empty());
-    assert_eq!(g.feed(Down(X), 10), vec![GbaDown(Select), GbaDown(X)]);
+    assert_eq!(g.feed(Down(X), 10), vec![CoreOptions]);
 }
 
 #[test]

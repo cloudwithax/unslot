@@ -417,11 +417,14 @@ fn the_kernel_log_keeps_only_card_trouble() {
 [   40.675342] FAT-fs (mmcblk0p7): Volume was not properly unmounted. Some data may be corrupt. Please run fsck.
 [  612.000001] FAT-fs (mmcblk0p7): error, invalid access to FAT (entry 0x0001a2b3)
 [  612.000002] FAT-fs (mmcblk0p7): Filesystem has been set read-only
+[  650.000000] EXT4-fs (mmcblk0p7): mounted filesystem with ordered data mode. Opts: noatime
+[  650.000001] EXT4-fs error (device mmcblk0p7): ext4_find_entry:1455: inode #2: comm slot: reading directory lblock 0
 [  700.000000] mmcblk1: r/w command failed, status = 0x80000900
 [  700.000001] blk_update_request: I/O error, dev mmcblk1, sector 1234
 ";
     let kept = slot_power::card_kernel_lines(dmesg);
-    assert_eq!(kept.len(), 7, "{kept:#?}");
+    assert_eq!(kept.len(), 8, "{kept:#?}");
+    assert!(kept.iter().all(|l| !l.contains("mounted filesystem")));
     assert!(kept.iter().all(|l| !l.contains("read-only switch")));
     assert!(kept.iter().all(|l| !l.contains("thermal")));
 }

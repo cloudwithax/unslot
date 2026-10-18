@@ -582,6 +582,7 @@ pub fn card_kernel_lines(dmesg: &str) -> Vec<String> {
         .filter(|l| {
             let l = l.to_ascii_lowercase();
             l.contains("fat-fs")
+                || l.contains("ext4-fs error")
                 || l.contains("exfat")
                 || l.contains("remount")
                 || l.contains("i/o error")

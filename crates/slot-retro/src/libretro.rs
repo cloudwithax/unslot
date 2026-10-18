@@ -4,10 +4,13 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Condvar, Mutex};
 
 use libloading::Library;
 
-use crate::core::{AvInfo, ButtonMask, CoreError, RetroCore, Sticks, GBA_H, GBA_W};
+use crate::core::{
+    AvInfo, ButtonMask, CoreError, CoreOption, RetroCore, SharedFrame, Sticks, GBA_H, GBA_W,
+};
 use crate::ffi::*;
 use crate::hw::{
     self, Hw, HwRenderCallback, CONTEXT_OPENGLES3, FRAME_IN_FRAMEBUFFER, GET_PREFERRED_HW_RENDER,
@@ -59,6 +62,8 @@ struct Host {
     options: std::collections::HashMap<String, std::ffi::CString>,
     options_dirty: bool,
     declared: std::collections::HashMap<String, Vec<String>>,
+    /// Each declared option's key and what the core calls it, in the order it gave them.
+    labels: Vec<(String, String)>,
     /// The context of a core that draws with the GPU.
     hw: Option<Hw>,
 }
@@ -114,6 +119,31 @@ extern "C" fn slot_retro_log_line(level: c_uint, line: *const c_char) {
         .get(level as usize)
         .unwrap_or(&"log");
     eprintln!("core {level}: {}", line.trim_end());
+}
+
+/// Microseconds on a steady clock, which Flycast reads unasked around its save states.
+extern "C" fn perf_time_usec() -> i64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_micros() as i64
+}
+
+extern "C" fn perf_cpu_features() -> u64 {
+    0
+}
+
+extern "C" fn perf_counter() -> u64 {
+    perf_time_usec() as u64
+}
+
+extern "C" fn perf_noop(_counter: *mut c_void) {}
+
+extern "C" fn perf_log_noop() {}
+
+/// Lets a core's thread through its audio wait, as Flycast asks, unchecked, to unload.
+unsafe extern "C" fn clear_thread_waits(clear: c_uint, _data: *mut c_void) -> bool {
+    NO_AUDIO_WAIT.store(clear != 0, Ordering::Release);
+    THREAD_AUDIO_TAKEN.notify_all();
+    true
 }
 
 unsafe extern "C" fn set_rumble_state(port: c_uint, effect: c_uint, strength: u16) -> bool {
@@ -192,9 +222,14 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
         }
         SET_VARIABLES => {
             if data.is_null() {
-                return with_host(|h| h.declared.clear()).is_some();
+                return with_host(|h| {
+                    h.declared.clear();
+                    h.labels.clear();
+                })
+                .is_some();
             }
             let mut list = std::collections::HashMap::new();
+            let mut labels = Vec::new();
             let mut p = data as *const Variable;
             for _ in 0..4096 {
                 let var = &*p;
@@ -204,26 +239,28 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
                 let Ok(key) = std::ffi::CStr::from_ptr(var.key).to_str() else {
                     break;
                 };
-                let values = if var.value.is_null() {
-                    Vec::new()
+                let (label, values) = if var.value.is_null() {
+                    (key.to_string(), Vec::new())
                 } else {
                     std::ffi::CStr::from_ptr(var.value)
                         .to_str()
                         .ok()
                         .and_then(|v| v.split_once(';'))
-                        .map(|(_, values)| {
-                            values
-                                .trim()
-                                .split('|')
-                                .map(|s| s.trim().to_string())
-                                .collect()
+                        .map(|(label, values)| {
+                            let values = values.trim().split('|').map(|s| s.trim().to_string());
+                            (label.trim().to_string(), values.collect())
                         })
-                        .unwrap_or_default()
+                        .unwrap_or_else(|| (key.to_string(), Vec::new()))
                 };
                 list.insert(key.to_string(), values);
+                labels.push((key.to_string(), label));
                 p = p.add(1);
             }
-            with_host(|h| h.declared = list).is_some()
+            with_host(|h| {
+                h.declared = list;
+                h.labels = labels;
+            })
+            .is_some()
         }
         GET_RUMBLE_INTERFACE => {
             if data.is_null() {
@@ -243,6 +280,37 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
                 true => slot_retro_log as *const c_void,
                 false => log_noop as *const c_void,
             };
+            true
+        }
+        GET_PERF_INTERFACE => {
+            if data.is_null() {
+                return false;
+            }
+            *(data as *mut PerfCallback) = PerfCallback {
+                get_time_usec: perf_time_usec as *const c_void,
+                get_cpu_features: perf_cpu_features as *const c_void,
+                get_perf_counter: perf_counter as *const c_void,
+                perf_register: perf_noop as *const c_void,
+                perf_start: perf_noop as *const c_void,
+                perf_stop: perf_noop as *const c_void,
+                perf_log: perf_log_noop as *const c_void,
+            };
+            true
+        }
+        // Flycast Xtreme sends its sound only when the frontend says it is not fast-forwarding;
+        // slot fast-forwards by running frames, so the core never is.
+        GET_FASTFORWARDING => {
+            if data.is_null() {
+                return false;
+            }
+            *(data as *mut bool) = false;
+            true
+        }
+        GET_CLEAR_ALL_THREAD_WAITS_CB => {
+            if data.is_null() {
+                return false;
+            }
+            *(data as *mut EnvironmentFn) = clear_thread_waits;
             true
         }
         SET_AUDIO_BUFFER_STATUS_CALLBACK => {
@@ -314,6 +382,9 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
                     fbo: 0,
                     readback: Vec::new(),
                     frames: 0,
+                    share: false,
+                    shared: None,
+                    buffers: None,
                 });
                 h.canvas = Canvas::Native;
             })
@@ -575,23 +646,52 @@ unsafe extern "C" fn audio_sample(left: i16, right: i16) {
     with_host(|h| h.audio.extend_from_slice(&[left, right]));
 }
 
+/// Sound from a core that makes it on a thread of its own, where no host is bound: Flycast Xtreme
+/// does, and was silent.
+static THREAD_AUDIO: Mutex<Vec<i16>> = Mutex::new(Vec::new());
+static THREAD_AUDIO_TAKEN: Condvar = Condvar::new();
+/// Set while the core has asked for its threads' waits cleared, as it does to unload.
+static NO_AUDIO_WAIT: AtomicBool = AtomicBool::new(false);
+/// About three frames of sound: past it, a core's own thread waits for slot to take some, as a
+/// RetroArch audio driver makes it, since that wait is all that keeps Xtreme to time.
+const THREAD_AUDIO_AHEAD: usize = 8192;
+
 unsafe extern "C" fn audio_batch(data: *const i16, frames: usize) -> usize {
     if !data.is_null() {
-        with_host(|h| {
-            h.audio
-                .extend_from_slice(std::slice::from_raw_parts(data, frames * 2))
-        });
+        let samples = std::slice::from_raw_parts(data, frames * 2);
+        if with_host(|h| h.audio.extend_from_slice(samples)).is_none() {
+            let mut audio = THREAD_AUDIO.lock().unwrap_or_else(|e| e.into_inner());
+            while audio.len() > THREAD_AUDIO_AHEAD && !NO_AUDIO_WAIT.load(Ordering::Acquire) {
+                let (a, wait) = THREAD_AUDIO_TAKEN
+                    .wait_timeout(audio, std::time::Duration::from_millis(100))
+                    .unwrap_or_else(|e| e.into_inner());
+                audio = a;
+                if wait.timed_out() {
+                    break;
+                }
+            }
+            audio.extend_from_slice(samples);
+        }
     }
     frames
 }
 
+fn take_thread_audio(into: &mut Vec<i16>) {
+    into.append(&mut THREAD_AUDIO.lock().unwrap_or_else(|e| e.into_inner()));
+    THREAD_AUDIO_TAKEN.notify_all();
+}
+
 unsafe extern "C" fn input_poll() {}
+
+/// The pads as last handed to the core, for a core that reads them from a thread of its own, where
+/// no host is bound: Flycast Xtreme does, and found every button up.
+static PADS: Mutex<([u16; 2], [Sticks; 2])> = Mutex::new(([0; 2], [[0; 4]; 2]));
 
 unsafe extern "C" fn input_state(port: c_uint, device: c_uint, index: c_uint, id: c_uint) -> i16 {
     // The low byte is the base device; the rest names a subclass the core may have made of it.
     let device = device & 0xff;
-    with_host(|h| {
-        let Some(&input) = h.inputs.get(port as usize) else {
+    let read = |inputs: &[u16; 2], sticks: &[Sticks; 2]| {
+        let Some(&input) = inputs.get(port as usize) else {
             return 0;
         };
         match (device, index) {
@@ -607,11 +707,14 @@ unsafe extern "C" fn input_state(port: c_uint, device: c_uint, index: c_uint, id
                     0
                 }
             }
-            (DEVICE_ANALOG, 0 | 1) if id < 2 => h.sticks[port as usize][(index * 2 + id) as usize],
+            (DEVICE_ANALOG, 0 | 1) if id < 2 => sticks[port as usize][(index * 2 + id) as usize],
             _ => 0,
         }
+    };
+    with_host(|h| read(&h.inputs, &h.sticks)).unwrap_or_else(|| {
+        let pads = PADS.lock().unwrap_or_else(|e| e.into_inner());
+        read(&pads.0, &pads.1)
     })
-    .unwrap_or(0)
 }
 
 pub struct LibretroCore {
@@ -765,6 +868,7 @@ impl LibretroCore {
             options: std::collections::HashMap::new(),
             options_dirty: false,
             declared: std::collections::HashMap::new(),
+            labels: Vec::new(),
             hw: None,
         });
         unsafe {
@@ -859,6 +963,23 @@ impl RetroCore for LibretroCore {
         LibretroCore::set_option(self, key, value);
     }
 
+    fn core_options(&self) -> Vec<CoreOption> {
+        let host = &self.host;
+        host.labels
+            .iter()
+            .filter_map(|(key, label)| {
+                let values = host.declared.get(key).filter(|v| !v.is_empty())?.clone();
+                let value = self.option(key).unwrap_or_else(|| values[0].clone());
+                Some(CoreOption {
+                    key: key.clone(),
+                    label: label.clone(),
+                    values,
+                    value,
+                })
+            })
+            .collect()
+    }
+
     fn load(&mut self, rom: &Path) -> Result<(), CoreError> {
         self.unload();
         self.state_size = None;
@@ -916,6 +1037,7 @@ impl RetroCore for LibretroCore {
             return;
         }
         self.host.inputs = [p1.0, p2.0];
+        *PADS.lock().unwrap_or_else(|e| e.into_inner()) = (self.host.inputs, self.host.sticks);
         let _a = Active::bind(&mut self.host);
         unsafe { (self.api.run)() };
     }
@@ -927,6 +1049,15 @@ impl RetroCore for LibretroCore {
 
     fn video_xrgb8888(&self) -> &[u8] {
         &self.host.video
+    }
+
+    fn shared_frame(&mut self) -> Option<SharedFrame> {
+        let hw = self.host.hw.as_mut()?;
+        hw.share = true;
+        Some(SharedFrame {
+            index: hw.shared?,
+            buffers: hw.buffers.take(),
+        })
     }
 
     fn video_size(&self) -> (u32, u32) {
@@ -975,7 +1106,9 @@ impl RetroCore for LibretroCore {
     }
 
     fn take_audio(&mut self) -> Vec<i16> {
-        std::mem::take(&mut self.host.audio)
+        let mut audio = std::mem::take(&mut self.host.audio);
+        take_thread_audio(&mut audio);
+        audio
     }
 
     fn serialize(&mut self) -> Result<Vec<u8>, CoreError> {
@@ -1087,6 +1220,7 @@ mod tests {
             options,
             options_dirty,
             declared: HashMap::new(),
+            labels: Vec::new(),
             hw: None,
         })
     }
@@ -1929,6 +2063,85 @@ mod tests {
         let mask = |port| unsafe { input_state(port, DEVICE_JOYPAD, 0, JOYPAD_MASK) } as u16;
         assert_eq!(mask(0), ButtonMask::A);
         assert_eq!(mask(1), ButtonMask::B | ButtonMask::START);
+    }
+
+    #[test]
+    fn input_state_answers_a_core_thread_with_no_host() {
+        *PADS.lock().unwrap() = ([ButtonMask::A, 0], [[0, 0, 0, 0], [0; 4]]);
+        let mask = std::thread::spawn(|| unsafe { input_state(0, DEVICE_JOYPAD, 0, JOYPAD_MASK) })
+            .join()
+            .unwrap();
+        *PADS.lock().unwrap() = ([0; 2], [[0; 4]; 2]);
+        assert_eq!(mask as u16, ButtonMask::A, "the pads last handed over, not none held");
+    }
+
+    #[test]
+    fn flycast_finds_the_callbacks_it_calls_unasked() {
+        let mut clear: Option<EnvironmentFn> = None;
+        let ok = unsafe {
+            environment(GET_CLEAR_ALL_THREAD_WAITS_CB, &mut clear as *mut _ as *mut c_void)
+        };
+        assert!(ok && clear.is_some(), "unloading calls it without a check");
+
+        let mut perf = PerfCallback {
+            get_time_usec: ptr::null(),
+            get_cpu_features: ptr::null(),
+            get_perf_counter: ptr::null(),
+            perf_register: ptr::null(),
+            perf_start: ptr::null(),
+            perf_stop: ptr::null(),
+            perf_log: ptr::null(),
+        };
+        let ok = unsafe { environment(GET_PERF_INTERFACE, &mut perf as *mut _ as *mut c_void) };
+        assert!(ok && !perf.get_time_usec.is_null(), "save states time themselves with it");
+
+        let mut ff = true;
+        let ok = unsafe { environment(GET_FASTFORWARDING, &mut ff as *mut bool as *mut c_void) };
+        assert!(ok && !ff, "it sends no sound while it thinks it is fast-forwarding");
+    }
+
+    /// The tests that fill THREAD_AUDIO, one at a time.
+    static THREAD_AUDIO_TEST: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn audio_from_a_core_thread_with_no_host_is_kept() {
+        let _serial = THREAD_AUDIO_TEST.lock().unwrap();
+        let frames = [1i16, 2, 3, 4];
+        std::thread::spawn(move || unsafe { audio_batch(frames.as_ptr(), 2) })
+            .join()
+            .unwrap();
+        let kept = std::mem::take(&mut *THREAD_AUDIO.lock().unwrap());
+        assert_eq!(kept, frames, "the samples, not dropped for want of a host");
+    }
+
+    #[test]
+    fn a_core_thread_far_ahead_on_sound_waits_until_some_is_taken() {
+        let _serial = THREAD_AUDIO_TEST.lock().unwrap();
+        *THREAD_AUDIO.lock().unwrap() = vec![0; THREAD_AUDIO_AHEAD + 2];
+        let frames = [7i16; 2];
+        let core = std::thread::spawn(move || unsafe { audio_batch(frames.as_ptr(), 1) });
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        assert!(!core.is_finished(), "it waits while slot is behind");
+
+        let mut taken = Vec::new();
+        take_thread_audio(&mut taken);
+        core.join().unwrap();
+        assert_eq!(taken.len(), THREAD_AUDIO_AHEAD + 2);
+        assert_eq!(std::mem::take(&mut *THREAD_AUDIO.lock().unwrap()), frames);
+    }
+
+    #[test]
+    fn a_cleared_wait_lets_a_core_thread_through() {
+        let _serial = THREAD_AUDIO_TEST.lock().unwrap();
+        *THREAD_AUDIO.lock().unwrap() = vec![0; THREAD_AUDIO_AHEAD + 2];
+        unsafe { clear_thread_waits(1, ptr::null_mut()) };
+        let frames = [7i16; 2];
+        std::thread::spawn(move || unsafe { audio_batch(frames.as_ptr(), 1) })
+            .join()
+            .unwrap();
+        unsafe { clear_thread_waits(0, ptr::null_mut()) };
+        assert_eq!(THREAD_AUDIO.lock().unwrap().len(), THREAD_AUDIO_AHEAD + 4);
+        THREAD_AUDIO.lock().unwrap().clear();
     }
 
     #[test]

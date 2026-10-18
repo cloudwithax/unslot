@@ -139,11 +139,12 @@ fn eject_preserves_the_levels() {
 }
 
 #[test]
-fn ejecting_a_playing_cart_flushes_before_the_animation_starts() {
+fn ejecting_a_playing_cart_saves_it_beside_the_animation() {
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
     let mut a = app_playing_in(d.path(), "Emerald");
     a.apply(Action::Eject);
     assert!(matches!(a.phase(), Phase::Ejecting { .. }));
+    a.settle_saves();
     let r = StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Emerald");
     assert_eq!(
         r.read_resume().unwrap().expect("nothing was flushed").len(),
@@ -347,6 +348,7 @@ fn an_eject_the_card_refuses_puts_up_a_banner() {
     let _ = std::fs::remove_dir_all(&states);
     std::fs::write(&states, b"").unwrap();
     a.apply(Action::Eject);
+    a.settle_saves();
     a.tick_ms(10);
     assert!(a.card_alarm(), "a refused eject raised no alarm");
 }

@@ -83,6 +83,34 @@ fn insert_does_not_advance_before_the_animation_floor_even_if_the_core_is_instan
     assert!(matches!(a.phase(), Phase::Inserting { .. }));
 }
 
+#[test]
+fn a_disc_spins_and_goes_dark_before_its_core_may_start() {
+    let mut a = app_with_platforms(&[(Platform::Dreamcast, "Crazy Taxi 2")]);
+    a.apply(Action::Insert);
+    assert!(!a.may_spawn_core(), "the core started over the insert");
+    for _ in 0..60 {
+        a.update(1.0 / 60.0);
+    }
+    assert!(
+        !a.may_spawn_core(),
+        "the core may start before the disc has spun"
+    );
+    while !a.may_spawn_core() {
+        a.update(1.0 / 60.0);
+    }
+    assert!(matches!(a.phase(), Phase::Inserting { .. }));
+    a.on_core_ready();
+    a.update(1.0 / 60.0);
+    assert!(matches!(a.phase(), Phase::Playing { .. }));
+}
+
+#[test]
+fn a_cart_may_start_its_core_as_it_goes_in() {
+    let mut a = app_with_carts(&["Emerald"]);
+    a.apply(Action::Insert);
+    assert!(a.may_spawn_core());
+}
+
 fn seconds_until(a: &mut App, done: fn(&App) -> bool) -> f32 {
     let mut t = 0.0;
     while !done(a) && t < 5.0 {

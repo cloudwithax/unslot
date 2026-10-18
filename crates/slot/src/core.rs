@@ -95,6 +95,106 @@ fn open_named(
     link: Option<u8>,
     paths: &[PathBuf],
 ) -> Option<Box<dyn RetroCore>> {
+    #[cfg(feature = "device")]
+    if matches!(core, Core::Flycast | Core::ParallelN64 | Core::Ppsspp)
+        && palette.is_none()
+        && link.is_none()
+    {
+        match open_remote(root, core, platform, serial, colour, paths) {
+            Ok(remote) => return Some(remote),
+            Err(e) => eprintln!(
+                "slot: core host for {}: {e}, running it here",
+                core.as_str()
+            ),
+        }
+    }
+    open_here(root, core, platform, serial, colour, palette, link, paths)
+}
+
+/// Opens a core that draws with the GPU in a process of its own, `slot --core-host`, which has
+/// the GPU to itself where in slot's it would wait on slot's page flips (see slot_retro's
+/// remote).
+#[cfg(feature = "device")]
+fn open_remote(
+    root: &Path,
+    core: Core,
+    platform: Platform,
+    serial: &str,
+    colour: bool,
+    paths: &[PathBuf],
+) -> std::io::Result<Box<dyn RetroCore>> {
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+    use std::process::{Command, Stdio};
+
+    let (ours, theirs) = UnixStream::pair()?;
+    let exe = std::env::current_exe()?;
+    // Run through the loader as slot is, it is the loader that is the exe.
+    let mut cmd = match exe.file_name().and_then(|n| n.to_str()) {
+        Some(n) if n.starts_with("ld-linux") => {
+            let mut cmd = Command::new(&exe);
+            cmd.arg(std::env::args_os().next().unwrap_or_default());
+            cmd
+        }
+        _ => Command::new(&exe),
+    };
+    cmd.arg("--core-host")
+        .arg(root)
+        .arg(core.as_str())
+        .arg(platform.key())
+        .arg(serial)
+        .arg(if colour { "1" } else { "0" })
+        .args(paths)
+        .stdin(Stdio::from(OwnedFd::from(theirs)));
+    let child = cmd.spawn()?;
+    let remote = slot_retro::RemoteCore::new(child, ours)?;
+    eprintln!("slot: {} runs in a core host", core.as_str());
+    Ok(Box::new(remote))
+}
+
+/// `slot --core-host ROOT CORE PLATFORM SERIAL COLOUR PATH...`: opens the core as slot would and
+/// serves it over the socket on stdin until slot hangs up.
+#[cfg(feature = "device")]
+pub fn host(args: &[String]) -> Result<(), String> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+    use std::os::unix::net::UnixStream;
+
+    let [root, core, platform, serial, colour, paths @ ..] = args else {
+        return Err("--core-host needs a root, core, platform, serial, colour and paths".into());
+    };
+    let core = Core::parse(core).ok_or(format!("no core {core}"))?;
+    let platform = Platform::from_key(platform).ok_or(format!("no platform {platform}"))?;
+    let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+    // Gone with slot, whatever it was doing.
+    unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) };
+    // SAFETY: slot hands the socket over as stdin and nothing else here reads it.
+    let stream = UnixStream::from(unsafe { OwnedFd::from_raw_fd(0) });
+    let opened = open_here(
+        Path::new(root),
+        core,
+        platform,
+        serial,
+        colour == "1",
+        None,
+        None,
+        &paths,
+    )
+    .ok_or("no core opened")?;
+    slot_retro::serve(opened, stream);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn open_here(
+    root: &Path,
+    core: Core,
+    platform: Platform,
+    serial: &str,
+    colour: bool,
+    palette: Option<GbPalette>,
+    link: Option<u8>,
+    paths: &[PathBuf],
+) -> Option<Box<dyn RetroCore>> {
     crate::gpu::install();
     root::seed_core_files(root, core);
     let bios = root::bios_dir(root);
@@ -117,6 +217,9 @@ fn open_named(
                     colour,
                     palette,
                 );
+                for (key, value) in slot_store::ini::read(root, &options_file(core)) {
+                    opened.set_option(&key, &value);
+                }
                 if let Some(player) = link {
                     apply_link_options(&mut opened, core, player);
                 }
@@ -127,6 +230,16 @@ fn open_named(
         }
     }
     None
+}
+
+/// Where the options the player chose on the core options page are kept, one file a core, put
+/// over slot's own each time it opens.
+pub fn options_file(core: Core) -> String {
+    format!(
+        "{}/core_options/{}.txt",
+        slot_store::CONFIG_DIR,
+        core.as_str()
+    )
 }
 
 pub fn palette_for(
@@ -203,18 +316,24 @@ pub const H700_OPTIONS: &[(Core, &str, &str)] = &[
         "dynamic_recompiler",
     ),
     (Core::ParallelN64, "parallel-n64-rspplugin", "hle"),
-    (Core::ParallelN64, "parallel-n64-framerate", "automatic"),
     (Core::ParallelN64, "parallel-n64-pak1", "memory"),
     (Core::ParallelN64, "parallel-n64-astick-deadzone", "15"),
-    (Core::Flycast, "reicast_internal_resolution", "640x480"),
+    // Each frame a GPU core draws is read back for the CPU, which on the Mali costs 5 ms at
+    // 320x240 and 29 at 640x480, too much of a frame to leave room for the Dreamcast. Its
+    // threaded rendering is worth ten frames a second, and anisotropic filtering is GPU time a
+    // 320x240 picture does not show. The rest is Flycast Xtreme's tuning, which muOS ships: two
+    // frames skipped after each one drawn, the fast alpha sorting and the quick GD-ROM.
+    (Core::Flycast, "reicast_internal_resolution", "320x240"),
     (Core::Flycast, "reicast_threaded_rendering", "enabled"),
-    (Core::Flycast, "reicast_synchronous_rendering", "disabled"),
     (Core::Flycast, "reicast_enable_dsp", "disabled"),
     (
         Core::Flycast,
         "reicast_alpha_sorting",
         "per-strip (fast, least accurate)",
     ),
+    (Core::Flycast, "reicast_frame_skipping", "2"),
+    (Core::Flycast, "reicast_gdrom_fast_loading", "enabled"),
+    (Core::Flycast, "reicast_anisotropic_filtering", "off"),
     (Core::Flycast, "reicast_per_content_vmus", "All VMUs"),
     (Core::Flycast, "reicast_analog_stick_deadzone", "15%"),
     (Core::Ppsspp, "ppsspp_internal_resolution", "480x272"),

@@ -676,3 +676,71 @@ fn a_screenscraper_login_is_typed_in_on_game_art_and_saved_to_the_card() {
         "Signed in, but ScreenScraper needs unslot's developer ID"
     );
 }
+
+#[test]
+fn games_syncthing_brings_go_on_the_shelves_as_they_land() {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    let set = SlotState {
+        clock_set: true,
+        syncthing: true,
+        password: Some("root".into()),
+        ..SlotState::default()
+    };
+    write_slot_state(d.path(), &set).expect("write slot.state");
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    let seated = a.selected_stem().map(str::to_string);
+    let gb = d.path().join("Games").join(Platform::Gb.dir_name());
+    std::fs::create_dir_all(&gb).unwrap();
+    std::fs::write(gb.join("Tetris.gb"), [0u8; 8]).unwrap();
+    std::fs::write(d.path().join("Games/GBA/Advance Wars.gba"), [0u8; 8]).unwrap();
+    // The pretend Syncthing is looked in on as often as the real one, every few seconds.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut now = 0;
+    let landed = |a: &App| {
+        ["Tetris", "Advance Wars"]
+            .iter()
+            .all(|s| a.carts().any(|c| c.stem == *s))
+    };
+    while !landed(&a) && Instant::now() < deadline {
+        now += 16;
+        a.tick_ms(now);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(landed(&a), "the new games never reached the shelves");
+    assert_eq!(
+        a.selected_stem().map(str::to_string),
+        seated,
+        "the shelf left the cart it was on"
+    );
+}
+
+#[test]
+fn the_sync_line_says_how_far_how_much_and_how_long() {
+    use slot::app::sync_line;
+    use slot::services::SyncProgress;
+    let gb = 1u64 << 30;
+    let line = |need, total, secs_left| {
+        sync_line(SyncProgress {
+            need,
+            total,
+            secs_left,
+        })
+    };
+    assert_eq!(
+        line(gb * 3 / 2, gb * 3, Some(2100)),
+        "Syncing 50% · 1.5 GB left · 35 min"
+    );
+    assert_eq!(
+        line(5 << 20, 10 << 20, Some(30)),
+        "Syncing 50% · 5 MB left · under a minute"
+    );
+    assert_eq!(
+        line(gb, gb * 10, Some(7500)),
+        "Syncing 90% · 1.0 GB left · 2 h 5 min"
+    );
+    assert_eq!(
+        line(1, 1 << 40, None),
+        "Syncing 99% · 1 MB left",
+        "never 100% with some to go"
+    );
+}

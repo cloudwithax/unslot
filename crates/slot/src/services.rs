@@ -8,13 +8,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::json;
 use crate::wireguard::{self, Tunnel};
 
-/// How often the services are looked in on: whether BaseOS's late start brought SSH back, and
-/// how far a Tailscale sign-in has got.
+/// How often the services are looked in on: whether BaseOS's late start brought SSH back, how
+/// far a Tailscale sign-in has got, and how far Syncthing has fetched.
 const POLL: Duration = Duration::from_secs(5);
 
 /// What the app wants running, from what it keeps in slot.state.
@@ -51,6 +51,100 @@ pub struct ServicesView {
     /// What is under way, said for the page.
     pub busy: Option<String>,
     pub error: Option<String>,
+    /// How far Syncthing is through fetching, while it has some to fetch from a device it can
+    /// reach.
+    pub syncing: Option<SyncProgress>,
+    /// How many files Syncthing has in step, which changes as each one lands or goes.
+    pub synced: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct SyncProgress {
+    /// Bytes still to fetch, of the folders' `total`.
+    pub need: u64,
+    pub total: u64,
+    /// How long the rest should take at the pace it has been coming.
+    pub secs_left: Option<u64>,
+}
+
+/// What Syncthing's REST API says, over every folder.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct SyncStatus {
+    pub need: u64,
+    pub total: u64,
+    pub files: u64,
+    /// Bytes received from every device since Syncthing started.
+    pub received: u64,
+    pub connected: bool,
+}
+
+/// Syncthing's API key and its folders' IDs, from its config.xml.
+pub fn syncthing_config(xml: &str) -> Option<(String, Vec<String>)> {
+    let after = |text: &str, open: &str, close: char| {
+        let at = text.find(open)? + open.len();
+        Some(text[at..].split(close).next()?.to_string())
+    };
+    let key = after(xml, "<apikey>", '<').filter(|k| !k.is_empty())?;
+    let folders = xml
+        .split("<folder id=\"")
+        .skip(1)
+        .filter_map(|f| f.split('"').next())
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect();
+    Some((key, folders))
+}
+
+/// Adds up each folder's `db/status` and reads the connections, with `get` fetching a REST path.
+pub fn sync_status(
+    folders: &[String],
+    get: &mut dyn FnMut(&str) -> Option<String>,
+) -> Option<SyncStatus> {
+    let mut status = SyncStatus::default();
+    for folder in folders {
+        let text = get(&format!("/rest/db/status?folder={folder}"))?;
+        let n = |key| json::number(&text, key).unwrap_or(0);
+        status.need += n("needBytes");
+        status.total += n("globalBytes");
+        status.files += n("inSyncFiles");
+    }
+    let text = get("/rest/system/connections")?;
+    status.received = text
+        .find("\"total\"")
+        .and_then(|at| json::number(&text[at..], "inBytesTotal"))
+        .unwrap_or(0);
+    status.connected = text.split("\"connected\"").skip(1).any(|rest| {
+        rest.trim_start()
+            .trim_start_matches(':')
+            .trim_start()
+            .starts_with("true")
+    });
+    Some(status)
+}
+
+/// The pace bytes have been coming at, smoothed over the last few looks.
+#[derive(Default)]
+struct Pace {
+    last: Option<(f64, u64)>,
+    per_sec: f64,
+}
+
+impl Pace {
+    /// How many seconds `need` bytes should take, given `received` so far at `at` seconds.
+    fn secs_left(&mut self, at: f64, received: u64, need: u64) -> Option<u64> {
+        if let Some((then, had)) = self.last {
+            let dt = at - then;
+            if dt > 0.0 {
+                let now = received.saturating_sub(had) as f64 / dt;
+                self.per_sec = match self.per_sec {
+                    0.0 => now,
+                    was => was * 0.7 + now * 0.3,
+                };
+            }
+        }
+        self.last = Some((at, received));
+        (self.per_sec >= 1024.0).then(|| (need as f64 / self.per_sec).ceil() as u64)
+    }
 }
 
 /// What `tailscale status --json` and `up --json` say, the parts slot uses.
@@ -102,6 +196,10 @@ pub trait ServicesBackend: Send {
     fn vpn_down(&mut self);
     /// Puts the tunnel's DNS back if a DHCP renewal wrote over it.
     fn vpn_keep(&mut self, tunnel: &Tunnel);
+    /// How far the running Syncthing is through fetching, when it can be asked.
+    fn sync_status(&mut self) -> Option<SyncStatus> {
+        None
+    }
 }
 
 /// How the worker changes what the app sees.
@@ -160,6 +258,8 @@ fn work(
     // not known.
     let mut have: Option<Wanted> = None;
     let mut tunnel: Option<Tunnel> = None;
+    let mut pace = Pace::default();
+    let start = Instant::now();
     loop {
         let want = match wants.recv_timeout(poll) {
             Ok(mut want) => {
@@ -171,6 +271,10 @@ fn work(
             Err(RecvTimeoutError::Timeout) => {
                 if let Some(have) = &have {
                     look_in(&mut *services, have, tunnel.as_ref(), &set);
+                    if have.syncthing {
+                        let at = start.elapsed().as_secs_f64();
+                        look_at_sync(&mut *services, &mut pace, at, &set);
+                    }
                 }
                 continue;
             }
@@ -223,8 +327,10 @@ fn work(
             };
             set(&mut |v| {
                 v.syncthing_id = None;
+                v.syncing = None;
                 v.busy = run.map(|_| "Starting Syncthing...".into());
             });
+            pace = Pace::default();
             match services.syncthing(run) {
                 Ok(id) => set(&mut |v| v.syncthing_id = id.clone()),
                 Err(e) => errors.push(format!("Syncthing: {e}")),
@@ -306,6 +412,22 @@ fn tailscale_up(services: &mut dyn ServicesBackend, set: SetView) {
     set(&mut |v| v.tailnet = status.tailnet());
 }
 
+fn look_at_sync(services: &mut dyn ServicesBackend, pace: &mut Pace, at: f64, set: SetView) {
+    let Some(status) = services.sync_status() else {
+        return;
+    };
+    let secs_left = pace.secs_left(at, status.received, status.need);
+    let syncing = (status.need > 0 && status.connected).then_some(SyncProgress {
+        need: status.need,
+        total: status.total,
+        secs_left,
+    });
+    set(&mut |v| {
+        v.syncing = syncing;
+        v.synced = status.files;
+    });
+}
+
 fn look_in(
     services: &mut dyn ServicesBackend,
     have: &Wanted,
@@ -356,8 +478,10 @@ fn backend(root: &Path) -> Box<dyn ServicesBackend> {
     }
     #[cfg(not(all(feature = "device", unix)))]
     {
-        let _ = root;
-        Box::new(SimServices::default())
+        Box::new(SimServices {
+            root: Some(root.to_path_buf()),
+            ..SimServices::default()
+        })
     }
 }
 
@@ -371,6 +495,8 @@ pub struct SimServices {
     pub tailscale: bool,
     looks: u32,
     pub vpn: bool,
+    /// The card, whose games the pretend Syncthing has always just finished fetching.
+    pub root: Option<PathBuf>,
 }
 
 impl SimServices {
@@ -432,6 +558,22 @@ impl ServicesBackend for SimServices {
     }
 
     fn vpn_keep(&mut self, _: &Tunnel) {}
+
+    fn sync_status(&mut self) -> Option<SyncStatus> {
+        let games = self.root.as_ref().filter(|_| self.syncthing)?.join("Games");
+        let files = std::fs::read_dir(games)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|system| std::fs::read_dir(system.path()).ok())
+            .map(|d| d.count() as u64)
+            .sum();
+        Some(SyncStatus {
+            files,
+            connected: true,
+            ..SyncStatus::default()
+        })
+    }
 }
 
 #[cfg(all(feature = "device", unix))]
@@ -621,6 +763,34 @@ mod device {
         fn vpn_keep(&mut self, tunnel: &Tunnel) {
             Self::set_dns(tunnel);
         }
+
+        fn sync_status(&mut self) -> Option<SyncStatus> {
+            let xml =
+                std::fs::read_to_string(self.root.join("Config/syncthing/config.xml")).ok()?;
+            let (key, folders) = syncthing_config(&xml)?;
+            sync_status(&folders, &mut |path| syncthing_get(&key, path))
+        }
+    }
+
+    /// A GET against Syncthing's REST API on this device, the body if it answered 200.
+    fn syncthing_get(key: &str, path: &str) -> Option<String> {
+        use std::io::Read;
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", 8384)).ok()?;
+        stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+        stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .ok()?;
+        // HTTP/1.0, so the answer comes whole rather than chunked, and ends with the connection.
+        write!(
+            stream,
+            "GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nX-API-Key: {key}\r\n\r\n"
+        )
+        .ok()?;
+        let mut text = String::new();
+        stream.read_to_string(&mut text).ok()?;
+        let (head, body) = text.split_once("\r\n\r\n")?;
+        head.split(' ').nth(1).filter(|code| *code == "200")?;
+        Some(body.to_string())
     }
 }
 
@@ -656,6 +826,75 @@ mod tests {
         assert!(parse_ts(r#"{"BackendState":"Stopped"}"#).wants_up());
         assert!(parse_ts(r#"{"BackendState":"NeedsLogin","AuthURL":""}"#).wants_up());
         assert!(!parse_ts(r#"{"BackendState":"Running"}"#).wants_up());
+    }
+
+    #[test]
+    fn syncthing_config_gives_the_key_and_the_named_folders() {
+        let xml = r#"<configuration><folder id="unslot-GBA" label="GBA" path="/mnt/sdcard/Games/GBA"></folder>
+<folder id="unslot-PS" label="PS"></folder><gui><apikey>k3y</apikey></gui>
+<defaults><folder id="" label="" path="/mnt/sdcard"></folder></defaults></configuration>"#;
+        let (key, folders) = syncthing_config(xml).unwrap();
+        assert_eq!(key, "k3y");
+        assert_eq!(
+            folders,
+            ["unslot-GBA", "unslot-PS"],
+            "the defaults' folder is no folder"
+        );
+        assert_eq!(syncthing_config("<configuration/>"), None);
+    }
+
+    #[test]
+    fn sync_status_adds_up_the_folders() {
+        let mut get = |path: &str| {
+            Some(match path {
+                "/rest/db/status?folder=a" => r#"{"globalBytes": 100, "inSyncFiles": 3, "needBytes": 40}"#,
+                "/rest/db/status?folder=b" => r#"{"globalBytes": 50, "inSyncFiles": 2, "needBytes": 0}"#,
+                _ => r#"{"connections": {"X": {"inBytesTotal": 7, "connected": true}}, "total": {"inBytesTotal": 9000}}"#,
+            }
+            .to_string())
+        };
+        let folders = ["a".to_string(), "b".to_string()];
+        let status = sync_status(&folders, &mut get).unwrap();
+        assert_eq!(
+            status,
+            SyncStatus {
+                need: 40,
+                total: 150,
+                files: 5,
+                received: 9000,
+                connected: true
+            }
+        );
+        let mut down = |path: &str| {
+            (path == "/rest/system/connections")
+                .then(|| r#"{"connections": {"X": {"connected": false}}}"#.to_string())
+        };
+        assert_eq!(
+            sync_status(&folders, &mut down),
+            None,
+            "a folder that does not answer"
+        );
+        let status = sync_status(&[], &mut down).unwrap();
+        assert!(!status.connected);
+    }
+
+    #[test]
+    fn the_time_left_follows_the_pace() {
+        let mut pace = Pace::default();
+        assert_eq!(pace.secs_left(0.0, 0, 10 << 20), None, "no pace yet");
+        assert_eq!(pace.secs_left(5.0, 5 << 20, 10 << 20), Some(10));
+        assert_eq!(
+            pace.secs_left(10.0, 5 << 20, 10 << 20),
+            Some(15),
+            "a stall slows it"
+        );
+        let mut idle = Pace::default();
+        idle.secs_left(0.0, 0, 1);
+        assert_eq!(
+            idle.secs_left(5.0, 0, 1),
+            None,
+            "nothing coming is no estimate"
+        );
     }
 
     const FAST: Duration = Duration::from_millis(20);

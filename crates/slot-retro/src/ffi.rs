@@ -16,10 +16,14 @@ pub const SET_VARIABLES: c_uint = 16;
 pub const GET_VARIABLE_UPDATE: c_uint = 17;
 pub const GET_RUMBLE_INTERFACE: c_uint = 23;
 pub const GET_LOG_INTERFACE: c_uint = 27;
+pub const GET_PERF_INTERFACE: c_uint = 28;
 pub const GET_SAVE_DIRECTORY: c_uint = 31;
 pub const SET_SYSTEM_AV_INFO: c_uint = 32;
 pub const SET_GEOMETRY: c_uint = 37;
+pub const GET_FASTFORWARDING: c_uint = 49 | 0x10000;
 pub const GET_INPUT_BITMASKS: c_uint = 51 | 0x10000;
+/// RetroArch's own block, which Flycast asks in.
+pub const GET_CLEAR_ALL_THREAD_WAITS_CB: c_uint = 3 | 0x800000;
 pub const GET_DISK_CONTROL_INTERFACE_VERSION: c_uint = 57;
 pub const SET_DISK_CONTROL_EXT_INTERFACE: c_uint = 58;
 pub const SET_AUDIO_BUFFER_STATUS_CALLBACK: c_uint = 62;
@@ -106,6 +110,18 @@ pub struct Variable {
 #[repr(C)]
 pub struct LogCallback {
     pub log: *const c_void,
+}
+
+/// retro_perf_callback: the clock and counters a core may time itself with.
+#[repr(C)]
+pub struct PerfCallback {
+    pub get_time_usec: *const c_void,
+    pub get_cpu_features: *const c_void,
+    pub get_perf_counter: *const c_void,
+    pub perf_register: *const c_void,
+    pub perf_start: *const c_void,
+    pub perf_stop: *const c_void,
+    pub perf_log: *const c_void,
 }
 
 pub type SetRumbleStateFn = unsafe extern "C" fn(c_uint, c_uint, u16) -> bool;

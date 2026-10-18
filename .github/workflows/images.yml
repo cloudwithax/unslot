@@ -48,7 +48,7 @@ jobs:
       - name: Install the disk tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends e2fsprogs dosfstools mtools zip unzip
+          sudo apt-get install -y --no-install-recommends e2fsprogs fakeroot gcc-aarch64-linux-gnu make zip unzip
 
       - name: Fetch the release's card tree
         run: |

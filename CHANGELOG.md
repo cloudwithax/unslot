@@ -3,7 +3,9 @@
 ## Unreleased
 
 - Syncthing, under Network → Services. Its web page is at `http://<device>:8384`, signed in to as root, and X shows the device ID as a code for the Syncthing app to scan. Folders added there go on the card.
+- Games Syncthing brings go on the shelves as they land, new systems too, and the top of the shelf says how far it has got, how much is left and about how long it will take.
 - File sharing starts: the Samba it uses needed a library BaseOS does not have, which now comes with it.
+- A flashed card image keeps unslot's space on ext4, which a reset mid-write cannot corrupt, and grows it in place on first boot. Windows and macOS cannot open it: add games over File sharing or Syncthing. Updates and slot cards stay on FAT.
 
 ## v2.2.0
 

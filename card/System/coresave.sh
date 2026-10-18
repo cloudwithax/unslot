@@ -14,6 +14,13 @@ mkdir -p "$DIR" 2>/dev/null
 echo "$(date '+%F %T') pid=$1 signal=$2 thread=$3 exe=$exe" >> "$DIR/cores.log"
 
 case "$exe ${cmd% }" in
+*/slot\ --core-host\ *)
+	# A GPU core's host maps hundreds of MB; writing it all to the card holds the dying host,
+	# and slot waiting on it, for minutes. The head has every thread's registers.
+	cp "/proc/$1/maps" "$DIR/slot.maps" 2>/dev/null
+	cp "$SD/Logs/slot.log" "$DIR/slot-$(date '+%F_%H-%M-%S').log" 2>/dev/null
+	{ head -c 8388608 > "$DIR/core-host.core"; cat > /dev/null; }
+	;;
 */slot|*/slot\ *)
 	cp "/proc/$1/maps" "$DIR/slot.maps" 2>/dev/null
 	cp "$SD/Logs/slot.log" "$DIR/slot-$(date '+%F_%H-%M-%S').log" 2>/dev/null

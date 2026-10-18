@@ -84,6 +84,8 @@ pub struct SlotChrome<'a> {
     pub rest: f32,
     pub scale: f32,
     pub seat: f32,
+    /// How far round a seated disc has spun, in radians.
+    pub turn: f32,
     pub alert: Option<(TexId, f32)>,
     pub dim: f32,
     pub screen: f32,
@@ -138,17 +140,38 @@ impl SlotChrome<'_> {
         let x = centre + (canvas.w / 2.0 - centre) * k - cw / 2.0;
         let y = foot0 + (seated_foot - foot0) * travel - ch;
         let cart_alpha = if seat >= 1.0 && !held { chrome } else { 1.0 };
+        let turn = self.turn;
         for tex in self.behind.into_iter().flatten() {
-            out.push(Draw::Tex {
+            out.push(match turn != 0.0 {
+                true => Draw::Turned {
+                    x,
+                    y,
+                    w: cw,
+                    h: ch,
+                    tex,
+                    alpha: cart_alpha,
+                    turn,
+                },
+                false => Draw::Tex {
+                    x,
+                    y,
+                    w: cw,
+                    h: ch,
+                    tex,
+                    alpha: cart_alpha,
+                },
+            });
+        }
+        out.push(match self.face {
+            Some(tex) if turn != 0.0 => Draw::Turned {
                 x,
                 y,
                 w: cw,
                 h: ch,
                 tex,
                 alpha: cart_alpha,
-            });
-        }
-        out.push(match self.face {
+                turn,
+            },
             Some(tex) => Draw::Tex {
                 x,
                 y,

@@ -46,11 +46,13 @@ tasks:
     desc: Debug build of the whole workspace
     cmds:
       - cargo build --workspace
+      - tools/target-cap/target-cap.sh
 
   release:
     desc: Release build of the slot binary
     cmds:
       - cargo build --release -p slot
+      - tools/target-cap/target-cap.sh
 
   test:
     desc: Run the whole test suite in parallel with cargo-nextest, silent
@@ -62,6 +64,7 @@ tasks:
       - cargo test -p slot-gfx --test pipeline
       - cargo test -p slot-ui --test render_row_edges
       - cargo test -p slot-retro --test options --test netpacket --test libretro
+      - tools/target-cap/target-cap.sh
 
   test:one:
     desc: Run tests matching FILTER, eg task test:one FILTER=gesture
@@ -71,6 +74,7 @@ tasks:
       SLOT_SILENT: '1'
     cmds:
       - cargo nextest run --workspace {{.FILTER}}
+      - tools/target-cap/target-cap.sh
 
   fmt:
     desc: Format the workspace
@@ -399,11 +403,14 @@ tasks:
     deps: [core:device, core:gpsp, core:fetch, core:gles, services, build:device]
     vars:
       OUT: '{{.OUT | default "dist-device"}}'
+      UID: {sh: id -u}
+      GID: {sh: id -g}
     cmds:
       - rm -rf {{.OUT}}
       - task: device:sh
         vars:
-          CMD: ./target-device/device/slot --init-root {{.OUT}}
+          # Docker on an x86 host runs this as root; the tree goes back to whoever builds it.
+          CMD: ./target-device/device/slot --init-root {{.OUT}} && chown -R {{.UID}}:{{.GID}} {{.OUT}}
       - cp target-device/device/slot {{.OUT}}/System/slot
       - cp -R card/System/* {{.OUT}}/System/
       - file vendor/mgba_libretro.so | grep -q aarch64

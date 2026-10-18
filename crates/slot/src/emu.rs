@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use crate::cable::{self, Cable};
 use slot_retro::{
-    AvInfo, ButtonMask, CoreError, Link, LinkChannel, RetroCore, Rumble, Sticks, GBA_H, GBA_W,
-    NETPACKET_RELIABLE,
+    AvInfo, ButtonMask, CoreError, CoreOption, Link, LinkChannel, RetroCore, Rumble, Sticks, GBA_H,
+    GBA_W, NETPACKET_RELIABLE,
 };
 use slot_store::RUN_AHEAD_MAX;
 
@@ -86,6 +86,7 @@ enum Cmd {
     EndLink,
     BeginCable(u8, Box<dyn LinkChannel>),
     SetOption(String, String),
+    Options(Sender<Vec<CoreOption>>),
     SetDisk(u32),
     Refresh,
 }
@@ -264,6 +265,12 @@ impl EmuHandle {
             &self.shared,
             Cmd::SetOption(key.to_owned(), value.to_owned()),
         );
+    }
+
+    pub fn request_options(&self) -> Receiver<Vec<CoreOption>> {
+        let (tx, rx) = channel();
+        request(&self.cmds, &self.shared, Cmd::Options(tx));
+        rx
     }
 
     pub fn set_driven(&self, driven: bool) {
@@ -562,7 +569,14 @@ impl Worker {
                 resume.len(),
                 crate::boot_time::ms()
             );
-            if let Err(e) = core.unserialize(&self.for_core(resume)) {
+            let resume = self.for_core(resume);
+            // Flycast Xtreme takes a state only once its emulation thread runs, which its first
+            // frame starts, so a refusal gets one more try after a frame.
+            let taken = core.unserialize(&resume).or_else(|_| {
+                core.run_frame(ButtonMask(0));
+                core.unserialize(&resume)
+            });
+            if let Err(e) = taken {
                 eprintln!("slot: resume: {e}");
                 self.shared.resume_refused.store(true, Ordering::Release);
             }
@@ -771,6 +785,8 @@ impl Worker {
                                 runahead.refused = true;
                             }
                         },
+                        // One frame a present: the core can go on with it while this one shows.
+                        None if speed == Speed::Normal => core.run_frame_overlapped(input),
                         None => core.run_frame(input),
                     }
                     let took = frame_began.elapsed();
@@ -1018,6 +1034,9 @@ impl Worker {
             }
             Cmd::SetOption(key, value) => {
                 core.set_option(&key, &value);
+            }
+            Cmd::Options(reply) => {
+                let _ = reply.send(core.core_options());
             }
             Cmd::SetDisk(index) => match core.set_disk(index) {
                 Ok(()) => eprintln!("slot: emu: disc {} is in", index + 1),
