@@ -13,7 +13,7 @@ use slot_retro::{
 use slot_store::RUN_AHEAD_MAX;
 
 use crate::audio::Ring;
-use crate::drc::{drc_ratio, drc_target, Stretch};
+use crate::drc::{drc_target, Level};
 use crate::frames::{FrameRef, Frames, Shape};
 use crate::link_state;
 use crate::persist::Snapshot;
@@ -606,7 +606,8 @@ impl Worker {
         let mut ticked = false;
         let mut paced = 0u64;
         let mut scale = 0.0f64;
-        let mut stretch = Stretch::default();
+        let mut level = Level::new();
+        let mut last_audio = Instant::now();
         let mut rate = TickRate::new(Instant::now(), 0);
         let mut stalled = false;
         let mut turbo_frame = 0u32;
@@ -894,17 +895,18 @@ impl Worker {
                     }
                     let base = if lock { scale } else { 1.0 };
                     let base = base * f64::from(span) / f64::from(ran);
-                    let slowed = match speed {
-                        Speed::Normal => stretch.push(
-                            Instant::now(),
-                            audio.len() as f64 / 2.0 * base / core_hz(av, period),
-                        ),
+                    let now = Instant::now();
+                    let dt = now.saturating_duration_since(last_audio).as_secs_f64();
+                    last_audio = now;
+                    let trim = match speed {
+                        Speed::Normal => level.push(dt, queued, target),
                         _ => {
-                            stretch.reset();
+                            level.reset();
                             1.0
                         }
                     };
-                    resampler.set_ratio(drc_ratio(queued, target) * base * slowed);
+                    let total = base * trim;
+                    resampler.set_ratio(total);
                     resampler.process(&audio, &mut out);
                     crate::audio::volume::apply(
                         &mut out,
@@ -915,7 +917,7 @@ impl Worker {
                     if crate::session::trace() && paced.is_multiple_of(TRACE_EVERY) {
                         let (dropped, starved) = (ring.overruns(), ring.underruns());
                         eprintln!(
-                            "slot: audio: {queued}/{target} queued, {dropped} dropped, {starved} starved, locked {lock} at {scale:.5}, stretched {slowed:.4}"
+                            "slot: audio: {queued}/{target} queued, {dropped} dropped, {starved} starved, locked {lock} at {scale:.5}, rate {total:.4} (trim {trim:.4})"
                         );
                     }
                 }

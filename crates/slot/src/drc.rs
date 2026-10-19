@@ -1,79 +1,61 @@
-use std::time::{Duration, Instant};
 
-const MAX_CORRECTION: f64 = 0.005;
-
-pub fn drc_ratio(queued_frames: usize, target_frames: usize) -> f64 {
-    if target_frames == 0 {
-        return 1.0;
-    }
-    let error = target_frames as f64 - queued_frames as f64;
-    let ratio = 1.0 + MAX_CORRECTION * error / target_frames as f64;
-    ratio.clamp(1.0 - MAX_CORRECTION, 1.0 + MAX_CORRECTION)
-}
-
+/// How much sound the ring holds, in frames, for a device at `sample_rate`.
 pub fn drc_target(capacity_frames: usize) -> usize {
     capacity_frames / 2
 }
 
-/// How much longer than the sound a core hands over lasts it takes to arrive, for a core that
-/// can't keep its full rate: its sound is played that much slower rather than run dry.
-pub struct Stretch {
-    window: Option<(Instant, f64)>,
-    last: Option<Instant>,
-    target: f64,
-    ratio: f64,
+/// Holds the sound queue at its target by steering how much the sound is stretched: a queue
+/// running low is played slower (at the same pitch) so the core doesn't run dry, and one running
+/// high is played faster so the delay doesn't grow and nothing overflows.
+///
+/// The rate the sound arrives at is not used. A core whose hand-over is batched, or whose thread
+/// waits when the queue is full, delivers unevenly without being slow, and measuring that would
+/// slow the sound down just when the queue is already full.
+pub struct Level {
+    learned: f64,
 }
 
-/// The most the sound is slowed, about what a core a few frames a second short needs.
-pub const MAX_STRETCH: f64 = 1.08;
-
-/// How long the arrival rate is measured over before the stretch heads for it.
-const STRETCH_WINDOW: Duration = Duration::from_millis(500);
-
-/// How long the stretch takes to get most of the way to a new rate, so the pitch glides.
-const STRETCH_GLIDE: Duration = Duration::from_secs(2);
-
-/// A wait between hand-overs this long is a pause, not the core running slow.
-const STRETCH_GAP: Duration = Duration::from_millis(100);
-
-impl Default for Stretch {
+impl Default for Level {
     fn default() -> Self {
-        Stretch {
-            window: None,
-            last: None,
-            target: 1.0,
-            ratio: 1.0,
-        }
+        Level { learned: 0.0 }
     }
 }
 
-impl Stretch {
-    /// Takes `sound` seconds of playback handed over at `now` and gives how much to stretch it.
-    pub fn push(&mut self, now: Instant, sound: f64) -> f64 {
-        let since = self.last.map(|last| now.saturating_duration_since(last));
-        self.last = Some(now);
-        let Some(since) = since.filter(|&d| d < STRETCH_GAP) else {
-            self.window = Some((now, sound));
-            return self.ratio;
-        };
-        match self.window {
-            Some((start, heard)) if now - start >= STRETCH_WINDOW && heard > 0.0 => {
-                let took = (now - start).as_secs_f64() / heard;
-                self.target = took.clamp(1.0, MAX_STRETCH);
-                self.window = Some((now, sound));
-            }
-            Some((start, heard)) => self.window = Some((start, heard + sound)),
-            None => self.window = Some((now, sound)),
-        }
-        let step = (since.as_secs_f64() / STRETCH_GLIDE.as_secs_f64()).min(1.0);
-        self.ratio += (self.target - self.ratio) * step;
-        self.ratio
+impl Level {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    /// Forgets the arrival rate being measured, for when the core stops running at its own pace.
+    /// What the queue being off its target should move the rate by. Small, so the rate the sound
+    /// is played at doesn't swing with the queue's own jitter.
+    const PROPORTION: f64 = 0.05;
+
+    /// How fast the part a core that never keeps its rate needs is learned.
+    const LEARN: f64 = 0.12;
+
+    /// How far the learned part may take the rate; a fifth short or a tenth ahead.
+    const LEARNED_MAX: f64 = 0.22;
+    const LEARNED_MIN: f64 = -0.12;
+
+    /// The most the rate may be moved either way, before the resampler takes over.
+    const MIN: f64 = 0.5;
+    const MAX: f64 = 1.5;
+
+    /// Takes `dt` since the last update and the queue's level, and gives the rate to play at.
+    pub fn push(&mut self, dt: f64, queued_frames: usize, target_frames: usize) -> f64 {
+        if target_frames == 0 {
+            return 1.0;
+        }
+        let error = (target_frames as f64 - queued_frames as f64) / target_frames as f64;
+        let dt = if dt.is_finite() { dt.clamp(0.0, 0.1) } else { 0.0 };
+        self.learned = (self.learned + Self::LEARN * error * dt)
+            .clamp(Self::LEARNED_MIN, Self::LEARNED_MAX);
+        (1.0 + Self::PROPORTION * error + self.learned).clamp(Self::MIN, Self::MAX)
+    }
+
+    /// Forgets the learned rate, for when the core stops running at its own pace.
     pub fn reset(&mut self) {
-        self.window = None;
-        self.last = None;
+        self.learned = 0.0;
     }
 }
 
@@ -81,75 +63,68 @@ impl Stretch {
 mod tests {
     use super::*;
 
-    fn run(stretch: &mut Stretch, start: Instant, every: Duration, sound: f64, n: u32) -> f64 {
-        let mut ratio = 1.0;
-        for i in 0..n {
-            ratio = stretch.push(start + every * i, sound);
+    /// A queue that rises by `produce` frames a step and drains `consume` frames a step.
+    fn settle(level: &mut Level, start: usize, target: usize, produce: f64, consume: f64) -> usize {
+        let frames = target * 2;
+        let mut queued = start;
+        let dt = 1.0 / 60.0;
+        for _ in 0..600 {
+            let rate = level.push(dt, queued, target);
+            let added = produce * rate;
+            queued = ((queued as f64 + added - consume).max(0.0) as usize).min(frames);
         }
-        ratio
+        queued
     }
 
     #[test]
-    fn a_core_at_full_rate_is_not_stretched() {
-        let mut stretch = Stretch::default();
-        let ratio = run(
-            &mut stretch,
-            Instant::now(),
-            Duration::from_micros(16_667),
-            0.016_667,
-            600,
-        );
-        assert!((ratio - 1.0).abs() < 1e-3, "{ratio}");
+    fn a_core_at_the_device_rate_holds_the_queue() {
+        let mut level = Level::new();
+        let queued = settle(&mut level, 3200, 3200, 800.0 * 48000.0 / 44100.0, 800.0 * 48000.0 / 44100.0);
+        assert!(queued.abs_diff(3200) < 200, "settled at {queued}");
     }
 
     #[test]
-    fn a_core_running_short_is_slowed_to_match_it() {
-        let mut stretch = Stretch::default();
-        let ratio = run(
-            &mut stretch,
-            Instant::now(),
-            Duration::from_micros(17_857),
-            0.016_667,
-            900,
-        );
-        assert!((ratio - 56.0f64.recip() * 60.0).abs() < 2e-3, "{ratio}");
+    fn a_core_running_short_is_slowed_until_the_queue_holds() {
+        let mut level = Level::new();
+        let queued = settle(&mut level, 3200, 3200, 0.9 * 800.0 * 48000.0 / 44100.0, 800.0 * 48000.0 / 44100.0);
+        assert!(queued.abs_diff(3200) < 400, "settled at {queued}");
+        let rate = level.push(1.0 / 60.0, 3200, 3200);
+        assert!(rate > 1.05, "a short core settled at {rate}");
     }
 
     #[test]
-    fn the_stretch_glides_rather_than_jumps() {
-        let mut stretch = Stretch::default();
-        let start = Instant::now();
-        let every = Duration::from_millis(20);
-        let mut last = 1.0;
-        for i in 0..300 {
-            let ratio = stretch.push(start + every * i, 0.016_667);
-            assert!((ratio - last).abs() < 0.002, "jumped {last} to {ratio}");
-            last = ratio;
+    fn a_core_running_ahead_is_quickened_until_the_queue_holds() {
+        let mut level = Level::new();
+        let queued = settle(&mut level, 3200, 3200, 1.1 * 800.0 * 48000.0 / 44100.0, 800.0 * 48000.0 / 44100.0);
+        assert!(queued.abs_diff(3200) < 400, "settled at {queued}");
+        let rate = level.push(1.0 / 60.0, 3200, 3200);
+        assert!(rate < 0.95, "a fast core settled at {rate}");
+    }
+
+    #[test]
+    fn a_full_queue_is_drained_and_an_empty_one_filled() {
+        let mut level = Level::new();
+        assert!(level.push(1.0 / 60.0, 0, 3200) > 1.0);
+        assert!(level.push(1.0 / 60.0, 6400, 3200) < 1.0);
+    }
+
+    #[test]
+    fn a_queue_with_no_target_is_left_alone() {
+        let mut level = Level::new();
+        assert_eq!(level.push(1.0 / 60.0, 0, 0), 1.0);
+    }
+
+    #[test]
+    fn the_rate_stays_within_what_the_resampler_can_take() {
+        let mut level = Level::new();
+        for queued in [0, 100, 3200, 6400, 100_000] {
+            for _ in 0..100 {
+                let rate = level.push(1.0 / 60.0, queued, 3200);
+                assert!(
+                    (Level::MIN..=Level::MAX).contains(&rate),
+                    "rate {rate} out of bounds for queued={queued}"
+                );
+            }
         }
-        assert!(last > 1.05);
-    }
-
-    #[test]
-    fn a_core_far_behind_is_stretched_no_further_than_the_cap() {
-        let mut stretch = Stretch::default();
-        let ratio = run(
-            &mut stretch,
-            Instant::now(),
-            Duration::from_millis(33),
-            0.016_667,
-            900,
-        );
-        assert!((ratio - MAX_STRETCH).abs() < 1e-3, "{ratio}");
-    }
-
-    #[test]
-    fn a_pause_is_not_taken_for_a_slow_core() {
-        let mut stretch = Stretch::default();
-        let start = Instant::now();
-        let every = Duration::from_micros(16_667);
-        run(&mut stretch, start, every, 0.016_667, 60);
-        let back = start + Duration::from_secs(5);
-        let ratio = run(&mut stretch, back, every, 0.016_667, 600);
-        assert!((ratio - 1.0).abs() < 1e-3, "{ratio}");
     }
 }

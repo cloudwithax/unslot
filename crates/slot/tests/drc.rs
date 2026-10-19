@@ -1,20 +1,30 @@
-use slot::drc::drc_ratio;
+use slot::drc::Level;
 
 #[test]
-fn drc_ratio_is_bounded_and_corrects_toward_target() {
-    assert!(drc_ratio(0, 2048) > 1.0);
-    assert!(drc_ratio(4096, 2048) < 1.0);
-    assert_eq!(drc_ratio(2048, 2048), 1.0);
-    for q in [0, 1, 100, 100_000] {
-        let r = drc_ratio(q, 2048);
-        assert!(
-            (0.995..=1.005).contains(&r),
-            "ratio {r} out of bounds for q={q}"
-        );
+fn the_rate_stays_within_what_the_resampler_can_take() {
+    let mut level = Level::new();
+    for queued in [0, 1, 100, 100_000] {
+        for _ in 0..100 {
+            let r = level.push(1.0 / 60.0, queued, 2048);
+            assert!(
+                (0.5..=1.5).contains(&r),
+                "rate {r} out of bounds for queued={queued}"
+            );
+        }
     }
 }
 
 #[test]
 fn a_sink_with_no_buffer_yet_yields_a_neutral_ratio() {
-    assert_eq!(drc_ratio(0, 0), 1.0);
+    let mut level = Level::new();
+    assert_eq!(level.push(1.0 / 60.0, 0, 0), 1.0);
+}
+
+#[test]
+fn an_empty_queue_is_played_slower_than_a_full_one() {
+    let mut level = Level::new();
+    let empty = level.push(1.0 / 60.0, 0, 2048);
+    let full = level.push(1.0 / 60.0, 4096, 2048);
+    assert!(empty > 1.0, "an empty queue was not slowed: {empty}");
+    assert!(full < 1.0, "a full queue was not quickened: {full}");
 }
