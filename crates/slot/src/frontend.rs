@@ -52,6 +52,7 @@ pub struct Frontend {
     core_built: Option<String>,
     undo_tex: Option<TexId>,
     switcher: Switcher,
+    fps: FpsCounter,
     clocks: Clocks,
     about: AboutFace,
     quick_clock: QuickClock,
@@ -159,6 +160,75 @@ struct Switcher {
     titled: Option<String>,
 }
 
+struct FpsCounter {
+    since: Instant,
+    frames: u64,
+    active: bool,
+    label: String,
+    tex: Option<TexId>,
+    size: (u32, u32),
+}
+
+impl FpsCounter {
+    fn new(now: Instant) -> Self {
+        Self {
+            since: now,
+            frames: 0,
+            active: false,
+            label: String::new(),
+            tex: None,
+            size: (0, 0),
+        }
+    }
+
+    fn draw(
+        &mut self,
+        compositor: &mut Compositor,
+        out: &mut Vec<Draw>,
+        frames: u64,
+        now: Instant,
+    ) {
+        if !self.active || frames < self.frames {
+            self.since = now;
+            self.frames = frames;
+            self.active = true;
+            self.label.clear();
+        }
+        let elapsed = now.duration_since(self.since);
+        if elapsed >= Duration::from_millis(500) {
+            let rate = frames.saturating_sub(self.frames) as f64 / elapsed.as_secs_f64();
+            let label = format!("{rate:.0} FPS");
+            if label != self.label {
+                let face = word_ink(&label, [255, 255, 255]);
+                self.size = (face.w, face.h);
+                upload(compositor, &mut self.tex, face);
+                self.label = label;
+            }
+            self.since = now;
+            self.frames = frames;
+        }
+        if let Some(tex) = self.tex.filter(|_| !self.label.is_empty()) {
+            let (w, h) = (self.size.0 as f32, self.size.1 as f32);
+            let x = OUT_W as f32 - w - 8.0;
+            out.push(Draw::Rect {
+                x: x - 4.0,
+                y: 4.0,
+                w: w + 8.0,
+                h: h + 4.0,
+                colour: [0.0, 0.0, 0.0, 0.7],
+            });
+            out.push(Draw::Tex {
+                x,
+                y: 6.0,
+                w,
+                h,
+                tex,
+                alpha: 1.0,
+            });
+        }
+    }
+}
+
 impl Frontend {
     pub fn boot(platform: Box<dyn Platform>) -> Self {
         Self::boot_with(platform, crate::audio::opened_sink())
@@ -194,6 +264,7 @@ impl Frontend {
             core_built: None,
             undo_tex: None,
             switcher: Switcher::default(),
+            fps: FpsCounter::new(now),
             clocks: Clocks::default(),
             about: AboutFace::default(),
             quick_clock: QuickClock::default(),
@@ -632,6 +703,18 @@ impl Frontend {
         );
         self.draws.clear();
         self.session.app().draw(&mut self.draws);
+        if self.session.game_visible()
+            && self.session.app().playing_platform() == Console::Dreamcast
+        {
+            self.fps.draw(
+                compositor,
+                &mut self.draws,
+                self.session.frames_published(),
+                Instant::now(),
+            );
+        } else {
+            self.fps.active = false;
+        }
         compositor.draw_list(&self.draws);
     }
 
