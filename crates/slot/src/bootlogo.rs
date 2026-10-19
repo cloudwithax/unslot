@@ -180,6 +180,19 @@ pub fn chosen(card: &Path) -> Option<Vec<u8>> {
     None
 }
 
+/// The card's boot logo as RGBA at `size`, for the first frame slot draws: the same picture
+/// BaseOS shows while the kernel comes up, so the panel is never left black while the shelf is
+/// built. Centred on the logo's own background, as the kernel's copy is.
+pub fn splash_rgba(card: &Path, size: (usize, usize)) -> Option<Vec<u8>> {
+    let mark = decode(&chosen(card)?)?;
+    let img = compose(&mark, size)?;
+    let mut rgba = Vec::with_capacity(img.width * img.height * 4);
+    for px in &img.rgb {
+        rgba.extend_from_slice(&[px[0], px[1], px[2], 255]);
+    }
+    Some(rgba)
+}
+
 pub fn refresh(card: &Path) {
     let Some(logo) = chosen(card) else {
         return;

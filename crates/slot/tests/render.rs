@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use slot::thumb;
-use slot_gfx::{lcd3x_mask, Compositor, Draw, HeadlessSurface, OUT_W, SRC_H, SRC_W};
+use slot_gfx::{lcd3x_mask, Compositor, Draw, HeadlessSurface, OUT_H, OUT_W, SRC_H, SRC_W};
 use slot_retro::{ButtonMask, MockCore, RetroCore};
 use slot_store::{Core, Platform, StateRing};
 use slot_ui::{photo_face, Polaroids, Printed};
@@ -161,4 +161,51 @@ fn the_switcher_magnifies_its_screenshot_without_resampling_it() {
             }
         }
     }
+}
+
+#[test]
+fn the_boot_splash_draws_the_card_logo_before_the_shelf() {
+    let Some((_g, _s, mut c)) = compositor() else {
+        return;
+    };
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("System")).unwrap();
+    let mark = slot::bootlogo::Bmp {
+        width: 5,
+        height: 3,
+        rgb: {
+            let mut rgb = vec![[11, 14, 17]; 15];
+            rgb[6] = [244, 245, 248];
+            rgb
+        },
+    };
+    std::fs::write(
+        d.path().join("System/bootlogo.bmp"),
+        slot::bootlogo::encode(&mark),
+    )
+    .unwrap();
+
+    assert!(
+        slot::frontend::draw_boot_splash(&mut c, d.path(), (OUT_W, OUT_H)),
+        "the card's logo drew nothing"
+    );
+    let frame = c.read_frame();
+    let ink = (0..OUT_H as usize).any(|y| {
+        (0..OUT_W as usize).any(|x| px(&frame, x, y).iter().all(|c| *c > 0x80))
+    });
+    assert!(ink, "the wordmark is not on the first frame");
+    assert_eq!(
+        px(&frame, 4, 4),
+        [11, 14, 17],
+        "the splash is not on the logo's own background"
+    );
+}
+
+#[test]
+fn a_card_without_a_logo_draws_no_first_frame() {
+    let Some((_g, _s, mut c)) = compositor() else {
+        return;
+    };
+    let d = tempfile::tempdir().unwrap();
+    assert!(!slot::frontend::draw_boot_splash(&mut c, d.path(), (OUT_W, OUT_H)));
 }

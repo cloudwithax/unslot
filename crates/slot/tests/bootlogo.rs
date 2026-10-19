@@ -1,5 +1,5 @@
 use slot::bootlogo::{
-    chosen, compose, decode, encode, install, size, Bmp, Outcome, CARD_LOGO, USER_LOGO,
+    chosen, compose, decode, encode, install, size, splash_rgba, Bmp, Outcome, CARD_LOGO, USER_LOGO,
 };
 
 const BG: [u8; 3] = [11, 14, 17];
@@ -53,6 +53,31 @@ fn a_portrait_panel_gets_the_wordmark_turned_a_quarter_counter_clockwise() {
 #[test]
 fn a_wordmark_bigger_than_the_panel_is_refused() {
     assert!(compose(&mark(), (4, 3)).is_none());
+}
+
+#[test]
+fn the_card_logo_becomes_the_first_frames_rgba() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("System")).unwrap();
+    std::fs::write(
+        d.path().join(CARD_LOGO),
+        encode(&compose(&mark(), (11, 7)).unwrap()),
+    )
+    .unwrap();
+    let px = splash_rgba(d.path(), (11, 7)).expect("no splash from the card's logo");
+    assert_eq!(px.len(), 11 * 7 * 4);
+    let at = |x: usize, y: usize| {
+        let o = (y * 11 + x) * 4;
+        [px[o], px[o + 1], px[o + 2], px[o + 3]]
+    };
+    assert_eq!(at(0, 0), [BG[0], BG[1], BG[2], 255]);
+    assert_eq!(at(4, 3), [INK[0], INK[1], INK[2], 255]);
+}
+
+#[test]
+fn a_card_without_a_logo_has_no_splash() {
+    let d = tempfile::tempdir().unwrap();
+    assert!(splash_rgba(d.path(), (11, 7)).is_none());
 }
 
 #[test]

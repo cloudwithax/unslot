@@ -116,6 +116,13 @@ pub fn run() {
             return;
         }
     }
+    // Draw the boot logo before the shelf is built, so the panel is not left black (or on a stale
+    // picture) for the second or so the card takes to read.
+    if slot::frontend::draw_boot_splash(&mut compositor, &root, window) {
+        if let Err(e) = surface.swap() {
+            eprintln!("slot: boot logo: {e}");
+        }
+    }
     let platform = DevicePlatform::new(root.clone());
     eprintln!("slot: {}", platform.report());
     platform.trace_boot();

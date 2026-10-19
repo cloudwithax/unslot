@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use slot_gfx::{Compositor, Draw, ScreenEffect, TexId, OUT_H, OUT_W};
+use slot_gfx::{Compositor, Draw, Layout, ScreenEffect, TexId, OUT_H, OUT_W};
 
 const PAPER: &[u8] = include_bytes!("../assets/paper.png");
 use slot_input::{InputSource, Millis};
@@ -31,6 +31,42 @@ use crate::session::Session;
 const DOZE_TIMEOUT: Duration = Duration::from_secs(180);
 
 const ALERT_INK: [u8; 3] = [0xf0, 0xb4, 0x3c];
+
+/// Draws the card's boot logo as the first frame, before the shelf is built, so the panel is not
+/// left black (or on a stale picture) for the second or so the card takes to read. The same bmp
+/// BaseOS shows on the kernel splash is used, so the two join. Whether anything was drawn.
+pub fn draw_boot_splash(
+    compositor: &mut Compositor,
+    root: &std::path::Path,
+    window: (u32, u32),
+) -> bool {
+    let Some(logo) = crate::bootlogo::splash_rgba(root, (OUT_W as usize, OUT_H as usize)) else {
+        return false;
+    };
+    compositor.fit(window);
+    compositor.begin_frame(Layout::Native);
+    compositor.set_screen_power(1.0);
+    let tex = compositor.create_texture(OUT_W, OUT_H, &logo);
+    compositor.draw_list(&[
+        Draw::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: OUT_W as f32,
+            h: OUT_H as f32,
+            colour: [0.0, 0.0, 0.0, 1.0],
+        },
+        Draw::Tex {
+            x: 0.0,
+            y: 0.0,
+            w: OUT_W as f32,
+            h: OUT_H as f32,
+            tex,
+            alpha: 1.0,
+        },
+    ]);
+    compositor.end_frame(window);
+    true
+}
 
 pub struct Frontend {
     session: Session,
