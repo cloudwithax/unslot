@@ -20,7 +20,7 @@ pub use core::{
     core_for, core_for_platform, read_selected_cores, write_selected_core, Core, SELECTED_CORE_FILE,
 };
 pub use gb_palette::GbPalette;
-pub use gba::{header_clean, header_code, header_title, header_title_code};
+pub use gba::{code, header_clean, title, title_code};
 pub use platform::{Header, Platform, Spec};
 pub use ring::{StateEntry, StateRing, RING_MAX};
 pub use scan::{initial, is_hidden, listing, scan, sort_key, Cart, StoreError};

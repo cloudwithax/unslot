@@ -34,7 +34,7 @@ pub enum Appearance {
 
 impl Appearance {
     pub fn light(self) -> bool {
-        matches!(self, Appearance::Light)
+        self == Appearance::Light
     }
 
     pub fn name(self) -> &'static str {
@@ -96,11 +96,8 @@ impl WallpaperTint {
             .iter()
             .position(|t| *t == self)
             .unwrap_or(0);
-        WallpaperTint::ALL[if right {
-            (at + 1) % n
-        } else {
-            (at + n - 1) % n
-        }]
+        let next = if right { at + 1 } else { at + n - 1 };
+        WallpaperTint::ALL[next % n]
     }
 }
 
@@ -343,11 +340,8 @@ impl Shader {
     pub fn step(self, choices: &[Shader], right: bool) -> Shader {
         let n = choices.len();
         let at = choices.iter().position(|&s| s == self).unwrap_or(0);
-        choices[if right {
-            (at + 1) % n
-        } else {
-            (at + n - 1) % n
-        }]
+        let next = if right { at + 1 } else { at + n - 1 };
+        choices[next % n]
     }
 }
 
@@ -543,13 +537,18 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut show_titles = None;
     let mut wifi = None;
     let mut bluetooth = None;
-    let (mut ssh, mut samba, mut syncthing, mut tailscale) = (None, None, None, None);
-    let (mut vpn, mut password) = (None, None);
+    let mut ssh = None;
+    let mut samba = None;
+    let mut syncthing = None;
+    let mut tailscale = None;
+    let mut vpn = None;
+    let mut password = None;
     let mut shelf = None;
     let mut shelf_cart = None;
     for line in text.lines().filter(|l| !l.is_empty()) {
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
+        let (key, value) = match line.split_once('=') {
+            Some(kv) => kv,
+            None => continue,
         };
         if let Some((setting, p)) = per_platform(key) {
             match setting {
@@ -564,7 +563,7 @@ fn parse(text: &str) -> Option<SlotState> {
         }
         match key {
             "cart" => cart = Some(value.to_string()),
-            "cart_platform" => cart_platform = platform_value(value),
+            "cart_platform" => cart_platform = Platform::from_key(value),
             "brightness" => brightness = Some(level(value, BRIGHTNESS_MAX)?),
             "blue_light" => blue_light = Some(level(value, BLUE_LIGHT_MAX)?),
             "volume" => volume = Some(level(value, VOLUME_MAX)?),
@@ -623,7 +622,7 @@ fn parse(text: &str) -> Option<SlotState> {
         }
     });
     Some(SlotState {
-        cart: (!cart.is_empty()).then_some(cart),
+        cart: if cart.is_empty() { None } else { Some(cart) },
         cart_platform,
         brightness: brightness?,
         blue_light: blue_light?,
@@ -687,22 +686,21 @@ fn settings_parent(platform: Platform) -> Option<Platform> {
 
 fn recent_value(value: &str) -> Option<Recent> {
     let (platform, stem) = value.split_once('/')?;
+    if stem.is_empty() {
+        return None;
+    }
     Some(Recent {
-        platform: platform_value(platform)?,
+        platform: Platform::from_key(platform)?,
         stem: stem.to_string(),
     })
-    .filter(|r| !r.stem.is_empty())
-}
-
-fn platform_value(value: &str) -> Option<Platform> {
-    Platform::from_key(value)
 }
 
 fn offset(value: &str) -> Option<i16> {
-    value
-        .parse()
-        .ok()
-        .filter(|n| (UTC_OFFSET_MIN..=UTC_OFFSET_MAX).contains(n))
+    let n: i16 = value.parse().ok()?;
+    if !(UTC_OFFSET_MIN..=UTC_OFFSET_MAX).contains(&n) {
+        return None;
+    }
+    Some(n)
 }
 
 fn ff_speed_value(value: &str) -> Option<u8> {

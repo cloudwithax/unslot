@@ -789,13 +789,11 @@ impl Platform {
     }
 
     pub fn accepts(self, path: &Path) -> bool {
-        path.extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|ext| {
-                self.extensions()
-                    .iter()
-                    .any(|k| ext.eq_ignore_ascii_case(k))
-            })
+        let ext = match path.extension().and_then(|e| e.to_str()) {
+            Some(ext) => ext,
+            None => return false,
+        };
+        self.extensions().iter().any(|k| ext.eq_ignore_ascii_case(k))
     }
 }
 

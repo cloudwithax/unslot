@@ -10,10 +10,9 @@ pub fn read(root: &Path, file: &str) -> HashMap<String, String> {
 pub fn parse(text: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     for line in text.lines() {
-        let Some((key, value)) = entry(line) else {
-            continue;
-        };
-        out.insert(key.to_string(), value.to_string());
+        if let Some((key, value)) = entry(line) {
+            out.insert(key.to_string(), value.to_string());
+        }
     }
     out
 }
@@ -25,7 +24,10 @@ fn entry(line: &str) -> Option<(&str, &str)> {
     }
     let (key, value) = line.split_once('=')?;
     let key = key.trim();
-    (!key.is_empty()).then_some((key, value.trim()))
+    if key.is_empty() {
+        return None;
+    }
+    Some((key, value.trim()))
 }
 
 pub fn value(root: &Path, file: &str, key: &str) -> Option<String> {
@@ -44,19 +46,26 @@ pub fn set(text: &str, key: &str, value: Option<&str>) -> std::io::Result<String
     let mut out = String::with_capacity(text.len() + probe.len() + 1);
     let mut replaced = false;
     for line in text.lines() {
-        let is_this_key = entry(line).is_some_and(|(k, _)| k == key);
+        let is_this_key = match entry(line) {
+            Some((k, _)) => k == key,
+            None => false,
+        };
         if !is_this_key {
             out.push_str(line);
             out.push('\n');
-        } else if let (false, Some(new)) = (replaced, &entry_line) {
-            out.push_str(new);
-            out.push('\n');
-            replaced = true;
+        } else if !replaced {
+            if let Some(new) = &entry_line {
+                out.push_str(new);
+                out.push('\n');
+                replaced = true;
+            }
         }
     }
-    if let (false, Some(new)) = (replaced, &entry_line) {
-        out.push_str(new);
-        out.push('\n');
+    if !replaced {
+        if let Some(new) = &entry_line {
+            out.push_str(new);
+            out.push('\n');
+        }
     }
     Ok(out)
 }

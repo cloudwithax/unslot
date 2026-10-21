@@ -107,7 +107,7 @@ fn gba_code(cart: &Cart) -> String {
         .unwrap_or_else(|e| e.into_inner());
     codes
         .entry(cart.rom.clone())
-        .or_insert_with(|| slot_store::header_code(&cart.rom).unwrap_or_default())
+        .or_insert_with(|| slot_store::code(&cart.rom).unwrap_or_default())
         .clone()
 }
 

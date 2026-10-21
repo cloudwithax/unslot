@@ -34,7 +34,9 @@ pub fn parse_stamp(s: &str) -> Option<i64> {
     }
     let field = |from: usize, to: usize| -> Option<i64> {
         let text = s.get(from..to)?;
-        text.bytes().all(|c| c.is_ascii_digit()).then_some(())?;
+        if !text.bytes().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
         text.parse().ok()
     };
     let (y, m, d) = (field(0, 4)?, field(5, 7)?, field(8, 10)?);

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::gba::header_title_code;
+use crate::gba::title_code;
 use crate::platform::{Header, Platform};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -28,7 +28,7 @@ impl Cart {
     pub fn read_header(&mut self) {
         match self.platform.spec().header {
             Header::Gba => {
-                if let Some((title, code)) = header_title_code(&self.rom) {
+                if let Some((title, code)) = title_code(&self.rom) {
                     self.title = title;
                     self.code = code;
                 }

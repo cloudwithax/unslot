@@ -39,14 +39,21 @@ impl ShellChoice {
         if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
             return None;
         }
-        let colour = [0, 2, 4].map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0));
+        let colour = [
+            u8::from_str_radix(&hex[0..2], 16).unwrap_or(0),
+            u8::from_str_radix(&hex[2..4], 16).unwrap_or(0),
+            u8::from_str_radix(&hex[4..6], 16).unwrap_or(0),
+        ];
         let finish = match words.next()? {
             "solid" => ShellFinish::Solid,
             "clear" => ShellFinish::Clear,
             "glitter" => ShellFinish::Glitter,
             _ => return None,
         };
-        words.next().is_none().then_some(ShellChoice {
+        if words.next().is_some() {
+            return None;
+        }
+        Some(ShellChoice {
             outline,
             colour,
             finish,
@@ -74,10 +81,13 @@ pub fn key(stem: &str) -> String {
 }
 
 pub fn choices(text: &str) -> HashMap<String, ShellChoice> {
-    crate::ini::parse(text)
-        .into_iter()
-        .filter_map(|(stem, value)| Some((key(&stem), ShellChoice::parse(&value)?)))
-        .collect()
+    let mut out = HashMap::new();
+    for (stem, value) in crate::ini::parse(text) {
+        if let Some(choice) = ShellChoice::parse(&value) {
+            out.insert(key(&stem), choice);
+        }
+    }
+    out
 }
 
 pub fn layered(system: &str, labels: &str) -> HashMap<String, ShellChoice> {

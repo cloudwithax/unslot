@@ -27,16 +27,14 @@ impl Header {
         let title = &bytes[TITLE_OFF as usize..][..TITLE_LEN];
         let end = title.iter().position(|b| *b == 0).unwrap_or(TITLE_LEN);
         let code = &bytes[CODE_OFF..CODE_OFF + 4];
-        let is_code = code
-            .iter()
-            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
+        let is_code = code.iter().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
+        let mut code_text = String::new();
+        if is_code {
+            code_text = String::from_utf8_lossy(code).into_owned();
+        }
         Some(Header {
             title: String::from_utf8_lossy(&title[..end]).trim().to_string(),
-            code: if is_code {
-                String::from_utf8_lossy(code).into_owned()
-            } else {
-                String::new()
-            },
+            code: code_text,
             cgb: bytes[CGB_OFF as usize],
             japan: bytes[DEST_OFF] == 0,
         })
@@ -77,7 +75,10 @@ pub fn title(rom: &Path) -> Option<String> {
     read_at(rom, TITLE_OFF, &mut buf)?;
     let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
     let text = std::str::from_utf8(&buf[..end]).ok()?.trim();
-    (!text.is_empty()).then(|| text.to_string())
+    if text.is_empty() {
+        return None;
+    }
+    Some(text.to_string())
 }
 
 pub fn cgb_flag(rom: &Path) -> Option<u8> {

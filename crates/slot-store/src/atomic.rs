@@ -7,12 +7,9 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = temp_path(path);
-    match write_then_rename(&tmp, path, bytes) {
-        Ok(()) => {}
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(e);
-        }
+    if let Err(e) = write_then_rename(&tmp, path, bytes) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
     sync_dir(path);
     Ok(())
@@ -40,7 +37,11 @@ fn temp_path(path: &Path) -> PathBuf {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let tail = format!(".{}.{seq}.tmp", std::process::id());
-    let mut room = NAME_MAX.saturating_sub(tail.len() + 1).min(name.len());
+    // Short of NAME_MAX once the tail is on it, and on a char boundary.
+    let mut room = NAME_MAX - tail.len() - 1;
+    if room > name.len() {
+        room = name.len();
+    }
     while room > 0 && !name.is_char_boundary(room) {
         room -= 1;
     }
