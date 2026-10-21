@@ -328,10 +328,10 @@ fn ss_conf(root: &Path) -> String {
 /// The login ScreenScraper is asked with: a developer id from `Config/screenscraper.conf`, else
 /// the one built in, and the player's own account from the file. None with no developer id.
 pub fn read_ss_conf(root: &Path) -> Option<SsLogin> {
-    read_ss_conf_with(root, built_dev())
+    read_conf_with(root, built_dev())
 }
 
-fn read_ss_conf_with(root: &Path, built: Option<(&str, &str)>) -> Option<SsLogin> {
+fn read_conf_with(root: &Path, built: Option<(&str, &str)>) -> Option<SsLogin> {
     let text = ss_conf(root);
     let (devid, devpassword) = match (conf_get(&text, "devid"), conf_get(&text, "devpassword")) {
         (Some(id), Some(pw)) => (id, pw),
@@ -902,12 +902,12 @@ game (
     #[test]
     fn a_built_in_developer_id_serves_when_the_card_has_none() {
         let d = tempfile::tempdir().unwrap();
-        assert_eq!(read_ss_conf_with(d.path(), None), None);
-        let login = read_ss_conf_with(d.path(), Some(("unslot", "secret"))).unwrap();
+        assert_eq!(read_conf_with(d.path(), None), None);
+        let login = read_conf_with(d.path(), Some(("unslot", "secret"))).unwrap();
         assert_eq!((login.devid.as_str(), login.ssid), ("unslot", None));
         std::fs::create_dir_all(d.path().join("Config")).unwrap();
         std::fs::write(d.path().join(SS_CONF), "devid=mine\ndevpassword=p\n").unwrap();
-        let login = read_ss_conf_with(d.path(), Some(("unslot", "secret"))).unwrap();
+        let login = read_conf_with(d.path(), Some(("unslot", "secret"))).unwrap();
         assert_eq!(
             login.devid, "mine",
             "the card's own developer id did not win"
@@ -954,11 +954,11 @@ game (
     #[test]
     fn screenscraper_stays_off_without_a_developer_id() {
         let d = tempfile::tempdir().unwrap();
-        assert_eq!(read_ss_conf_with(d.path(), None), None);
+        assert_eq!(read_conf_with(d.path(), None), None);
         std::fs::create_dir_all(d.path().join("Config")).unwrap();
         std::fs::write(d.path().join(SS_CONF), "# mine\nssid=me\nsspassword=pw\n").unwrap();
         assert_eq!(
-            read_ss_conf_with(d.path(), None),
+            read_conf_with(d.path(), None),
             None,
             "a player login alone is not enough"
         );

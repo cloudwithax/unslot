@@ -1958,11 +1958,7 @@ fn a_shoulder_still_held_when_the_cart_seats_never_reaches_a_game_boy_core() {
             pad(&s) & ButtonMask::L != 0,
             want_held,
             "{label}: the core is holding L {} the cart seated under a thumb that never moved",
-            if want_held {
-                "nowhere after"
-            } else {
-                "ever since"
-            }
+            if want_held { "nowhere after" } else { "ever since" }
         );
     }
 }

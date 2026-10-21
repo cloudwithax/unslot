@@ -711,19 +711,11 @@ fn fake_faces(a: &mut App) {
 }
 
 fn label(row: QuickRow, lit: bool) -> usize {
-    if lit {
-        130 + row.index()
-    } else {
-        100 + row.index()
-    }
+    if lit { 130 + row.index() } else { 100 + row.index() }
 }
 
 fn value(v: QuickValue, lit: bool) -> usize {
-    if lit {
-        210 + v.index()
-    } else {
-        200 + v.index()
-    }
+    if lit { 210 + v.index() } else { 200 + v.index() }
 }
 
 fn frame(a: &App) -> Vec<Draw> {
@@ -1006,7 +998,7 @@ fn no_row_in_hand_runs_its_arrows_into_its_label() {
             .iter()
             .enumerate()
             .map(|(i, v)| {
-                let w = slot_ui::quick_value_face(v.text(), true).w;
+                let w = slot_ui::value_face(v.text(), true).w;
                 [(id(200 + i), w, 40), (id(230 + i), w, 40)]
             })
             .collect(),

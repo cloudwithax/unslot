@@ -176,8 +176,8 @@ impl Compositor {
         self.sprites.create_texture(w, h, rgba)
     }
 
-    pub fn create_texture_nearest(&mut self, w: u32, h: u32, rgba: &[u8]) -> TexId {
-        self.sprites.create_texture_nearest(w, h, rgba)
+    pub fn texture_nearest(&mut self, w: u32, h: u32, rgba: &[u8]) -> TexId {
+        self.sprites.texture_nearest(w, h, rgba)
     }
 
     pub fn update_texture(&mut self, id: TexId, w: u32, h: u32, rgba: &[u8]) {

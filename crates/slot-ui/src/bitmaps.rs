@@ -4,7 +4,7 @@ use slot_gfx::OUT_W;
 
 use slot_store::Platform;
 
-use crate::art::decode_png_bytes;
+use crate::art::decode_png;
 use crate::media::Media;
 
 /// A cart's shape: the Game Boy family's three moulds, or another system's media.
@@ -106,7 +106,7 @@ pub(crate) fn load(
     slot: &'static OnceLock<Vec<u8>>,
 ) -> &'static [u8] {
     slot.get_or_init(|| {
-        let (mut rgba, sw, sh) = decode_png_bytes(bytes).expect("a template png decodes");
+        let (mut rgba, sw, sh) = decode_png(bytes).expect("a template png decodes");
         if sh == h && sw > w {
             rgba = crop_centre(&rgba, sw, sh, w);
         } else if (sw, sh) != (w, h) {
@@ -340,7 +340,7 @@ pub(crate) fn button_legend(which: ButtonLegend) -> (&'static [u8], u32, u32) {
         BUTTON_LEGEND_PNG
             .iter()
             .map(|bytes| {
-                let (mut rgba, w, h) = decode_png_bytes(bytes).expect("a button legend decodes");
+                let (mut rgba, w, h) = decode_png(bytes).expect("a button legend decodes");
                 bleed(&mut rgba, w, h);
                 (rgba, w, h)
             })

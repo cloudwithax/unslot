@@ -7,7 +7,7 @@
 
 use resvg::tiny_skia::{FilterQuality, IntSize, Pixmap, PixmapPaint, Transform};
 
-use crate::art::decode_png_bytes;
+use crate::art::decode_png;
 
 /// The logo's box, as fractions of the label, so a label of any shape places it alike.
 const BOX_W_OF: f32 = 920.0 / 1280.0;
@@ -34,7 +34,7 @@ pub fn scraped_label(
     w: u32,
     h: u32,
 ) -> Option<Vec<u8>> {
-    if let Some((px, lw, lh)) = logo.and_then(decode_png_bytes) {
+    if let Some((px, lw, lh)) = logo.and_then(decode_png) {
         if trim(&px, lw, lh).is_some() {
             let hue = boxart.and_then(box_hue).unwrap_or(fallback_hue);
             let (deep, pale) = stops(hue, luma(&px));
@@ -158,17 +158,13 @@ fn luma(px: &[u8]) -> f32 {
         sum += 0.2126 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.0722 * p[2] as f32;
         n += 1;
     }
-    if n == 0 {
-        255.0
-    } else {
-        sum / n as f32
-    }
+    if n == 0 { 255.0 } else { sum / n as f32 }
 }
 
 /// The box art's dominant saturated hue, edges cropped and dull or dark pixels ignored, so a
 /// region's trade dress does not outvote the art.
 pub fn box_hue(png: &[u8]) -> Option<u16> {
-    let (px, w, h) = decode_png_bytes(png)?;
+    let (px, w, h) = decode_png(png)?;
     let (mx, my) = ((w as f32 * 0.06) as u32, (h as f32 * 0.06) as u32);
     let mut bins = [0f32; 36];
     for y in my..h.saturating_sub(my) {
@@ -254,7 +250,7 @@ mod tests {
     }
 
     fn at(png_bytes: &[u8], x: u32, y: u32) -> [u8; 4] {
-        let (px, w, _) = decode_png_bytes(png_bytes).unwrap();
+        let (px, w, _) = decode_png(png_bytes).unwrap();
         let i = ((y * w + x) * 4) as usize;
         [px[i], px[i + 1], px[i + 2], px[i + 3]]
     }
@@ -300,7 +296,7 @@ mod tests {
         let boxart = png(30, 30, |_, _| [10, 200, 40, 255]);
         let label = scraped_label(None, Some(&boxart), 0, 64, 32).unwrap();
         assert_eq!(at(&label, 32, 16), [10, 200, 40, 255]);
-        let (_, w, h) = decode_png_bytes(&label).unwrap();
+        let (_, w, h) = decode_png(&label).unwrap();
         assert_eq!((w, h), (64, 32));
     }
 

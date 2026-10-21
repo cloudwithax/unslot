@@ -5,18 +5,10 @@ const BLUE: [u8; 3] = [0, 0, 255];
 
 fn exif(orientation: u16, big_endian: bool) -> Vec<u8> {
     let u16b = |v: u16| {
-        if big_endian {
-            v.to_be_bytes()
-        } else {
-            v.to_le_bytes()
-        }
+        if big_endian { v.to_be_bytes() } else { v.to_le_bytes() }
     };
     let u32b = |v: u32| {
-        if big_endian {
-            v.to_be_bytes()
-        } else {
-            v.to_le_bytes()
-        }
+        if big_endian { v.to_be_bytes() } else { v.to_le_bytes() }
     };
     let mut e = Vec::new();
     e.extend_from_slice(if big_endian { b"MM" } else { b"II" });

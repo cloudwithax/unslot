@@ -422,7 +422,7 @@ fn the_kernel_log_keeps_only_card_trouble() {
 [  700.000000] mmcblk1: r/w command failed, status = 0x80000900
 [  700.000001] blk_update_request: I/O error, dev mmcblk1, sector 1234
 ";
-    let kept = slot_power::card_kernel_lines(dmesg);
+    let kept = slot_power::kernel_lines(dmesg);
     assert_eq!(kept.len(), 8, "{kept:#?}");
     assert!(kept.iter().all(|l| !l.contains("mounted filesystem")));
     assert!(kept.iter().all(|l| !l.contains("read-only switch")));
@@ -434,7 +434,7 @@ fn the_kernel_log_keeps_the_latest_card_lines() {
     let dmesg: String = (0..100)
         .map(|n| format!("[{n}] FAT-fs (mmcblk0p7): line {n}\n"))
         .collect();
-    let kept = slot_power::card_kernel_lines(&dmesg);
+    let kept = slot_power::kernel_lines(&dmesg);
     assert_eq!(kept.len(), 40);
     assert_eq!(kept.last().unwrap(), "[99] FAT-fs (mmcblk0p7): line 99");
 }

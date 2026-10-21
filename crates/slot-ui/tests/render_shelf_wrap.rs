@@ -119,11 +119,7 @@ fn double_tap(n: usize, start: usize, way: i32, gap: usize, frames: usize) -> Ru
     let mut s = shelf_with(n);
     s.select(start);
     let press = |s: &mut Shelf| {
-        if way > 0 {
-            s.right()
-        } else {
-            s.left()
-        }
+        if way > 0 { s.right() } else { s.left() }
     };
     press(&mut s);
     let mut out = run();

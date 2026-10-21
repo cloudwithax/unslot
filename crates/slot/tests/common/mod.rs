@@ -471,7 +471,7 @@ impl Platform for StubPlatform {
         self.card_log.clone()
     }
 
-    fn card_kernel_lines(&self) -> Vec<String> {
+    fn kernel_lines(&self) -> Vec<String> {
         vec![STUB_KERNEL_LINE.to_owned()]
     }
 }

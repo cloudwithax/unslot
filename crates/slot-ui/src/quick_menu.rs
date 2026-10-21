@@ -601,11 +601,7 @@ impl QuickValue {
     }
 
     pub fn flag(on: bool) -> QuickValue {
-        if on {
-            QuickValue::On
-        } else {
-            QuickValue::Off
-        }
+        if on { QuickValue::On } else { QuickValue::Off }
     }
 }
 
@@ -674,7 +670,7 @@ pub fn quick_pointer_face() -> UndoFace {
     }
 }
 
-pub fn quick_value_face(text: &str, lit: bool) -> UndoFace {
+pub fn value_face(text: &str, lit: bool) -> UndoFace {
     quick_text_face(text, if lit { MENU_INK } else { DIM_INK })
 }
 

@@ -131,7 +131,7 @@ fn the_switcher_magnifies_its_screenshot_without_resampling_it() {
     let entries = ring.list().expect("list");
 
     let face = photo_face(&entries[0]);
-    let tex = c.create_texture_nearest(face.w, face.h, &face.rgba);
+    let tex = c.texture_nearest(face.w, face.h, &face.rgba);
     let mut switcher = Polaroids::new(entries);
     switcher.set_faces(vec![tex]);
     c.set_screen_power(1.0);

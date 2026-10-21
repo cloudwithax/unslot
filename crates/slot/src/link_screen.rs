@@ -44,11 +44,7 @@ const ARC_STAGGER_MS: f32 = 300.0;
 const ARROW_ALPHA: f32 = 0.7;
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    if t >= 1.0 {
-        b
-    } else {
-        a + (b - a) * t
-    }
+    if t >= 1.0 { b } else { a + (b - a) * t }
 }
 
 fn eased(now: Millis, since: Millis, ms: Millis) -> f32 {

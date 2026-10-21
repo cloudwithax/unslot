@@ -1943,7 +1943,7 @@ impl App {
             return;
         };
         let kernel = if alarm {
-            power.card_kernel_lines()
+            power.kernel_lines()
         } else {
             Vec::new()
         };

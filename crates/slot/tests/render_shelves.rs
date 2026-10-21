@@ -529,11 +529,7 @@ fn a_scrolled_row_slides_by_a_pitch_rather_than_swapping_its_carts() {
             let now = [phase - 1.0, phase, phase + 1.0]
                 .into_iter()
                 .fold(f32::MAX, |a, b| {
-                    if (b - stood).abs() < (a - stood).abs() {
-                        b
-                    } else {
-                        a
-                    }
+                    if (b - stood).abs() < (a - stood).abs() { b } else { a }
                 });
             assert!(
                 now <= stood + 0.01,

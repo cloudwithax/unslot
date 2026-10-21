@@ -432,10 +432,10 @@ impl Platform for DevicePlatform {
         Some(PathBuf::from(CARD_LOG))
     }
 
-    fn card_kernel_lines(&self) -> Vec<String> {
+    fn kernel_lines(&self) -> Vec<String> {
         Command::new("dmesg")
             .output()
-            .map(|o| card_kernel_lines(&String::from_utf8_lossy(&o.stdout)))
+            .map(|o| kernel_lines(&String::from_utf8_lossy(&o.stdout)))
             .unwrap_or_default()
     }
 
@@ -576,7 +576,7 @@ pub fn read_only(path: &Path) -> bool {
     fs::read_to_string("/proc/mounts").is_ok_and(|m| read_only_in(&m, path))
 }
 
-pub fn card_kernel_lines(dmesg: &str) -> Vec<String> {
+pub fn kernel_lines(dmesg: &str) -> Vec<String> {
     let lines: Vec<String> = dmesg
         .lines()
         .filter(|l| {

@@ -109,7 +109,7 @@ impl Sprites {
         self.push(w, h, rgba, gl::LINEAR)
     }
 
-    pub fn create_texture_nearest(&mut self, w: u32, h: u32, rgba: &[u8]) -> TexId {
+    pub fn texture_nearest(&mut self, w: u32, h: u32, rgba: &[u8]) -> TexId {
         self.push(w, h, rgba, gl::NEAREST)
     }
 

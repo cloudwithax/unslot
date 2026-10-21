@@ -58,7 +58,7 @@ pub use cart::{
     GB_LABEL_X, GB_LABEL_Y, LABEL_H, LABEL_W, LABEL_WELL, LABEL_X, LABEL_Y,
 };
 pub use clock::{
-    clock_label, date_time_text, date_time_text_as, hhmm, set_clock_hint_face, time_text,
+    clock_label, date_time, date_time_text, hhmm, set_clock_hint_face, time_text,
     ClockPicker, Field,
 };
 pub use draw::{Canvas, Draw, Layout, TexId, OUT_H, OUT_W};
@@ -88,7 +88,7 @@ pub use power_menu::{menu_face, PowerChoice, MENU_PAD};
 pub use qr_page::QrPage;
 pub use quick_menu::{
     core_button_legends, draw_menu_ground, link_button_legends, quick_caret_face, quick_label_face,
-    quick_legend_faces, quick_pointer_face, quick_row_top, quick_row_top_at, quick_value_face,
+    quick_legend_faces, quick_pointer_face, quick_row_top, quick_row_top_at, value_face,
     QuickMenu, QuickMenuFaces, QuickRow, QuickValue, QUICK_EDGE, QUICK_LABEL_X, QUICK_PITCH,
     QUICK_ROWS_MAX,
 };

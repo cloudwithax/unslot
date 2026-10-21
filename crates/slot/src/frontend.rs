@@ -7,10 +7,10 @@ use slot_input::{InputSource, Millis};
 use slot_power::{Platform, Power};
 use slot_store::{format_stamp, BezelPick, Platform as Console};
 use slot_ui::{
-    badge_face, bezel_face, chip_face, chip_shadow_face, core_button_legends, date_time_text_as,
+    badge_face, bezel_face, chip_face, chip_shadow_face, core_button_legends, date_time,
     default_game_bezel_face, footer_ink, game_bezel_face, hint_face, icon_face,
     link_button_legends, menu_face, mould_shadow, photo_face, quick_caret_face, quick_label_face,
-    quick_legend_faces, quick_pointer_face, quick_value_face, rebuild_count_face,
+    quick_legend_faces, quick_pointer_face, value_face, rebuild_count_face,
     rebuild_title_face, set_clock_hint_face, slot_back, slot_back_light, slot_front,
     slot_front_light, socket_face, sticker_face, time_text, title_face, toast_face, wallpaper_face,
     word_ink, CartFace, GbShell, Icon, LinkBadge, Mould, PowerChoice, QuickMenuFaces, QuickRow,
@@ -376,7 +376,7 @@ impl Frontend {
         let tex = compositor.create_texture(back.w, back.h, &back.rgba);
         self.session.app_mut().set_clock_back_face((tex, back.w));
         let star = slot_ui::star_face(slot_ui::STAR_SCALE, slot_ui::STAR_INK);
-        let id = compositor.create_texture_nearest(star.w, star.h, &star.rgba);
+        let id = compositor.texture_nearest(star.w, star.h, &star.rgba);
         self.session.app_mut().set_star_face(id, star.w, star.h);
         for mould in Mould::ALL {
             let shadow = mould_shadow(mould);
@@ -625,7 +625,7 @@ impl Frontend {
                 id
             }
             _ => {
-                let id = compositor.create_texture_nearest(w, h, &rgba);
+                let id = compositor.texture_nearest(w, h, &rgba);
                 self.link_shot = Some(id);
                 self.link_shot_size = (w, h);
                 id
@@ -960,7 +960,7 @@ impl UiFaces {
             quick_pointer: quick_pointer_face(),
             quick_values: QuickValue::ALL
                 .iter()
-                .map(|v| [false, true].map(|lit| quick_value_face(v.text(), lit)))
+                .map(|v| [false, true].map(|lit| value_face(v.text(), lit)))
                 .collect(),
             quick_carets: [false, true].map(quick_caret_face),
             quick_legend: quick_legend_faces(footer_ink(false)),
@@ -1020,7 +1020,7 @@ fn sync_switcher(app: &mut App, compositor: &mut Compositor, texes: Faces, state
                     *id
                 }
                 None => {
-                    let id = compositor.create_texture_nearest(f.w, f.h, &f.rgba);
+                    let id = compositor.texture_nearest(f.w, f.h, &f.rgba);
                     texes.pool.push(id);
                     id
                 }
@@ -1153,8 +1153,8 @@ fn sync_game_bezel(app: &mut App, compositor: &mut Compositor, state: &mut Bezel
             continue;
         }
         let (dim, lit) = (
-            quick_value_face(&label, false),
-            quick_value_face(&label, true),
+            value_face(&label, false),
+            value_face(&label, true),
         );
         let (dim_size, lit_size) = ((dim.w, dim.h), (lit.w, lit.h));
         let dim = upload(compositor, &mut state.faces[at].0, dim);
@@ -1201,8 +1201,8 @@ fn sync_wallpaper(app: &mut App, compositor: &mut Compositor, state: &mut Wallpa
         return;
     }
     let (dim, lit) = (
-        quick_value_face(&label, false),
-        quick_value_face(&label, true),
+        value_face(&label, false),
+        value_face(&label, true),
     );
     let (dim_size, lit_size) = ((dim.w, dim.h), (lit.w, lit.h));
     let dim = upload(compositor, &mut state.dim, dim);
@@ -1215,13 +1215,13 @@ fn sync_quick_clock(app: &mut App, compositor: &mut Compositor, state: &mut Quic
     if app.quick_menu().is_none() {
         return;
     }
-    let text = date_time_text_as(app.wall_secs(), app.clock_12h());
+    let text = date_time(app.wall_secs(), app.clock_12h());
     if text == state.shown {
         return;
     }
     let (dim, lit) = (
-        quick_value_face(&text, false),
-        quick_value_face(&text, true),
+        value_face(&text, false),
+        value_face(&text, true),
     );
     let (dim_size, lit_size) = ((dim.w, dim.h), (lit.w, lit.h));
     let dim = upload(compositor, &mut state.dim, dim);
@@ -1238,7 +1238,7 @@ fn sync_quick_palette(app: &mut App, compositor: &mut Compositor, state: &mut Qu
     if text == state.shown {
         return;
     }
-    let (dim, lit) = (quick_value_face(text, false), quick_value_face(text, true));
+    let (dim, lit) = (value_face(text, false), value_face(text, true));
     let (dim_size, lit_size) = ((dim.w, dim.h), (lit.w, lit.h));
     let dim = upload(compositor, &mut state.dim, dim);
     let lit = upload(compositor, &mut state.lit, lit);

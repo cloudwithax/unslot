@@ -108,7 +108,7 @@ fn a_part_draws_only_its_window_of_the_texture() {
     for _y in 0..2 {
         rgba.extend_from_slice(&[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255]);
     }
-    let tex = c.create_texture_nearest(3, 2, &rgba);
+    let tex = c.texture_nearest(3, 2, &rgba);
     c.fit((720, 480));
     c.begin_frame(Layout::Framed);
     c.draw_list(&[Draw::Part {

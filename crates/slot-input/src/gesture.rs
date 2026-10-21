@@ -70,7 +70,7 @@ pub struct Gestures {
     chord_held: u16,
     menu_down_at: Option<Millis>,
     menu_last_tap: Option<Millis>,
-    menu_eject_fired: bool,
+    eject_fired: bool,
     menu_display_chorded: bool,
     power_down_at: Option<Millis>,
     power_hold_fired: bool,
@@ -150,8 +150,8 @@ impl Gestures {
             }
         }
         if let Some(d) = self.menu_down_at {
-            if !self.menu_eject_fired && now.saturating_sub(d) >= MENU_HOLD_MS {
-                self.menu_eject_fired = true;
+            if !self.eject_fired && now.saturating_sub(d) >= MENU_HOLD_MS {
+                self.eject_fired = true;
                 out.push(Action::Eject);
             }
         }
@@ -179,7 +179,7 @@ impl Gestures {
             self.menu_display_chorded = true;
             self.menu_down_at = None;
             self.menu_last_tap = None;
-            self.menu_eject_fired = false;
+            self.eject_fired = false;
             self.chord_held |= bit;
             return vec![action];
         }
@@ -307,7 +307,7 @@ impl Gestures {
             }
         }
         self.menu_down_at = Some(now);
-        self.menu_eject_fired = false;
+        self.eject_fired = false;
         Vec::new()
     }
 
@@ -315,14 +315,14 @@ impl Gestures {
         if self.menu_display_chorded {
             self.menu_display_chorded = false;
             self.menu_down_at = None;
-            self.menu_eject_fired = false;
+            self.eject_fired = false;
             return Vec::new();
         }
         let Some(d) = self.menu_down_at.take() else {
             return Vec::new();
         };
-        let ejected = self.menu_eject_fired;
-        self.menu_eject_fired = false;
+        let ejected = self.eject_fired;
+        self.eject_fired = false;
         let tapped = !ejected && now.saturating_sub(d) < MENU_TAP_MS;
         self.menu_last_tap = tapped.then_some(now);
         match tapped {
@@ -438,7 +438,7 @@ impl Gestures {
 impl Gestures {
     fn menu_display_chord(&self, b: Btn) -> Option<(u16, Action)> {
         (self.menu_dpad_display
-            && !self.menu_eject_fired
+            && !self.eject_fired
             && (self.menu_down_at.is_some() || self.menu_display_chorded))
             .then(|| display_chord(b))
             .flatten()

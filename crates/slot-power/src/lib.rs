@@ -4,7 +4,7 @@ mod power;
 mod sim;
 
 pub use device::{
-    card_kernel_lines, has_bit, motor_change, read_only, read_only_in, record_first_frame,
+    kernel_lines, has_bit, motor_change, read_only, read_only_in, record_first_frame,
     rumble_node, trace_first_frame, uptime_seconds, DevicePlatform,
 };
 pub use motor::Motor;
@@ -65,7 +65,7 @@ pub trait Platform: Send {
         None
     }
 
-    fn card_kernel_lines(&self) -> Vec<String> {
+    fn kernel_lines(&self) -> Vec<String> {
         Vec::new()
     }
 }

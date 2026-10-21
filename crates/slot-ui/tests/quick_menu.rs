@@ -1,6 +1,6 @@
 use slot_store::{parse_stamp, Platform, FF_SPEEDS};
 use slot_ui::{
-    date_time_text, quick_caret_face, quick_label_face, quick_value_face, ClockPicker, QuickRow,
+    date_time_text, quick_caret_face, quick_label_face, value_face, ClockPicker, QuickRow,
     QuickValue, UndoFace, MENU_PAD,
 };
 
@@ -23,9 +23,9 @@ fn the_type_sits_exactly_menu_pad_in_from_both_sides_of_its_face() {
     for f in [
         quick_label_face(QuickRow::FastForwardSound, true),
         quick_label_face(QuickRow::Rumble, true),
-        quick_value_face("Off", false),
-        quick_value_face(QuickValue::Speed6.text(), true),
-        quick_value_face("SEP 15 16:35", true),
+        value_face("Off", false),
+        value_face(QuickValue::Speed6.text(), true),
+        value_face("SEP 15 16:35", true),
     ] {
         let (first, last) = ink_columns(&f);
         let right = f.w - 1 - MENU_PAD;
@@ -290,7 +290,7 @@ fn a_picker_for_a_set_clock_starts_at_the_local_time_and_its_offset() {
 #[test]
 fn a_value_is_grey_until_its_row_is_in_hand() {
     let inkiest = |lit| {
-        let f = quick_value_face("4×", lit);
+        let f = value_face("4×", lit);
         f.rgba
             .chunks(4)
             .max_by_key(|p| p[3])
@@ -309,7 +309,7 @@ fn the_arrows_are_faces_the_height_of_a_value() {
             caret.w > 0 && caret.rgba.chunks(4).any(|p| p[3] > 0),
             "an empty arrow"
         );
-        assert_eq!(caret.h, quick_value_face("On", true).h);
+        assert_eq!(caret.h, value_face("On", true).h);
     }
 }
 

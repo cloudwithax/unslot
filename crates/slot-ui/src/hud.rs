@@ -24,11 +24,7 @@ pub const FOOTER_INK: [u8; 3] = [0xff, 0xff, 0xff];
 pub const FOOTER_INK_LIGHT: [u8; 3] = [0x00, 0x00, 0x00];
 
 pub fn footer_ink(light: bool) -> [u8; 3] {
-    if light {
-        FOOTER_INK_LIGHT
-    } else {
-        FOOTER_INK
-    }
+    if light { FOOTER_INK_LIGHT } else { FOOTER_INK }
 }
 const ICON_GAP: f32 = 10.0;
 

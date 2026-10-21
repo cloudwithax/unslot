@@ -57,10 +57,11 @@ const MONTHS: [&str; 12] = [
 ];
 
 pub fn date_time_text(secs: i64) -> String {
-    date_time_text_as(secs, false)
+    date_time(secs, false)
 }
 
-pub fn date_time_text_as(secs: i64, twelve: bool) -> String {
+/// The date and the time, the time on a 12-hour clock when `twelve`.
+pub fn date_time(secs: i64, twelve: bool) -> String {
     let (_, month, day) = civil_from_days(secs.div_euclid(DAY));
     let name = MONTHS
         .get((month - 1) as usize)

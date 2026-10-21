@@ -31,11 +31,7 @@ pub fn link_kind(code: &str, title: &str, clean: bool) -> LinkKind {
             LinkKind::Cable
         };
     }
-    if WIRELESS.contains(&code) {
-        LinkKind::Wireless
-    } else {
-        LinkKind::Cable
-    }
+    if WIRELESS.contains(&code) { LinkKind::Wireless } else { LinkKind::Cable }
 }
 
 pub fn serial_option(chosen: LinkKind, auto: LinkKind, code: &str, title: &str) -> &'static str {

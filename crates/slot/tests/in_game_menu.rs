@@ -395,7 +395,7 @@ fn legend_at(a: &App, id: usize) -> (f32, f32, f32) {
         .unwrap_or_else(|| panic!("legend {id} is not drawn"))
 }
 
-fn menu_faces(a: &mut App) {
+fn quick_menu_faces(a: &mut App) {
     let id = TexId::from_raw;
     a.set_quick_menu_faces(QuickMenuFaces {
         labels: (0..QuickRow::ALL.len())
@@ -458,7 +458,7 @@ fn the_pause_menu_slides_the_carousel_footer_up_and_back_down() {
 #[test]
 fn pause_legends_sit_on_the_link_line_at_either_end() {
     let (_d, mut a) = playing();
-    menu_faces(&mut a);
+    quick_menu_faces(&mut a);
     a.apply(Action::QuickMenu);
     frames(&mut a, 30);
     let (lx, ly, _) = legend_at(&a, 403);
@@ -485,7 +485,7 @@ fn legend_missing(a: &App, id: usize) -> bool {
 #[test]
 fn a_value_row_puts_change_on_the_right_of_the_footer() {
     let (_d, mut a) = playing();
-    menu_faces(&mut a);
+    quick_menu_faces(&mut a);
     go_to(&mut a, QuickRow::Shader);
     frames(&mut a, 30);
     let (lx, ly, _) = legend_at(&a, 400);

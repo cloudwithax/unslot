@@ -210,7 +210,7 @@ fn a_saved_shot_is_drawn_through_the_lcd_pass() {
         return;
     };
     let shot = flat_shot([200, 200, 200]);
-    let tex = c.create_texture_nearest(SRC_W, SRC_H, &shot);
+    let tex = c.texture_nearest(SRC_W, SRC_H, &shot);
     c.set_screen_power(1.0);
 
     c.begin_frame(slot_gfx::Layout::Framed);
@@ -251,7 +251,7 @@ fn a_still_is_not_cropped_by_the_picture_mode() {
         let o = (y * SRC_W as usize + x) * 4;
         shot[o..o + 3].copy_from_slice(&[255, 0, 0]);
     }
-    let tex = c.create_texture_nearest(SRC_W, SRC_H, &shot);
+    let tex = c.texture_nearest(SRC_W, SRC_H, &shot);
     let src = gb_shaped(|x, y| [(x * 3) as u8, (y * 5) as u8, 200], [0, 0, 0]);
     c.set_screen_power(1.0);
 
@@ -382,7 +382,7 @@ fn a_quarter_turn_takes_the_top_left_corner_to_the_top_right() {
     };
     let mut rgba = [0u8, 0, 255, 255].repeat(8);
     rgba[0..4].copy_from_slice(&[255, 0, 0, 255]);
-    let tex = c.create_texture_nearest(4, 2, &rgba);
+    let tex = c.texture_nearest(4, 2, &rgba);
 
     c.begin_frame(slot_gfx::Layout::Framed);
     c.draw_list(&[Draw::Turned {

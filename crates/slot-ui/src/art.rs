@@ -66,7 +66,7 @@ fn decode(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
 fn decode_bytes(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     match bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
         true => decode_jpeg_bytes(bytes),
-        false => decode_png_bytes(bytes),
+        false => decode_png(bytes),
     }
 }
 
@@ -103,7 +103,7 @@ fn decode_jpeg_bytes(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     (rgba.len() == (w * h * 4) as usize).then_some((rgba, w, h))
 }
 
-pub(crate) fn decode_png_bytes(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+pub(crate) fn decode_png(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     let orientation = exif_chunk(bytes).and_then(exif_orientation).unwrap_or(1);
     let mut dec = png::Decoder::new(bytes);
     dec.set_transformations(png::Transformations::normalize_to_color8());
