@@ -127,7 +127,6 @@ impl Keyboard {
         (self.row, self.col)
     }
 
-    /// The key under the cursor.
     pub fn key(&self) -> Key {
         self.key_at(self.row, self.col)
     }

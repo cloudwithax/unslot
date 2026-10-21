@@ -98,7 +98,6 @@ fn gb_mould(shell: GbShell) -> Mould {
     }
 }
 
-/// The shape this cart is drawn in.
 pub fn mould_of(cart: &Cart) -> Mould {
     match gb_shell_of(cart) {
         Some(GbShell::Notched) => Mould::Notched,

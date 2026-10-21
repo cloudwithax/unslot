@@ -15,7 +15,6 @@ pub enum QuickRow {
     Screen,
     Rumble,
     DateTime,
-    /// The clock's hours: 24 or 12.
     Clock,
     /// Whether the menus click and clack.
     MenuSounds,
