@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## v2.2.1
 
+- Game Art passes over a game ScreenScraper turns away with a 403 or another error, instead of stopping the whole run, and says on the Game Art page how many it skipped. The game still gets its turn at libretro.
+- The boot logo is drawn the moment the panel is unslot's, so a restart is not black while the shelf is built.
+- Dreamcast games show an FPS counter.
+- A GPU core's frames are handed to the frontend in step, and its sound is held to its rate, rather than run dry or fill and wander.
 - Syncthing, under Network → Services. Its web page is at `http://<device>:8384`, signed in to as root, and X shows the device ID as a code for the Syncthing app to scan. Folders added there go on the card.
 - Games Syncthing brings go on the shelves as they land, new systems too, and the top of the shelf says how far it has got, how much is left and about how long it will take.
 - File sharing starts: the Samba it uses needed a library BaseOS does not have, which now comes with it.
