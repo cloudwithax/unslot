@@ -180,11 +180,14 @@ pub fn box_hue(png: &[u8]) -> Option<u16> {
             bins[((hue / 10.0) as usize).min(35)] += s * v;
         }
     }
-    let (best, weight) =
-        bins.iter().enumerate().fold(
-            (0, 0.0),
-            |acc, (i, w)| if *w > acc.1 { (i, *w) } else { acc },
-        );
+    let mut best = 0;
+    let mut weight = 0.0;
+    for (i, w) in bins.iter().enumerate() {
+        if *w > weight {
+            best = i;
+            weight = *w;
+        }
+    }
     if weight > 0.0 { Some(best as u16 * 10 + 5) } else { None }
 }
 

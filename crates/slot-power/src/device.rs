@@ -58,13 +58,11 @@ pub fn record_first_frame(run: &Path, uptime: &str) {
 }
 
 pub fn trace_first_frame() {
-    let Ok(raw) = fs::read_to_string("/proc/uptime") else {
-        return;
-    };
-    let Some(up) = uptime_seconds(&raw) else {
-        return;
-    };
-    record_first_frame(Path::new(RUN_DIR), &up);
+    if let Ok(raw) = fs::read_to_string("/proc/uptime") {
+        if let Some(up) = uptime_seconds(&raw) {
+            record_first_frame(Path::new(RUN_DIR), &up);
+        }
+    }
 }
 
 const EV_FF: u16 = 0x15;
@@ -112,9 +110,11 @@ impl DevicePlatform {
             Some(dir) => Some(Backlight::Class(dir)),
             None => {
                 let dbg = sysfs.join("kernel/debug/dispdbg");
-                dbg.join("param")
-                    .is_file()
-                    .then_some(Backlight::Dispdbg(dbg))
+                if dbg.join("param").is_file() {
+                    Some(Backlight::Dispdbg(dbg))
+                } else {
+                    None
+                }
             }
         };
         let battery = first_dir(&sysfs.join("class/power_supply"), is_battery);
@@ -201,16 +201,22 @@ fn ran(what: &str, result: std::io::Result<std::process::ExitStatus>) {
 pub fn has_bit(mask: &str, bit: u16) -> bool {
     let words: Vec<&str> = mask.split_whitespace().collect();
     let from_end = usize::from(bit) / 64;
-    let Some(word) = words.len().checked_sub(from_end + 1).map(|i| words[i]) else {
-        return false;
+    let word = match words.len().checked_sub(from_end + 1).map(|i| words[i]) {
+        Some(word) => word,
+        None => return false,
     };
-    u64::from_str_radix(word, 16).is_ok_and(|w| w >> (bit % 64) & 1 == 1)
+    match u64::from_str_radix(word, 16) {
+        Ok(w) => w >> (bit % 64) & 1 == 1,
+        Err(_) => false,
+    }
 }
 
 pub fn rumble_node(sysfs: &Path) -> Option<String> {
     let dir = first_dir(&sysfs.join("class/input"), |node| {
-        fs::read_to_string(node.join("device/capabilities/ff"))
-            .is_ok_and(|ff| has_bit(&ff, FF_RUMBLE))
+        match fs::read_to_string(node.join("device/capabilities/ff")) {
+            Ok(ff) => has_bit(&ff, FF_RUMBLE),
+            Err(_) => false,
+        }
     })?;
     Some(dir.file_name()?.to_string_lossy().into_owned())
 }

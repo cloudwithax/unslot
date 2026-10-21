@@ -263,8 +263,13 @@ fn take_scan(view: &mut WifiView, found: &Result<Vec<Network>, String>) {
 }
 
 fn take_status(view: &mut WifiView, status: &Status) {
-    view.connected = status.ssid.clone().filter(|_| status.connected());
-    view.ip = status.ip.clone().filter(|_| status.connected());
+    if status.connected() {
+        view.connected = status.ssid.clone();
+        view.ip = status.ip.clone();
+    } else {
+        view.connected = None;
+        view.ip = None;
+    }
 }
 
 /// The networks in a `SCAN_RESULTS` reply, strongest first: one entry a name, the hidden ones
@@ -273,10 +278,15 @@ pub fn parse_scan_results(text: &str, saved: &[String]) -> Vec<Network> {
     let mut networks: Vec<Network> = Vec::new();
     for line in text.lines().skip(1) {
         let mut fields = line.splitn(5, '\t');
-        let (Some(_bssid), Some(_freq), Some(level), Some(flags)) =
-            (fields.next(), fields.next(), fields.next(), fields.next())
-        else {
-            continue;
+        // bssid and frequency, neither of which is any use here
+        let _ = (fields.next(), fields.next());
+        let level = match fields.next() {
+            Some(l) => l,
+            None => continue,
+        };
+        let flags = match fields.next() {
+            Some(f) => f,
+            None => continue,
         };
         let ssid = unescape(fields.next().unwrap_or_default());
         if ssid.is_empty() || ssid.chars().all(|c| c == '\0') {
@@ -310,14 +320,18 @@ pub fn security(flags: &str) -> Security {
 
 /// The ids and names in a `LIST_NETWORKS` reply.
 pub fn parse_list_networks(text: &str) -> Vec<(u32, String)> {
-    text.lines()
-        .skip(1)
-        .filter_map(|line| {
-            let mut fields = line.split('\t');
-            let id = fields.next()?.trim().parse().ok()?;
-            Some((id, unescape(fields.next()?)))
-        })
-        .collect()
+    let mut out = Vec::new();
+    for line in text.lines().skip(1) {
+        let mut fields = line.split('\t');
+        let id = match fields.next().and_then(|f| f.trim().parse().ok()) {
+            Some(id) => id,
+            None => continue,
+        };
+        if let Some(name) = fields.next() {
+            out.push((id, unescape(name)));
+        }
+    }
+    out
 }
 
 pub fn parse_status(text: &str) -> Status {
@@ -440,21 +454,23 @@ impl WifiBackend for SimWifi {
     }
 
     fn scan(&mut self) -> Result<Vec<Network>, String> {
-        Ok(SimWifi::in_range()
-            .into_iter()
-            .map(|(ssid, signal, security)| Network {
+        let mut out = Vec::new();
+        for (ssid, signal, security) in SimWifi::in_range() {
+            let saved = self.saved.iter().any(|s| s == ssid);
+            out.push(Network {
                 ssid: ssid.to_string(),
                 signal,
                 security,
-                saved: self.saved.iter().any(|s| s == ssid),
-            })
-            .collect())
+                saved,
+            });
+        }
+        Ok(out)
     }
 
     fn join(&mut self, ssid: &str, psk: Option<&str>) -> Result<(), JoinError> {
-        let Some((_, _, security)) = SimWifi::in_range().into_iter().find(|(s, ..)| *s == ssid)
-        else {
-            return Err(JoinError::Failed("Not in range".into()));
+        let security = match SimWifi::in_range().into_iter().find(|(s, ..)| *s == ssid) {
+            Some((_, _, security)) => security,
+            None => return Err(JoinError::Failed("Not in range".into())),
         };
         let saved = self.saved.iter().any(|s| s == ssid);
         let ok = match security {
@@ -585,7 +601,8 @@ mod device {
                 .arg(self.root.join("System/slotwifi.sh"))
                 .args(args)
                 .status()
-                .is_ok_and(|s| s.success())
+                .map(|s| s.success())
+                .unwrap_or(false)
         }
 
         fn ctrl(&self) -> Result<Ctrl, String> {
@@ -626,7 +643,8 @@ mod device {
                 } else if events.is_none() {
                     std::thread::sleep(Duration::from_millis(500));
                 }
-                if Self::ask(ctrl, "STATUS").is_ok_and(|s| parse_status(&s).connected()) {
+                let status = Self::ask(ctrl, "STATUS").map(|s| parse_status(&s).connected());
+                if status.unwrap_or(false) {
                     return Ok(());
                 }
             }
@@ -637,9 +655,10 @@ mod device {
     impl WifiBackend for DeviceWifi {
         fn up(&mut self) -> Result<(), String> {
             let conf = conf_path(&self.root);
-            match self.script(&["up", &conf.to_string_lossy()]) {
-                true => Ok(()),
-                false => Err("The Wi-Fi would not start".into()),
+            if self.script(&["up", &conf.to_string_lossy()]) {
+                Ok(())
+            } else {
+                Err("The Wi-Fi would not start".into())
             }
         }
 

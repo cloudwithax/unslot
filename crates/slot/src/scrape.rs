@@ -370,14 +370,16 @@ pub fn ss_state(root: &Path) -> SsState {
 /// signs them out.
 pub fn save_ss_login(root: &Path, user: &str, password: &str) -> std::io::Result<()> {
     let text = ss_conf(root);
-    let mut lines: Vec<String> = text
-        .lines()
-        .filter(|l| {
-            !l.split_once('=')
-                .is_some_and(|(k, _)| matches!(k.trim(), "ssid" | "sspassword"))
-        })
-        .map(str::to_string)
-        .collect();
+    let mut lines: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let ours = match line.split_once('=') {
+            Some((k, _)) => matches!(k.trim(), "ssid" | "sspassword"),
+            None => false,
+        };
+        if !ours {
+            lines.push(line.to_string());
+        }
+    }
     if !user.is_empty() {
         lines.push(format!("ssid={user}"));
         lines.push(format!("sspassword={password}"));
@@ -578,7 +580,11 @@ fn label_for(
     cart: &Cart,
 ) -> Result<Found, String> {
     let (sets, system) = source(cart.platform, &cart.rom);
-    let crc = (!is_disc(&cart.rom)).then(|| crc_of(&cart.rom)).flatten();
+    // A disc's crc is not what ScreenScraper knows it by.
+    let crc = match is_disc(&cart.rom) {
+        false => crc_of(&cart.rom),
+        true => None,
+    };
     let png = |bytes: Option<Vec<u8>>| bytes.filter(|b| b.starts_with(b"\x89PNG"));
     let (mut logo, mut boxart) = (None, None);
     let mut turned_away = false;

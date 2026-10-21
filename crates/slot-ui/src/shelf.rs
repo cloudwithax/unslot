@@ -339,7 +339,7 @@ impl Shelf {
             return None;
         }
         if n == 1 {
-            return (off == 0).then_some(self.index);
+            return if off == 0 { Some(self.index) } else { None };
         }
         Some((self.index as i32 + off).rem_euclid(n) as usize)
     }

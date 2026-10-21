@@ -287,7 +287,11 @@ fn work(
         set(&mut |v| v.error = None);
         let mut errors = Vec::new();
         let was = have.clone();
-        let changed = |f: fn(&Wanted) -> bool| was.as_ref().is_none_or(|w| f(w) != f(&want));
+        // Nothing was wanted before the first look, so everything is a change then.
+        let changed = |f: fn(&Wanted) -> bool| match &was {
+            Some(w) => f(w) != f(&want),
+            None => true,
+        };
 
         if was.as_ref().map(|w| &w.password) != Some(&want.password) {
             if let Some(password) = &want.password {
@@ -304,7 +308,10 @@ fn work(
             }
         }
         // A new password reaches Samba by starting it again.
-        let new_password = was.as_ref().is_some_and(|w| w.password != want.password);
+        let new_password = match &was {
+            Some(w) => w.password != want.password,
+            None => false,
+        };
         if changed(|w| w.samba) || (want.samba && new_password) {
             let share = match (want.samba, &want.password) {
                 (true, Some(password)) => Some(password.as_str()),
@@ -421,11 +428,15 @@ fn look_at_sync(services: &mut dyn ServicesBackend, pace: &mut Pace, at: f64, se
         return;
     };
     let secs_left = pace.secs_left(at, status.received, status.need);
-    let syncing = (status.need > 0 && status.connected).then_some(SyncProgress {
-        need: status.need,
-        total: status.total,
-        secs_left,
-    });
+    let syncing = if status.need > 0 && status.connected {
+        Some(SyncProgress {
+            need: status.need,
+            total: status.total,
+            secs_left,
+        })
+    } else {
+        None
+    };
     set(&mut |v| {
         v.syncing = syncing;
         v.synced = status.files;
@@ -564,7 +575,11 @@ impl ServicesBackend for SimServices {
     fn vpn_keep(&mut self, _: &Tunnel) {}
 
     fn sync_status(&mut self) -> Option<SyncStatus> {
-        let games = self.root.as_ref().filter(|_| self.syncthing)?.join("Games");
+        let root = match &self.root {
+            Some(root) if self.syncthing => root,
+            _ => return None,
+        };
+        let games = root.join("Games");
         let files = std::fs::read_dir(games)
             .into_iter()
             .flatten()
@@ -870,8 +885,11 @@ mod tests {
             }
         );
         let mut down = |path: &str| {
-            (path == "/rest/system/connections")
-                .then(|| r#"{"connections": {"X": {"connected": false}}}"#.to_string())
+            if path == "/rest/system/connections" {
+                Some(r#"{"connections": {"X": {"connected": false}}}"#.to_string())
+            } else {
+                None
+            }
         };
         assert_eq!(
             sync_status(&folders, &mut down),
