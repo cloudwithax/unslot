@@ -90,7 +90,7 @@ fn visible_size() -> Option<(u32, u32)> {
         let fb = std::fs::File::open("/dev/fb0").ok()?;
         let mut info = [0u32; 40];
         let rc = unsafe { ioctl(fb.as_raw_fd(), FBIOGET_VSCREENINFO, info.as_mut_ptr()) };
-        (rc == 0 && info[0] > 0 && info[1] > 0).then_some((info[0], info[1]))
+        if rc == 0 && info[0] > 0 && info[1] > 0 { Some((info[0], info[1])) } else { None }
     }
 }
 
@@ -99,13 +99,13 @@ pub fn panel_mode(text: &str) -> Option<(u32, u32)> {
     let (w, rest) = body.split_once('x')?;
     let h: String = rest.chars().take_while(char::is_ascii_digit).collect();
     let (w, h) = (w.trim().parse().ok()?, h.parse().ok()?);
-    (w > 0 && h > 0).then_some((w, h))
+    if w > 0 && h > 0 { Some((w, h)) } else { None }
 }
 
 pub fn panel_size(text: &str) -> Option<(u32, u32)> {
     let (w, h) = text.trim().split_once(',')?;
     let (w, h) = (w.trim().parse().ok()?, h.trim().parse().ok()?);
-    (w > 0 && h > 0).then_some((w, h))
+    if w > 0 && h > 0 { Some((w, h)) } else { None }
 }
 
 pub fn egl_error(what: &str, code: i32) -> GfxError {
@@ -261,7 +261,7 @@ fn query_size(egl: &Egl, display: Ptr, surface: Ptr) -> Option<(u32, u32)> {
             return None;
         }
     }
-    (w > 0 && h > 0).then_some((w as u32, h as u32))
+    if w > 0 && h > 0 { Some((w as u32, h as u32)) } else { None }
 }
 
 impl Surface for FbdevSurface {

@@ -32,7 +32,11 @@ fn bios(state: &[u8]) -> Option<u32> {
     } else {
         state.to_vec()
     };
-    (gba.len() >= 0x400).then(|| u32::from_le_bytes(gba[4..8].try_into().unwrap()))
+    if gba.len() >= 0x400 {
+        Some(u32::from_le_bytes(gba[4..8].try_into().unwrap()))
+    } else {
+        None
+    }
 }
 
 pub fn same_bios(a: &[u8], b: &[u8]) -> bool {

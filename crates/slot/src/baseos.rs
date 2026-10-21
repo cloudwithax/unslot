@@ -13,6 +13,6 @@ pub fn var_in(key: &str, env: Option<String>, release: &Path) -> Option<String> 
 pub fn lookup(release: &str, key: &str) -> Option<String> {
     release.lines().find_map(|line| {
         let (k, v) = line.trim().split_once('=')?;
-        (k == key).then(|| v.trim_matches('"').to_string())
+        if k == key { Some(v.trim_matches('"').to_string()) } else { None }
     })
 }

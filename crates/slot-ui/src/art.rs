@@ -100,7 +100,7 @@ fn decode_jpeg_bytes(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
             })
             .collect(),
     };
-    (rgba.len() == (w * h * 4) as usize).then_some((rgba, w, h))
+    if rgba.len() == (w * h * 4) as usize { Some((rgba, w, h)) } else { None }
 }
 
 pub(crate) fn decode_png(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {

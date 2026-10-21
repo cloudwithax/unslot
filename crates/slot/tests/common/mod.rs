@@ -123,12 +123,12 @@ pub fn vendored_core() -> Option<PathBuf> {
         "vendor/mgba_libretro.{}",
         std::env::consts::DLL_EXTENSION
     ));
-    p.exists().then_some(p)
+    if p.exists() { Some(p) } else { None }
 }
 
 pub fn real_bios() -> Option<PathBuf> {
     let p = repo_root().join("sdcard/BIOS/gba_bios.bin");
-    p.exists().then_some(p)
+    if p.exists() { Some(p) } else { None }
 }
 
 pub fn logo_rom() -> Option<Vec<u8>> {

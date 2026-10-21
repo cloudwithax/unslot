@@ -328,7 +328,7 @@ fn absinfo(file: &File, code: u16) -> Option<(i32, i32, i32)> {
     let request = 0x8018_4540u64 + u64::from(code);
     let mut info = [0i32; 6];
     let rc = unsafe { libc::ioctl(file.as_raw_fd(), request as _, info.as_mut_ptr()) };
-    (rc == 0).then_some((info[0], info[1], info[2]))
+    if rc == 0 { Some((info[0], info[1], info[2])) } else { None }
 }
 
 #[cfg(not(unix))]

@@ -89,13 +89,17 @@ pub struct Gestures {
 }
 
 fn ramp_due(down: Option<Millis>, last: Option<Millis>, now: Millis) -> bool {
-    let Some(down) = down else {
-        return false;
+    let down = match down {
+        Some(d) => d,
+        None => return false,
     };
     if now.saturating_sub(down) < VOLUME_REPEAT_DELAY_MS {
         return false;
     }
-    last.is_none_or(|l| now.saturating_sub(l) >= VOLUME_REPEAT_MS)
+    match last {
+        Some(l) => now.saturating_sub(l) >= VOLUME_REPEAT_MS,
+        None => true,
+    }
 }
 
 impl Gestures {
@@ -183,10 +187,12 @@ impl Gestures {
             self.chord_held |= bit;
             return vec![action];
         }
-        if let (true, Some((bit, action))) = (self.chording(now), chord(b)) {
-            self.mark_chorded();
-            self.chord_held |= bit;
-            return vec![action];
+        if self.chording(now) {
+            if let Some((bit, action)) = chord(b) {
+                self.mark_chorded();
+                self.chord_held |= bit;
+                return vec![action];
+            }
         }
         match b {
             Btn::Select => self.select_down(now),
@@ -272,8 +278,9 @@ impl Gestures {
     }
 
     fn select_up(&mut self, now: Millis) -> Vec<Action> {
-        let Select::Held { chorded, sent, .. } = std::mem::take(&mut self.select) else {
-            return Vec::new();
+        let (chorded, sent) = match std::mem::take(&mut self.select) {
+            Select::Held { chorded, sent, .. } => (chorded, sent),
+            _ => return Vec::new(),
         };
         match (sent, chorded) {
             (Some(at), _) if now.saturating_sub(at) >= SELECT_TAP_MS => {
@@ -318,16 +325,18 @@ impl Gestures {
             self.eject_fired = false;
             return Vec::new();
         }
-        let Some(d) = self.menu_down_at.take() else {
-            return Vec::new();
+        let d = match self.menu_down_at.take() {
+            Some(d) => d,
+            None => return Vec::new(),
         };
         let ejected = self.eject_fired;
         self.eject_fired = false;
         let tapped = !ejected && now.saturating_sub(d) < MENU_TAP_MS;
-        self.menu_last_tap = tapped.then_some(now);
-        match tapped {
-            true => vec![Action::QuickMenu],
-            false => Vec::new(),
+        self.menu_last_tap = if tapped { Some(now) } else { None };
+        if tapped {
+            vec![Action::QuickMenu]
+        } else {
+            Vec::new()
         }
     }
 
@@ -335,11 +344,7 @@ impl Gestures {
         let held = self.power_hold_fired;
         self.power_down_at = None;
         self.power_hold_fired = false;
-        vec![if held {
-            Action::PowerOff
-        } else {
-            Action::PowerTap
-        }]
+        vec![if held { Action::PowerOff } else { Action::PowerTap }]
     }
 
     fn volume_press(&mut self, b: Btn, now: Millis) -> Vec<Action> {
@@ -353,7 +358,10 @@ impl Gestures {
             _ => self.vol_down_ramp = None,
         }
         let mut out = vec![action];
-        let paired = other.is_some_and(|t| now.abs_diff(t) <= MUTE_CHORD_MS);
+        let paired = match other {
+            Some(t) => now.abs_diff(t) <= MUTE_CHORD_MS,
+            None => false,
+        };
         if paired && !self.mute_fired {
             self.mute_fired = true;
             out.push(Action::MuteToggle);
@@ -363,8 +371,14 @@ impl Gestures {
 
     fn volume_release(&mut self, b: Btn) -> Vec<Action> {
         match b {
-            Btn::VolUp => (self.vol_up_at, self.vol_up_ramp) = (None, None),
-            _ => (self.vol_down_at, self.vol_down_ramp) = (None, None),
+            Btn::VolUp => {
+                self.vol_up_at = None;
+                self.vol_up_ramp = None;
+            }
+            _ => {
+                self.vol_down_at = None;
+                self.vol_down_ramp = None;
+            }
         }
         if self.vol_up_at.is_none() && self.vol_down_at.is_none() {
             self.mute_fired = false;
@@ -399,9 +413,10 @@ impl Gestures {
         if self.ff_latched {
             self.ff_latching_press = false;
         } else {
-            let double = self
-                .r2_last_release
-                .is_some_and(|rel| now.saturating_sub(rel) <= FF_DOUBLE_TAP_MS);
+            let double = match self.r2_last_release {
+                Some(rel) => now.saturating_sub(rel) <= FF_DOUBLE_TAP_MS,
+                None => false,
+            };
             self.ff_latched = double;
             self.ff_latching_press = double;
         }
@@ -413,7 +428,8 @@ impl Gestures {
     }
 
     fn ff_up(&mut self, now: Millis) -> Vec<Action> {
-        if std::mem::take(&mut self.r2_refused) {
+        if self.r2_refused {
+            self.r2_refused = false;
             return Vec::new();
         }
         self.r2_last_release = Some(now);
@@ -437,11 +453,13 @@ impl Gestures {
 
 impl Gestures {
     fn menu_display_chord(&self, b: Btn) -> Option<(u16, Action)> {
-        (self.menu_dpad_display
-            && !self.eject_fired
-            && (self.menu_down_at.is_some() || self.menu_display_chorded))
-            .then(|| display_chord(b))
-            .flatten()
+        if !self.menu_dpad_display || self.eject_fired {
+            return None;
+        }
+        if self.menu_down_at.is_none() && !self.menu_display_chorded {
+            return None;
+        }
+        display_chord(b)
     }
 }
 

@@ -179,6 +179,6 @@ impl CorePicker {
     fn hop_progress(&self, now: Millis) -> Option<f32> {
         let hop = self.hop?;
         let q = now.saturating_sub(hop.started) as f32 / HOP_MS as f32;
-        (q < 1.0).then_some(q)
+        if q < 1.0 { Some(q) } else { None }
     }
 }

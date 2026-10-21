@@ -309,7 +309,7 @@ fn upload(node: &fs::File, id: i16) -> Option<i16> {
                 &mut effect as *mut FfEffect as *mut c_void,
             )
         };
-        (rc >= 0).then_some(effect.id)
+        if rc >= 0 { Some(effect.id) } else { None }
     }
 }
 
@@ -601,7 +601,7 @@ pub fn read_only_in(mounts: &str, path: &Path) -> bool {
             let mut f = l.split_whitespace();
             let point = Path::new(f.nth(1)?);
             let options = f.nth(1)?;
-            path.starts_with(point).then_some((point, options))
+            if path.starts_with(point) { Some((point, options)) } else { None }
         })
         .max_by_key(|(point, _)| point.as_os_str().len())
         .is_some_and(|(_, options)| options.split(',').any(|o| o == "ro"))

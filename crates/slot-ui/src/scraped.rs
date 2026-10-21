@@ -185,7 +185,7 @@ pub fn box_hue(png: &[u8]) -> Option<u16> {
             (0, 0.0),
             |acc, (i, w)| if *w > acc.1 { (i, *w) } else { acc },
         );
-    (weight > 0.0).then_some(best as u16 * 10 + 5)
+    if weight > 0.0 { Some(best as u16 * 10 + 5) } else { None }
 }
 
 fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [u8; 3] {

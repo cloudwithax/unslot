@@ -188,7 +188,7 @@ impl OffscreenGl {
                 let mut config: Ptr = std::ptr::null_mut();
                 let mut found = 0;
                 let ok = choose_config(display, attrs.as_ptr(), &mut config, 1, &mut found);
-                (ok != 0 && found > 0).then_some(config)
+                if ok != 0 && found > 0 { Some(config) } else { None }
             };
             let size = [EGL_WIDTH, 16, EGL_HEIGHT, 16, EGL_NONE];
             let make = |version: i32, bit: i32| {
@@ -199,7 +199,7 @@ impl OffscreenGl {
                 }
                 let attrs = [EGL_CONTEXT_CLIENT_VERSION, version, EGL_NONE];
                 let context = create_context(display, config, std::ptr::null_mut(), attrs.as_ptr());
-                (!context.is_null()).then_some((surface, context))
+                if !context.is_null() { Some((surface, context)) } else { None }
             };
             let made = match gles3 {
                 true => make(3, EGL_OPENGL_ES3_BIT).map(|m| (m, true)),

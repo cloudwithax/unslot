@@ -38,7 +38,7 @@ pub fn size(bmp: &[u8]) -> Option<(usize, usize)> {
     let w = u32_at(bmp, 18)? as i32;
     let h = u32_at(bmp, 22)? as i32;
     let (w, h) = (w.unsigned_abs() as usize, h.unsigned_abs() as usize);
-    ((1..=4096).contains(&w) && (1..=4096).contains(&h)).then_some((w, h))
+    if (1..=4096).contains(&w) && (1..=4096).contains(&h) { Some((w, h)) } else { None }
 }
 
 pub fn decode(bmp: &[u8]) -> Option<Bmp> {

@@ -9,12 +9,12 @@ fn vendored() -> Option<PathBuf> {
         "vendor/mgba_libretro.{}",
         std::env::consts::DLL_EXTENSION
     ));
-    p.exists().then_some(p)
+    if p.exists() { Some(p) } else { None }
 }
 
 fn card_cart() -> Option<PathBuf> {
     let p = common::repo_root().join("sdcard/Games/GB/Tetris Rosy Retrospection.gb");
-    p.exists().then_some(p)
+    if p.exists() { Some(p) } else { None }
 }
 
 fn link_core(dylib: &Path, player: u8) -> LibretroCore {

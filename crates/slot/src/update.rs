@@ -96,7 +96,11 @@ pub fn parse_release(text: &str) -> Option<Release> {
 pub fn parse_sums(text: &str, name: &str) -> Option<String> {
     text.lines().find_map(|line| {
         let (sum, file) = line.split_once(char::is_whitespace)?;
-        (file.trim_start().trim_start_matches('*') == name).then(|| sum.to_ascii_lowercase())
+        if file.trim_start().trim_start_matches('*') == name {
+            Some(sum.to_ascii_lowercase())
+        } else {
+            None
+        }
     })
 }
 

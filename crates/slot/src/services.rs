@@ -143,7 +143,11 @@ impl Pace {
             }
         }
         self.last = Some((at, received));
-        (self.per_sec >= 1024.0).then(|| (need as f64 / self.per_sec).ceil() as u64)
+        if self.per_sec >= 1024.0 {
+            Some((need as f64 / self.per_sec).ceil() as u64)
+        } else {
+            None
+        }
     }
 }
 
