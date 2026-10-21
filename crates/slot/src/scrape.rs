@@ -453,6 +453,10 @@ pub struct ScrapeView {
     pub made: Vec<(Platform, String)>,
     /// Games looked for and not found.
     pub missed: usize,
+    /// Games the last run passed over because ScreenScraper turned them away, with a 403 or
+    /// another error of its own. They are skipped, not stopped on, and libretro still gets its
+    /// turn at them.
+    pub skipped: usize,
     pub error: Option<String>,
 }
 
@@ -520,21 +524,29 @@ fn work(
             v.done = 0;
             v.total = total;
             v.error = None;
+            v.skipped = 0;
         });
         for cart in carts {
             set(&mut |v| v.current = Some(cart.stem.clone()));
             match label_for(&mut *fetch, &root, &mut dats, login.as_ref(), &cart) {
-                Ok(Some(png)) => {
-                    let dir = root.join("Labels").join(cart.platform.dir_name());
-                    let path = dir.join(format!("{}.png", cart.stem));
-                    let written =
-                        std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, png));
-                    match written {
-                        Ok(()) => set(&mut |v| v.made.push((cart.platform, cart.stem.clone()))),
-                        Err(e) => set(&mut |v| v.error = Some(format!("{}: {e}", path.display()))),
+                Ok(found) => match found.png {
+                    Some(png) => {
+                        let dir = root.join("Labels").join(cart.platform.dir_name());
+                        let path = dir.join(format!("{}.png", cart.stem));
+                        let written =
+                            std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, png));
+                        match written {
+                            Ok(()) => set(&mut |v| v.made.push((cart.platform, cart.stem.clone()))),
+                            Err(e) => {
+                                set(&mut |v| v.error = Some(format!("{}: {e}", path.display())))
+                            }
+                        }
                     }
-                }
-                Ok(None) => set(&mut |v| v.missed += 1),
+                    // A game ScreenScraper would not answer for is skipped, not missed: it was
+                    // never really looked for, and another run can pick it up where it left off.
+                    None if found.turned_away => set(&mut |v| v.skipped += 1),
+                    None => set(&mut |v| v.missed += 1),
+                },
                 Err(e) => {
                     eprintln!("slot: scraper: {e}");
                     set(&mut |v| v.error = Some(e.clone()));
@@ -550,18 +562,26 @@ fn work(
     }
 }
 
-/// A label for one game, or None when no art for it turned up.
+/// What one game's search came to: its label once drawn, and whether ScreenScraper was the one
+/// that turned it away.
+struct Found {
+    png: Option<Vec<u8>>,
+    turned_away: bool,
+}
+
+/// A label for one game, or none when no art for it turned up.
 fn label_for(
     fetch: &mut dyn Fetch,
     root: &Path,
     dats: &mut HashMap<&'static str, Dat>,
     login: Option<&SsLogin>,
     cart: &Cart,
-) -> Result<Option<Vec<u8>>, String> {
+) -> Result<Found, String> {
     let (sets, system) = source(cart.platform, &cart.rom);
     let crc = (!is_disc(&cart.rom)).then(|| crc_of(&cart.rom)).flatten();
     let png = |bytes: Option<Vec<u8>>| bytes.filter(|b| b.starts_with(b"\x89PNG"));
     let (mut logo, mut boxart) = (None, None);
+    let mut turned_away = false;
 
     if let Some(login) = login {
         let size = std::fs::metadata(&cart.rom).map(|m| m.len()).unwrap_or(0);
@@ -570,13 +590,19 @@ fn label_for(
             .file_name()
             .and_then(|f| f.to_str())
             .unwrap_or(&cart.stem);
-        if let Some(answer) = fetch.get(&ss_url(login, system, crc, size, file))? {
-            let answer = String::from_utf8_lossy(&answer);
-            if let Some(url) = ss_media(&answer, "wheel") {
-                logo = png(fetch.get(&url)?);
+        // ScreenScraper refusing a game—a 403, a quota used up, an outage—is that game's
+        // trouble and not the run's: it is passed over, and libretro still gets its turn.
+        match ss_art(fetch, login, system, crc, size, file) {
+            Ok(art) => {
+                logo = png(art.logo);
+                boxart = png(art.boxart);
             }
-            if let Some(url) = ss_media(&answer, "box-2D") {
-                boxart = png(fetch.get(&url)?);
+            Err(e) => {
+                eprintln!(
+                    "slot: scraper: ScreenScraper passed {} over: {e}",
+                    cart.stem
+                );
+                turned_away = true;
             }
         }
     }
@@ -606,13 +632,41 @@ fn label_for(
 
     let (w, h) = slot_ui::label_size(cart);
     let hue = slot_ui::hue_of(slot_ui::label_colour(&slot_ui::label_text(cart)));
-    Ok(slot_ui::scraped_label(
-        logo.as_deref(),
-        boxart.as_deref(),
-        hue,
-        w * 2,
-        h * 2,
-    ))
+    Ok(Found {
+        png: slot_ui::scraped_label(logo.as_deref(), boxart.as_deref(), hue, w * 2, h * 2),
+        turned_away,
+    })
+}
+
+/// ScreenScraper's art for one game: its logo and its box, either of which may be missing.
+#[derive(Default)]
+struct SsArt {
+    logo: Option<Vec<u8>>,
+    boxart: Option<Vec<u8>>,
+}
+
+/// ScreenScraper's logo and box art for one game, fetched from the `jeuInfos` answer. An error
+/// here is ScreenScraper's, so the caller skips only this game and lets libretro have it.
+fn ss_art(
+    fetch: &mut dyn Fetch,
+    login: &SsLogin,
+    system: u32,
+    crc: Option<u32>,
+    size: u64,
+    file: &str,
+) -> Result<SsArt, String> {
+    let mut art = SsArt::default();
+    let Some(answer) = fetch.get(&ss_url(login, system, crc, size, file))? else {
+        return Ok(art);
+    };
+    let answer = String::from_utf8_lossy(&answer);
+    if let Some(url) = ss_media(&answer, "wheel") {
+        art.logo = fetch.get(&url)?;
+    }
+    if let Some(url) = ss_media(&answer, "box-2D") {
+        art.boxart = fetch.get(&url)?;
+    }
+    Ok(art)
 }
 
 /// A set's database, from memory, the card, or libretro, in that order.
@@ -949,5 +1003,46 @@ game (
                 .exists(),
             "the database was not kept"
         );
+    }
+
+    #[test]
+    fn a_game_screenscraper_turns_away_is_skipped_and_the_run_goes_on() {
+        /// SimFetch, but ScreenScraper answers every call with a flat refusal.
+        struct BadSs(SimFetch);
+        impl Fetch for BadSs {
+            fn get(&mut self, url: &str) -> Result<Option<Vec<u8>>, String> {
+                if url.starts_with(SS_API) {
+                    return Err("The art server answered 403".into());
+                }
+                self.0.get(url)
+            }
+        }
+        let d = tempfile::tempdir().unwrap();
+        let games = d.path().join("Games/GBA");
+        std::fs::create_dir_all(&games).unwrap();
+        std::fs::write(games.join("whatever.gba"), [0u8; 8]).unwrap();
+        std::fs::write(games.join("unknown.gba"), [1u8; 8]).unwrap();
+        std::fs::create_dir_all(d.path().join("Config")).unwrap();
+        std::fs::write(d.path().join(SS_CONF), "devid=d\ndevpassword=p\n").unwrap();
+        let carts = slot_store::scan(d.path()).unwrap();
+        let s = Scraper::spawn(Box::new(BadSs(SimFetch)), d.path());
+        s.fetch(carts);
+        let start = std::time::Instant::now();
+        let v = loop {
+            let v = s.view();
+            if (!v.running && v.done == 2) || start.elapsed().as_secs() > 10 {
+                break v;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert_eq!(v.done, 2, "a refusal stopped the run: {v:?}");
+        assert!(v.error.is_none(), "{:?}", v.error);
+        assert_eq!(v.made, [(Platform::Gba, "whatever".to_string())]);
+        assert_eq!(
+            v.skipped, 1,
+            "the game with no art to fall back on was not passed over"
+        );
+        assert_eq!(v.missed, 0, "a skipped game was counted as missed");
+        assert!(d.path().join("Labels/GBA/whatever.png").exists());
     }
 }

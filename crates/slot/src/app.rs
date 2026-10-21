@@ -2818,6 +2818,11 @@ impl App {
             ),
             _ if note.is_some() => note.unwrap_or_default().to_string(),
             _ if v.error.is_some() => v.error.clone().unwrap_or_default(),
+            _ if v.skipped > 0 => format!(
+                "Skipped {} game{} ScreenScraper turned away",
+                v.skipped,
+                if v.skipped == 1 { "" } else { "s" }
+            ),
             _ if made > 0 => format!(
                 "Added {made} label{} to the shelves",
                 if made == 1 { "" } else { "s" }
