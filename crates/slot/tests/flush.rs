@@ -31,17 +31,17 @@ fn power_press_edge_flushes_immediately_not_on_release() {
 }
 
 #[test]
-fn autosave_fires_at_sixty_seconds_and_not_before() {
+fn autosave_fires_at_five_minutes_and_not_before() {
     let d = tmp_root_with_carts(&["Emerald"]);
     let mut a = app_playing_in(d.path(), "Emerald");
-    a.tick_ms(59_999);
+    a.tick_ms(299_999);
     assert!(
         StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Emerald")
             .read_resume()
             .unwrap()
             .is_none()
     );
-    a.tick_ms(60_000);
+    a.tick_ms(300_000);
     a.settle_saves();
     assert!(
         StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Emerald")
@@ -132,11 +132,11 @@ fn the_autosave_repeats_rather_than_firing_once() {
     let d = tmp_root_with_carts(&["Emerald"]);
     let (snapshot, flushes) = counting();
     let mut a = app_playing_with(d.path(), "Emerald", snapshot);
-    a.tick_ms(60_000);
+    a.tick_ms(300_000);
     assert_eq!(flushes.load(Ordering::Relaxed), 1);
-    a.tick_ms(119_999);
-    assert_eq!(flushes.load(Ordering::Relaxed), 1, "one write per minute");
-    a.tick_ms(120_000);
+    a.tick_ms(599_999);
+    assert_eq!(flushes.load(Ordering::Relaxed), 1, "one write per five minutes");
+    a.tick_ms(600_000);
     assert_eq!(flushes.load(Ordering::Relaxed), 2);
 }
 
@@ -145,17 +145,17 @@ fn a_flush_resets_the_autosave_clock() {
     let d = tmp_root_with_carts(&["Emerald"]);
     let (snapshot, flushes) = counting();
     let mut a = app_playing_with(d.path(), "Emerald", snapshot);
-    a.tick_ms(30_000);
+    a.tick_ms(150_000);
     a.apply(Action::LidClose);
     a.apply(Action::LidOpen);
     assert_eq!(flushes.load(Ordering::Relaxed), 1);
-    a.tick_ms(61_000);
+    a.tick_ms(305_000);
     assert_eq!(
         flushes.load(Ordering::Relaxed),
         1,
-        "the lid wrote 31 s ago, not 61"
+        "the lid wrote 155 s ago, not 305"
     );
-    a.tick_ms(90_000);
+    a.tick_ms(450_000);
     assert_eq!(flushes.load(Ordering::Relaxed), 2);
 }
 
@@ -318,7 +318,7 @@ fn charging_outranks_low_so_a_flat_device_on_a_cable_is_not_red() {
 fn an_autosave_lands_once_the_writes_settle() {
     let d = tmp_root_with_carts(&["Emerald"]);
     let mut a = app_playing_in(d.path(), "Emerald");
-    a.tick_ms(60_000);
+    a.tick_ms(300_000);
     a.settle_saves();
     assert!(
         StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Emerald")
@@ -333,7 +333,7 @@ fn a_lid_close_right_after_an_autosave_leaves_the_lids_state() {
     let d = tmp_root_with_carts(&["Emerald"]);
     let (snapshot, _) = counting();
     let mut a = app_playing_with(d.path(), "Emerald", snapshot);
-    a.tick_ms(60_000);
+    a.tick_ms(300_000);
     a.apply(Action::LidClose);
     a.settle_saves();
     let state = StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Emerald")
@@ -358,9 +358,9 @@ fn an_autosave_the_card_refuses_puts_up_a_banner() {
     let d = tmp_root_with_carts(&["Emerald"]);
     let mut a = app_playing_in(d.path(), "Emerald");
     lock_the_card(d.path());
-    a.tick_ms(60_000);
+    a.tick_ms(300_000);
     a.settle_saves();
-    a.tick_ms(60_010);
+    a.tick_ms(300_010);
     assert!(a.card_alarm(), "a refused autosave raised no alarm");
     a.tick_ms(3_600_000);
     assert!(
@@ -374,14 +374,14 @@ fn the_alarm_clears_once_the_card_takes_a_write_again() {
     let d = tmp_root_with_carts(&["Emerald"]);
     let mut a = app_playing_in(d.path(), "Emerald");
     lock_the_card(d.path());
-    a.tick_ms(60_000);
+    a.tick_ms(300_000);
     a.settle_saves();
-    a.tick_ms(60_010);
+    a.tick_ms(300_010);
     assert!(a.card_alarm());
     std::fs::remove_file(d.path().join("States")).unwrap();
-    a.tick_ms(120_000);
+    a.tick_ms(600_000);
     a.settle_saves();
-    a.tick_ms(120_010);
+    a.tick_ms(600_010);
     assert!(!a.card_alarm(), "the alarm stayed after a write landed");
 }
 
@@ -389,9 +389,9 @@ fn the_alarm_clears_once_the_card_takes_a_write_again() {
 fn an_autosave_that_lands_puts_up_no_banner() {
     let d = tmp_root_with_carts(&["Emerald"]);
     let mut a = app_playing_in(d.path(), "Emerald");
-    a.tick_ms(60_000);
+    a.tick_ms(300_000);
     a.settle_saves();
-    a.tick_ms(60_010);
+    a.tick_ms(300_010);
     assert!(!a.card_alarm());
 }
 

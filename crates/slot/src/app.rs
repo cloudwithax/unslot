@@ -62,7 +62,7 @@ const FOOTER_SLIDE_S: f32 = POWER_ON_S;
 
 const VOLUME_STEP: u8 = 5;
 
-const AUTOSAVE_MS: Millis = 60_000;
+const AUTOSAVE_MS: Millis = 300_000;
 const CARD_CHECK_MS: Millis = 2_000;
 
 const BATTERY_CRITICAL: u8 = 5;
@@ -6282,6 +6282,12 @@ impl App {
 
     fn autosave(&mut self) {
         self.autosave_at = self.now() + AUTOSAVE_MS;
+        // Taking a Dreamcast state holds the game up for a quarter second, and writing it can stall
+        // the game's reads from the card for seconds. It is still written on sleep, eject, power
+        // off and a flat battery.
+        if self.platform == Platform::Dreamcast {
+            return;
+        }
         self.settle_saves();
         let (Some(root), Some(snapshot), Some(cart)) = (&self.root, &self.snapshot, self.seated())
         else {
