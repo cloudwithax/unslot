@@ -38,9 +38,17 @@ SMB="$RUN/slotsamba"
 TS_SOCK="$RUN/tailscale/tailscaled.sock"
 TS_PID="$RUN/slot-tailscaled.pid"
 ST_PID="$RUN/slot-syncthing.pid"
+ST_STAMP="$RUN/slot-syncthing.stamp"
+SMB_STAMP="$SMB/stamp"
 
 alive() {
 	[ -f "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null
+}
+
+# What a service was started with, so one a slot before this started the same way is left
+# running rather than cut off mid-transfer.
+stamp() {
+	printf '%s\n' "$@" | sha256sum
 }
 
 stop_pid() {
@@ -95,6 +103,8 @@ samba_on() {
 	root="$1"
 	pw=""
 	IFS= read -r pw || [ -n "$pw" ] || { echo "no password given" >&2; return 1; }
+	alive "$SMB/smbd-smb.conf.pid" && [ "$(stamp "$root" "$pw")" = "$(cat "$SMB_STAMP" 2>/dev/null)" ] &&
+		return 0
 	samba_off
 	/bin/mkdir -p "$SMB/private" "$SMB/lock"
 	cat > "$SMB/smb.conf" <<EOF
@@ -127,11 +137,13 @@ EOF
 			>/dev/null || return 1
 	LD_LIBRARY_PATH="$SVC/samba/lib" $IDLE "$SVC/samba/bin/smbd" -s "$SMB/smb.conf" -D \
 		< /dev/null > "$SMB/smbd.out" 2>&1 || { echo "smbd did not start" >&2; return 1; }
+	stamp "$root" "$pw" > "$SMB_STAMP"
 }
 
 samba_off() {
 	# Samba 3.6 names its pidfile after the config it was given.
 	stop_pid "$SMB/smbd-smb.conf.pid"
+	/bin/rm -f "$SMB_STAMP"
 	# Each connection has its own smbd, which outlives the one that listens.
 	$KILLALL smbd 2>/dev/null || true
 	return 0
@@ -142,6 +154,10 @@ syncthing_on() {
 	home="$root/Config/syncthing"
 	pw=""
 	IFS= read -r pw || [ -n "$pw" ] || { echo "no password given" >&2; return 1; }
+	if alive "$ST_PID" && [ "$(stamp "$root" "$pw")" = "$(cat "$ST_STAMP" 2>/dev/null)" ]; then
+		"$SVC/syncthing" device-id --home="$home"
+		return
+	fi
 	syncthing_off
 	/bin/mkdir -p "$home"
 	# Makes the keys and config the first time, and each time sets the web page's login.
@@ -156,6 +172,7 @@ syncthing_on() {
 		--gui-address=0.0.0.0:8384 --log-file="$RUN/slot-syncthing.log" \
 		--log-max-size=1048576 --log-max-old-files=0 < /dev/null > /dev/null 2>&1 &
 	echo $! > "$ST_PID"
+	stamp "$root" "$pw" > "$ST_STAMP"
 	"$SVC/syncthing" device-id --home="$home"
 }
 
@@ -163,6 +180,7 @@ syncthing_off() {
 	[ -f "$ST_PID" ] || return 0
 	pid="$(cat "$ST_PID")"
 	stop_pid "$ST_PID"
+	/bin/rm -f "$ST_STAMP"
 	# Gone before another starts on its database, which it holds until it exits.
 	s=0
 	while kill -0 "$pid" 2>/dev/null && [ "$s" -lt $((WAIT_S * 4)) ]; do

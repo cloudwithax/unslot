@@ -19,6 +19,8 @@ for bin in syncthing tailscaled wireguard-go samba/bin/smbd samba/bin/smbpasswd;
 	f="$TREE/System/services/$bin"
 	[ ! -e "$f" ] || [ -x "$f" ] || { echo "$f is not executable" >&2; exit 1; }
 done
+# wpa_cli runs this itself as the link comes and goes, to start DHCP.
+[ -x "$TREE/System/slotwifi.sh" ] || { echo "$TREE/System/slotwifi.sh is not executable" >&2; exit 1; }
 
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT HUP INT TERM

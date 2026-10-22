@@ -37,7 +37,7 @@ reset() {
 	make_fake "$TMP/bin/pidof" "$TMP/pidof.log" '[ "${FAKE_BASEOS_SSH:-}" = yes ] && echo 4242 && exit 0' 'exit 1'
 	make_fake "$TMP/bin/ip" "$TMP/ip.log"
 	make_fake "$TMP/svc/samba/bin/smbpasswd" "$TMP/smbpasswd.log" "cat > \"$TMP/smbpasswd.in\""
-	make_fake "$TMP/svc/samba/bin/smbd" "$TMP/smbd.log"
+	make_fake "$TMP/svc/samba/bin/smbd" "$TMP/smbd.log" "sleep 30 & echo \$! > \"$TMP/run/slotsamba/smbd-smb.conf.pid\""
 	# tailscaled stays up and opens its socket; as the CLI it says what it was asked.
 	make_fake "$TMP/svc/tailscaled" "$TMP/tailscaled.log" \
 		"[ \"\${TS_BE_CLI:-}\" = 1 ] && exit 0" \
@@ -92,6 +92,10 @@ grep -q 'guest ok = no' "$TMP/run/slotsamba/smb.conf" || fail "guests can get in
 grep -q -- "-s -a root" "$TMP/smbpasswd.log" || fail "root was not given a Samba password"
 [ "$(cat "$TMP/smbpasswd.in")" = "$(printf 'pw\npw')" ] || fail "smbpasswd was not told the password twice"
 grep -q -- "-s $TMP/run/slotsamba/smb.conf -D" "$TMP/smbd.log" || fail "smbd was not started on slot's config"
+echo 'pw' | run samba on /mnt/card || fail "samba on again failed"
+[ "$(grep -c -- '-D' "$TMP/smbd.log")" = 1 ] || fail "a running smbd was started again for the same share"
+echo 'new' | run samba on /mnt/card || fail "samba on with a new password failed"
+[ "$(grep -c -- '-D' "$TMP/smbd.log")" = 2 ] || fail "a new password did not start smbd again"
 run samba off
 grep -q smbd "$TMP/killall.log" || fail "samba off left the connections' smbds"
 
@@ -110,6 +114,11 @@ grep -q '<folder id="saves" path="/x" ignorePerms="false">' "$TMP/card/Config/sy
 grep -q -- "serve --home=$TMP/card/Config/syncthing --no-browser --no-restart --no-upgrade --gui-address=0.0.0.0:8384" \
 	"$TMP/syncthing.log" || fail "syncthing was not served on the network"
 kill -0 "$(cat "$TMP/run/slot-syncthing.pid")" 2>/dev/null || fail "syncthing is not running"
+echo 'pw' | run syncthing on "$TMP/card" > "$TMP/st.out" || fail "syncthing on again failed"
+[ "$(cat "$TMP/st.out")" = ABCDEFG-1234567 ] || fail "syncthing on again did not print the device ID"
+[ "$(grep -c '^serve' "$TMP/syncthing.log")" = 1 ] || fail "a running syncthing was started again for the same card"
+echo 'new' | run syncthing on "$TMP/card" > /dev/null || fail "syncthing on with a new password failed"
+[ "$(grep -c '^serve' "$TMP/syncthing.log")" = 2 ] || fail "a new password did not start syncthing again"
 run syncthing off
 [ -f "$TMP/run/slot-syncthing.pid" ] && fail "syncthing off left syncthing running"
 : | run syncthing on "$TMP/card" 2>/dev/null && fail "syncthing started with no password"
