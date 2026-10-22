@@ -185,6 +185,36 @@ fn a_multi_disc_game_is_shelved_once_as_its_playlist() {
 }
 
 #[test]
+fn a_disc_set_in_its_own_folder_is_shelved_as_the_disc_named_after_it() {
+    let d = tmp_root();
+    write_file(&d, "DC/Tony Hawk's Pro Skater 2 (USA)/Tony Hawk's Pro Skater 2 (USA).cue", "");
+    write_file(&d, "DC/Tony Hawk's Pro Skater 2 (USA)/Tony Hawk's Pro Skater 2 (USA) (Track 1).bin", "");
+    write_file(&d, "DC/downloaded_images/Crazy Taxi.png", "");
+    write_file(&d, "DC/Crazy Taxi.chd", "");
+    let carts: Vec<_> = scan(d.path())
+        .unwrap()
+        .into_iter()
+        .filter(|c| c.platform == Platform::Dreamcast)
+        .collect();
+    let stems: Vec<&str> = carts.iter().map(|c| c.stem.as_str()).collect();
+    assert_eq!(stems, ["Crazy Taxi", "Tony Hawk's Pro Skater 2 (USA)"]);
+    assert_eq!(
+        carts[1].rom,
+        d.path().join("Games/DC/Tony Hawk's Pro Skater 2 (USA)/Tony Hawk's Pro Skater 2 (USA).cue")
+    );
+}
+
+#[test]
+fn a_folder_beside_an_arcade_set_is_not_a_game_of_its_own() {
+    let d = tmp_root();
+    write_file(&d, "ARCADE/kof98/kof98.zip", "");
+    assert!(scan(d.path())
+        .unwrap()
+        .iter()
+        .all(|c| c.platform != Platform::Arcade));
+}
+
+#[test]
 fn a_playlist_hides_discs_only_on_its_own_shelf() {
     let d = tmp_root();
     write_file(&d, "MD/Sonic.md", "");

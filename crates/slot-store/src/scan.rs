@@ -94,13 +94,20 @@ pub fn scan(root: &Path) -> Result<Vec<Cart>, StoreError> {
                 continue;
             };
             let rom = entry.path();
-            if is_hidden(&rom) || !platform.accepts(&rom) || !is_file(&entry) {
-                continue;
-            }
+            let arcade = platform.spec().header == Header::Arcade;
+            // A disc set kept in its own folder, as Redump's are, is the disc named after the
+            // folder. Not for arcade, where a folder beside a romset holds that romset's disks.
+            let rom = match !arcade && !is_hidden(&rom) && is_dir(&entry) {
+                true => match disc_in(&rom, platform) {
+                    Some(disc) => disc,
+                    None => continue,
+                },
+                false if is_hidden(&rom) || !platform.accepts(&rom) || !is_file(&entry) => continue,
+                false => rom,
+            };
             let Some(stem) = rom.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
-            let arcade = platform.spec().header == Header::Arcade;
             if arcade && crate::arcade::is_bios(stem) {
                 continue;
             }
@@ -167,6 +174,24 @@ pub fn listing(dir: &Path) -> HashMap<String, String> {
         .filter(|name| !name.starts_with('.'))
         .map(|name| (name.to_lowercase(), name))
         .collect()
+}
+
+fn is_dir(entry: &std::fs::DirEntry) -> bool {
+    match entry.file_type() {
+        Ok(t) if t.is_symlink() => entry.path().is_dir(),
+        Ok(t) => t.is_dir(),
+        Err(_) => false,
+    }
+}
+
+/// The disc in `dir` named after it, in the order the platform lists its extensions.
+fn disc_in(dir: &Path, platform: Platform) -> Option<PathBuf> {
+    let name = dir.file_name()?.to_str()?;
+    platform
+        .extensions()
+        .iter()
+        .map(|ext| dir.join(format!("{name}.{ext}")))
+        .find(|p| p.is_file())
 }
 
 fn is_file(entry: &std::fs::DirEntry) -> bool {
