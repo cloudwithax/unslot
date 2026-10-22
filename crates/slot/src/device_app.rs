@@ -159,6 +159,11 @@ pub fn run() {
             frontend.poweroff();
             return;
         }
+        if frontend.reloading() {
+            // init starts the frontend again once slot is gone.
+            frontend.reload();
+            return;
+        }
         frontend.step_emulator(pacer.period, STEP_TIMEOUT);
         frontend.render(&mut compositor, window);
         let swap = Instant::now();

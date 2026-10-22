@@ -450,6 +450,7 @@ pub struct App {
     starting: Option<LinkStarting>,
     link_transport: Option<(u16, Box<dyn LinkChannel>)>,
     restarting: bool,
+    reloading: bool,
     act_at: Millis,
     root: Option<PathBuf>,
     state: SlotState,
@@ -706,6 +707,7 @@ impl App {
             starting: None,
             link_transport: None,
             restarting: false,
+            reloading: false,
             act_at: 0,
             root: None,
             state: SlotState::default(),
@@ -1206,9 +1208,14 @@ impl App {
             | QuickRow::Bezel => None,
             QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
             QuickRow::Bluetooth => Some(QuickValue::flag(self.state.bluetooth)),
-            QuickRow::BtDevices | QuickRow::Services | QuickRow::Updates | QuickRow::GameArt => {
-                None
-            }
+            QuickRow::BtDevices
+            | QuickRow::Services
+            | QuickRow::Updates
+            | QuickRow::GameArt
+            | QuickRow::Power
+            | QuickRow::Restart
+            | QuickRow::ShutDown
+            | QuickRow::Reload => None,
         }
     }
 
@@ -2026,8 +2033,12 @@ impl App {
         self.restarting && self.now() >= self.act_at
     }
 
+    pub fn ready_to_reload(&self) -> bool {
+        self.reloading && self.now() >= self.act_at
+    }
+
     pub fn shutting_down(&self) -> bool {
-        self.powering_off || self.restarting
+        self.powering_off || self.restarting || self.reloading
     }
 
     pub fn restarting(&self) -> bool {
@@ -2039,6 +2050,11 @@ impl App {
         if let Some(power) = &mut self.power {
             power.restart();
         }
+    }
+
+    /// Settles the saves before slot exits, for whatever started it to start it again.
+    pub fn reload(&mut self) {
+        self.settle_saves();
     }
 
     pub fn core_picker(&self) -> Option<Core> {
@@ -3547,10 +3563,20 @@ impl App {
                 };
                 self.with_wifi(Wifi::scan);
             }
+            QuickRow::Restart => {
+                self.flush_resume();
+                self.begin_restart();
+            }
+            QuickRow::ShutDown => self.hold_power(),
+            QuickRow::Reload => {
+                self.flush_resume();
+                self.begin_reload();
+            }
             QuickRow::Screen
             | QuickRow::Game
             | QuickRow::General
             | QuickRow::Network
+            | QuickRow::Power
             | QuickRow::ScreenOf(_) => {
                 if let Some(row) = row.child() {
                     let row = row.shown(&self.hidden_rows())[0];
@@ -3717,6 +3743,10 @@ impl App {
             | QuickRow::Services
             | QuickRow::Updates
             | QuickRow::GameArt
+            | QuickRow::Power
+            | QuickRow::Restart
+            | QuickRow::ShutDown
+            | QuickRow::Reload
             | QuickRow::Bezel => return,
         }
         self.persist();
@@ -4713,6 +4743,8 @@ impl App {
             });
             let which = if self.restarting {
                 PowerChoice::Restart
+            } else if self.reloading {
+                PowerChoice::Reload
             } else {
                 PowerChoice::PowerOff
             };
@@ -5682,6 +5714,16 @@ impl App {
         }
         self.remember_shelf();
         self.restarting = true;
+        self.act_at = self.now() + SHUTDOWN_SHOW_MS;
+        self.set_led(LedState::Off);
+    }
+
+    fn begin_reload(&mut self) {
+        if self.shutting_down() {
+            return;
+        }
+        self.remember_shelf();
+        self.reloading = true;
         self.act_at = self.now() + SHUTDOWN_SHOW_MS;
         self.set_led(LedState::Off);
     }

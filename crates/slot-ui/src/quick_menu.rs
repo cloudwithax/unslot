@@ -56,6 +56,12 @@ pub enum QuickRow {
     Updates,
     /// Labels for the card's games, found online.
     GameArt,
+    /// Restart, Shut Down and Reload unslot.
+    Power,
+    Restart,
+    ShutDown,
+    /// Starts slot again, without restarting the device.
+    Reload,
     /// A platform's own page under Screen, and the rows on it.
     ScreenOf(Platform),
     ShaderOf(Platform),
@@ -64,7 +70,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 40] = [
+const GENERIC: [QuickRow; 44] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -105,6 +111,10 @@ const GENERIC: [QuickRow; 40] = [
     QuickRow::GameArt,
     QuickRow::MenuSounds,
     QuickRow::Haptics,
+    QuickRow::Power,
+    QuickRow::Restart,
+    QuickRow::ShutDown,
+    QuickRow::Reload,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -193,13 +203,16 @@ impl QuickRow {
         all
     };
 
-    pub const MAIN: [QuickRow; 5] = [
+    pub const MAIN: [QuickRow; 6] = [
         QuickRow::General,
         QuickRow::Screen,
         QuickRow::Game,
         QuickRow::Network,
+        QuickRow::Power,
         QuickRow::About,
     ];
+
+    pub const POWER: [QuickRow; 3] = [QuickRow::Restart, QuickRow::ShutDown, QuickRow::Reload];
 
     pub const NETWORK: [QuickRow; 7] = [
         QuickRow::Wifi,
@@ -332,6 +345,7 @@ impl QuickRow {
             | QuickRow::Services
             | QuickRow::Updates
             | QuickRow::GameArt => QuickRow::NETWORK.to_vec(),
+            QuickRow::Restart | QuickRow::ShutDown | QuickRow::Reload => QuickRow::POWER.to_vec(),
             QuickRow::Shader | QuickRow::ColourCorrection | QuickRow::Palette | QuickRow::Bezel => {
                 QuickRow::PLAY_SCREEN.to_vec()
             }
@@ -345,6 +359,7 @@ impl QuickRow {
             QuickRow::ShaderOf(p) => Some(QuickRow::ScreenOf(p)),
             QuickRow::Disc => Some(QuickRow::Game),
             QuickRow::Wifi => Some(QuickRow::Network),
+            QuickRow::Restart => Some(QuickRow::Power),
             QuickRow::Wallpaper => Some(QuickRow::General),
             QuickRow::PlayScreen => Some(QuickRow::Settings),
             QuickRow::Shader => Some(QuickRow::PlayScreen),
@@ -364,6 +379,7 @@ impl QuickRow {
         page == QuickRow::MAIN
             || page == QuickRow::PLAY
             || page == QuickRow::SETTINGS
+            || page == QuickRow::POWER
             || page == QuickRow::screen_page()
     }
 
@@ -376,6 +392,7 @@ impl QuickRow {
             QuickRow::PlayScreen => Some(QuickRow::PLAY_SCREEN[0]),
             QuickRow::PlayGameplay => Some(QuickRow::GAME[0]),
             QuickRow::Network => Some(QuickRow::NETWORK[0]),
+            QuickRow::Power => Some(QuickRow::POWER[0]),
             QuickRow::ScreenOf(p) => Some(QuickRow::screen_of(p)[0]),
             _ => None,
         }
@@ -438,6 +455,10 @@ impl QuickRow {
             QuickRow::Services => "Services",
             QuickRow::Updates => "Updates",
             QuickRow::GameArt => "Game Art",
+            QuickRow::Power => "Power",
+            QuickRow::Restart => "Restart",
+            QuickRow::ShutDown => "Shut Down",
+            QuickRow::Reload => "Reload unslot",
         }
     }
 
@@ -462,6 +483,10 @@ impl QuickRow {
                 | QuickRow::Services
                 | QuickRow::Updates
                 | QuickRow::GameArt
+                | QuickRow::Power
+                | QuickRow::Restart
+                | QuickRow::ShutDown
+                | QuickRow::Reload
         )
     }
 

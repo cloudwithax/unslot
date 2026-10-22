@@ -884,6 +884,14 @@ impl Frontend {
         self.session.app_mut().restart();
     }
 
+    pub fn reloading(&self) -> bool {
+        self.session.app().ready_to_reload()
+    }
+
+    pub fn reload(&mut self) {
+        self.session.app_mut().reload();
+    }
+
     pub fn poweroff(&mut self) {
         self.session.app_mut().poweroff();
     }
@@ -948,6 +956,7 @@ impl UiFaces {
                     menu_face(match c {
                         PowerChoice::Restart => "Restarting",
                         PowerChoice::PowerOff => "Powering Down",
+                        PowerChoice::Reload => "Reloading",
                     })
                 })
                 .collect(),

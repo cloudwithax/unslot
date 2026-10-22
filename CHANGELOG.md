@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.3.0
+
+- Power, on the main menu: Restart, Shut Down, and Reload unslot, which starts unslot again without restarting the device.
+- Dreamcast games are no longer autosaved, and other games are autosaved every five minutes instead of every minute. A Dreamcast autosave held the game up long enough to drop frames.
+- A save state comes back from the core through shared memory and is packed with LZ4, so saving one doesn't stall the game. States saved before this still load.
+- When a core crashes during a game, the cart comes back out with the alert for a game that won't open, instead of the game freezing.
+- A disc set kept in its own folder, as Redump sets are, shows on the shelf as the disc named after the folder.
+- File sharing and Syncthing keep running when unslot restarts, so a transfer isn't cut off.
+- Wi-Fi gets an address on a flashed card image: the script that starts DHCP was not executable there.
+
 ## v2.2.1
 
 - Game Art passes over a game ScreenScraper turns away with a 403 or another error, instead of stopping the whole run, and says on the Game Art page how many it skipped. The game still gets its turn at libretro.

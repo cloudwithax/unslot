@@ -165,6 +165,9 @@ fn the_settings_pages_draw_their_own_rows() {
     open_page(&mut f, &mut input, &mut c, QuickRow::Game, "game");
     tap(&mut f, &mut input, Btn::B);
 
+    open_page(&mut f, &mut input, &mut c, QuickRow::Power, "power");
+    tap(&mut f, &mut input, Btn::B);
+
     open_page(&mut f, &mut input, &mut c, QuickRow::About, "about");
     assert!(
         matches!(f.app().phase(), Phase::About),

@@ -233,6 +233,7 @@ fn up_and_down_move_the_bar_and_wrap_at_the_ends() {
         QuickRow::Screen,
         QuickRow::Game,
         QuickRow::Network,
+        QuickRow::Power,
         QuickRow::About,
         QuickRow::General,
     ] {
@@ -551,6 +552,47 @@ fn x_on_about_restarts() {
     assert!(!a.restarting(), "opening About restarted");
     press(&mut a, Btn::X);
     assert!(a.restarting() && !a.powering_off());
+}
+
+#[test]
+fn a_on_power_opens_restart_shut_down_and_reload_and_b_comes_back() {
+    let (_d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::Power);
+    press(&mut a, Btn::A);
+    assert_eq!(a.quick_menu(), Some(QuickRow::Restart));
+    press(&mut a, Btn::Down);
+    assert_eq!(a.quick_menu(), Some(QuickRow::ShutDown));
+    press(&mut a, Btn::Down);
+    assert_eq!(a.quick_menu(), Some(QuickRow::Reload));
+    press(&mut a, Btn::B);
+    assert_eq!(a.quick_menu(), Some(QuickRow::Power));
+}
+
+#[test]
+fn a_on_restart_restarts() {
+    let (_d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::Restart);
+    press(&mut a, Btn::A);
+    assert!(a.restarting() && !a.powering_off());
+}
+
+#[test]
+fn a_on_shut_down_powers_off() {
+    let (_d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::ShutDown);
+    press(&mut a, Btn::A);
+    assert!(a.powering_off() && !a.restarting());
+}
+
+#[test]
+fn a_on_reload_shows_the_face_then_lets_slot_go() {
+    let (_d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::Reload);
+    press(&mut a, Btn::A);
+    assert!(a.shutting_down() && !a.restarting() && !a.powering_off());
+    assert!(!a.ready_to_reload(), "gone before the face was shown");
+    a.tick_ms(60_000);
+    assert!(a.ready_to_reload());
 }
 
 #[test]

@@ -5,10 +5,15 @@ use crate::text;
 pub enum PowerChoice {
     Restart,
     PowerOff,
+    Reload,
 }
 
 impl PowerChoice {
-    pub const ALL: [PowerChoice; 2] = [PowerChoice::Restart, PowerChoice::PowerOff];
+    pub const ALL: [PowerChoice; 3] = [
+        PowerChoice::Restart,
+        PowerChoice::PowerOff,
+        PowerChoice::Reload,
+    ];
 
     pub fn index(self) -> usize {
         self as usize
