@@ -152,6 +152,15 @@ pub trait RetroCore: Send {
     }
     fn take_audio(&mut self) -> Vec<i16>;
     fn serialize(&mut self) -> Result<Vec<u8>, CoreError>;
+    /// How long a state is, for a core that can write one straight into memory it is given with
+    /// `serialize_to`. None leaves `serialize` to make one.
+    fn state_size(&mut self) -> Option<usize> {
+        None
+    }
+    /// As `serialize`, into `buf`, which is `state_size` long.
+    fn serialize_to(&mut self, _buf: &mut [u8]) -> Result<(), CoreError> {
+        Err(CoreError::Unsupported("the core makes its own state".into()))
+    }
     fn unserialize(&mut self, data: &[u8]) -> Result<(), CoreError>;
     fn save_ram(&self) -> Option<Vec<u8>>;
     fn load_save_ram(&mut self, data: &[u8]) -> Result<(), CoreError>;
@@ -165,6 +174,10 @@ pub trait RetroCore: Send {
     fn start_link(&mut self, _client_id: u16) {}
     fn pump_link(&mut self) {}
     fn stop_link(&mut self) {}
+    /// Whether the core has stopped for good, as one in a host process has once the host dies.
+    fn gone(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

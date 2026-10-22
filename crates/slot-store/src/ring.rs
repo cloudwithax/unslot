@@ -10,6 +10,9 @@ const STATE_EXT: &str = "state";
 const THUMB_EXT: &str = "png";
 const RESUME: &str = "resume";
 const REFUSED: &str = "resume-refused";
+/// What a state slot writes starts with, the rest lz4: a Dreamcast state is 46 MB as the core
+/// gives it and 12 MB packed. A state without it is one written before, as the core gave it.
+const PACKED: &[u8] = b"SLZ4";
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct StateEntry {
@@ -36,7 +39,7 @@ impl StateRing {
     pub fn push(&self, state: &[u8], thumb_png: &[u8], stamp: &str) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.dir)?;
         atomic_write(&self.path(stamp, THUMB_EXT), thumb_png)?;
-        atomic_write(&self.path(stamp, STATE_EXT), state)?;
+        atomic_write(&self.path(stamp, STATE_EXT), &pack(state))?;
         self.evict()
     }
 
@@ -70,7 +73,7 @@ impl StateRing {
     }
 
     pub fn read(&self, stamp: &str) -> std::io::Result<(Vec<u8>, Vec<u8>)> {
-        let state = std::fs::read(self.stamped(stamp, STATE_EXT)?)?;
+        let state = read_state(&self.stamped(stamp, STATE_EXT)?)?;
         let thumb = std::fs::read(self.path(stamp, THUMB_EXT)).unwrap_or_default();
         Ok((state, thumb))
     }
@@ -83,11 +86,11 @@ impl StateRing {
 
     pub fn write_resume(&self, state: &[u8]) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.dir)?;
-        atomic_write(&self.path(RESUME, STATE_EXT), state)
+        atomic_write(&self.path(RESUME, STATE_EXT), &pack(state))
     }
 
     pub fn read_resume(&self) -> std::io::Result<Option<Vec<u8>>> {
-        match std::fs::read(self.path(RESUME, STATE_EXT)) {
+        match read_state(&self.path(RESUME, STATE_EXT)) {
             Ok(b) => Ok(Some(b)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(e),
@@ -137,6 +140,22 @@ impl StateRing {
             ));
         }
         Ok(self.path(stamp, ext))
+    }
+}
+
+fn pack(state: &[u8]) -> Vec<u8> {
+    let mut out = PACKED.to_vec();
+    out.extend_from_slice(&lz4_flex::compress_prepend_size(state));
+    out
+}
+
+/// A state file as the core gave it, packed or not.
+pub fn read_state(path: &Path) -> std::io::Result<Vec<u8>> {
+    let bytes = std::fs::read(path)?;
+    match bytes.strip_prefix(PACKED) {
+        Some(packed) => lz4_flex::decompress_size_prepended(packed)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+        None => Ok(bytes),
     }
 }
 

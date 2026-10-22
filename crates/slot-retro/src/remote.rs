@@ -10,11 +10,12 @@
 //!
 //! The picture goes through memory both processes map, handed over with the READY byte, rather
 //! than through the socket: a Dreamcast frame is 1.2 MB, and on the socket it was copied four
-//! times more on its way to slot.
+//! times more on its way to slot. A state goes through memory of its own, handed over with it:
+//! a Dreamcast state is 46 MB, and on the socket the autosave held the game up for 410 ms.
 
 use std::cell::{Cell, RefCell};
 use std::io::{self, Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::Child;
@@ -121,9 +122,9 @@ struct Shm {
 }
 
 impl Shm {
-    fn create() -> Option<Shm> {
+    fn create(name: &std::ffi::CStr) -> Option<Shm> {
         // SAFETY: a fresh memfd with a NUL-terminated name.
-        let fd = unsafe { libc::memfd_create(c"slot-video".as_ptr(), libc::MFD_CLOEXEC) };
+        let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
         // SAFETY: a valid fd just made, owned from here on.
         (fd >= 0).then(|| Shm::from(unsafe { OwnedFd::from_raw_fd(fd) }))
     }
@@ -182,6 +183,12 @@ impl Shm {
         Some(at)
     }
 
+    /// Its first `n` bytes to write in, grown to `n` first if it isn't.
+    fn room(&mut self, n: usize) -> Option<&mut [u8]> {
+        // SAFETY: once mapped, the mapping is writable, `n` long and lives as long as `self`.
+        (n > 0 && self.map(n, true)).then(|| unsafe { std::slice::from_raw_parts_mut(self.ptr, n) })
+    }
+
     fn get(&self, at: usize, n: usize) -> &[u8] {
         match at + n <= self.len {
             // SAFETY: the mapping is at least `at + n` long and lives as long as `self`.
@@ -204,9 +211,9 @@ impl Drop for Shm {
 const MAX_FDS: usize = 4;
 
 /// Writes some of `bytes`, at least one, with `fds` along with them. How many went.
-fn send_fds(stream: &UnixStream, bytes: &[u8], fds: &[OwnedFd]) -> io::Result<usize> {
+fn send_fds(stream: &UnixStream, bytes: &[u8], fds: &[impl AsFd]) -> io::Result<usize> {
     let fds = &fds[..fds.len().min(MAX_FDS)];
-    let size = std::mem::size_of_val(fds) as u32;
+    let size = (fds.len() * std::mem::size_of::<i32>()) as u32;
     // SAFETY: the control buffer is sized by CMSG_SPACE for at most MAX_FDS fds, which are
     // written into it as the raw fds `OwnedFd` holds.
     unsafe {
@@ -226,7 +233,7 @@ fn send_fds(stream: &UnixStream, bytes: &[u8], fds: &[OwnedFd]) -> io::Result<us
         (*c).cmsg_len = libc::CMSG_LEN(size) as _;
         for (i, fd) in fds.iter().enumerate() {
             let at = libc::CMSG_DATA(c).cast::<i32>().add(i);
-            std::ptr::write_unaligned(at, fd.as_raw_fd());
+            std::ptr::write_unaligned(at, fd.as_fd().as_raw_fd());
         }
         match libc::sendmsg(stream.as_raw_fd(), &msg, libc::MSG_NOSIGNAL) {
             n if n > 0 => Ok(n as usize),
@@ -274,16 +281,17 @@ fn receive_fds(stream: &UnixStream, bytes: &mut [u8], fds: &mut Vec<OwnedFd>) ->
     }
 }
 
-/// Writes READY with `fd` along with it.
-fn send_ready(stream: &UnixStream, fd: &OwnedFd) -> io::Result<()> {
-    send_fds(stream, &[READY], std::slice::from_ref(fd)).map(drop)
+/// Writes READY with `fds` along with it.
+fn send_ready(stream: &UnixStream, fds: &[BorrowedFd]) -> io::Result<()> {
+    send_fds(stream, &[READY], fds).map(drop)
 }
 
-/// Reads the one byte the host first sends, and the fd that may come with it.
-fn receive_ready(stream: &UnixStream) -> io::Result<(u8, Option<OwnedFd>)> {
+/// Reads the one byte the host first sends, and the fds that may come with it: the picture's
+/// memory, then the state's.
+fn receive_ready(stream: &UnixStream) -> io::Result<(u8, Vec<OwnedFd>)> {
     let (mut byte, mut fds) = ([0u8], Vec::new());
     receive_fds(stream, &mut byte, &mut fds)?;
-    Ok((byte[0], fds.pop()))
+    Ok((byte[0], fds))
 }
 
 fn receive(from: &mut UnixStream, buf: &mut Vec<u8>) -> io::Result<()> {
@@ -331,10 +339,13 @@ fn get_result(i: &mut In) -> io::Result<Result<Vec<u8>, CoreError>> {
 /// Runs `core` for the `RemoteCore` at the other end of `stream` until it goes away.
 pub fn serve(mut core: Box<dyn RetroCore>, mut stream: UnixStream) {
     // Without memory to share, the picture goes on the socket as before.
-    let mut shm = Shm::create();
-    let sent = match &shm {
-        Some(s) => send_ready(&stream, &s.fd),
-        None => stream.write_all(&[READY]),
+    let mut shm = Shm::create(c"slot-video");
+    // Sent after the picture's, so there is none without it.
+    let mut state = shm.as_ref().and_then(|_| Shm::create(c"slot-state"));
+    let sent = match (&shm, &state) {
+        (Some(v), Some(s)) => send_ready(&stream, &[v.fd.as_fd(), s.fd.as_fd()]),
+        (Some(v), None) => send_ready(&stream, &[v.fd.as_fd()]),
+        _ => stream.write_all(&[READY]),
     };
     if sent.is_err() {
         return;
@@ -345,7 +356,7 @@ pub fn serve(mut core: Box<dyn RetroCore>, mut stream: UnixStream) {
     while receive(&mut stream, &mut buf).is_ok() {
         out.0.clear();
         let mut video = false;
-        if let Err(e) = answer(core.as_mut(), &buf, &mut out, &mut video) {
+        if let Err(e) = answer(core.as_mut(), &buf, &mut out, &mut video, state.as_mut()) {
             eprintln!("slot: core host: {e}");
             return;
         }
@@ -356,7 +367,13 @@ pub fn serve(mut core: Box<dyn RetroCore>, mut stream: UnixStream) {
     }
 }
 
-fn answer(core: &mut dyn RetroCore, msg: &[u8], out: &mut Out, video: &mut bool) -> io::Result<()> {
+fn answer(
+    core: &mut dyn RetroCore,
+    msg: &[u8],
+    out: &mut Out,
+    video: &mut bool,
+    state: Option<&mut Shm>,
+) -> io::Result<()> {
     let mut i = In(msg);
     let r = match i.u8()? {
         LOAD => core.load(Path::new(i.str()?)).map(|()| Vec::new()),
@@ -388,7 +405,7 @@ fn answer(core: &mut dyn RetroCore, msg: &[u8], out: &mut Out, video: &mut bool)
             Ok(Vec::new())
         }
         DISK => core.set_disk(i.u32()?).map(|()| Vec::new()),
-        SERIALIZE => core.serialize(),
+        SERIALIZE => serialize(core, state),
         UNSERIALIZE => core.unserialize(i.bytes()?).map(|()| Vec::new()),
         SAVE_RAM => Ok(core.save_ram().map_or_else(Vec::new, |mut ram| {
             ram.insert(0, 1);
@@ -419,6 +436,27 @@ fn answer(core: &mut dyn RetroCore, msg: &[u8], out: &mut Out, video: &mut bool)
     };
     put_result(out, r);
     Ok(())
+}
+
+/// The core's state: a 1 and its length when it is in `shm`, or a 0 and the state itself when
+/// the core can't write it there.
+fn serialize(core: &mut dyn RetroCore, shm: Option<&mut Shm>) -> Result<Vec<u8>, CoreError> {
+    if let Some((n, room)) = core
+        .state_size()
+        .zip(shm)
+        .and_then(|(n, s)| Some((n, s.room(n)?)))
+    {
+        if core.serialize_to(room).is_ok() {
+            let mut put = vec![1];
+            put.extend_from_slice(&(n as u32).to_le_bytes());
+            return Ok(put);
+        }
+    }
+    let state = core.serialize()?;
+    let mut put = Vec::with_capacity(1 + state.len());
+    put.push(0);
+    put.extend_from_slice(&state);
+    Ok(put)
 }
 
 /// Puts the core's state after a call in `out`, giving the fds to send along with it.
@@ -483,6 +521,8 @@ pub struct RemoteCore {
     /// it is there rather than in `video`.
     shm: Option<Shm>,
     shm_video: Option<(usize, usize)>,
+    /// The memory the host puts a state in.
+    state: Option<Shm>,
     /// The buffers the host leaves pictures in where the GPU put them, mapped, and which the
     /// last one is in and how long, when it is in one.
     frames: Vec<Shm>,
@@ -505,14 +545,17 @@ pub struct RemoteCore {
 impl RemoteCore {
     /// Waits for the host `child` at the other end of `stream` to say its core is open.
     pub fn new(mut child: Child, stream: UnixStream) -> io::Result<RemoteCore> {
-        let shm = match receive_ready(&stream).and_then(|ready| match ready {
-            (READY, fd) => Ok(fd.map(Shm::from)),
+        let (shm, state) = match receive_ready(&stream).and_then(|ready| match ready {
+            (READY, fds) => {
+                let mut fds = fds.into_iter().map(Shm::from);
+                Ok((fds.next(), fds.next()))
+            }
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "not a core host",
             )),
         }) {
-            Ok(shm) => shm,
+            Ok(shms) => shms,
             Err(e) => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -529,6 +572,7 @@ impl RemoteCore {
             video: Vec::new(),
             shm,
             shm_video: None,
+            state,
             frames: Vec::new(),
             frame: None,
             arrived: RefCell::new(Vec::new()),
@@ -795,7 +839,24 @@ impl RetroCore for RemoteCore {
     }
 
     fn serialize(&mut self) -> Result<Vec<u8>, CoreError> {
-        self.call_mut(Out::default().u8(SERIALIZE))
+        let mut put = self.call_mut(Out::default().u8(SERIALIZE))?;
+        match put.first() {
+            Some(0) => {
+                put.remove(0);
+                Ok(put)
+            }
+            Some(1) => {
+                let n = In(&put[1..]).u32().map_err(CoreError::Io)? as usize;
+                let s = self.state.as_mut();
+                match s.and_then(|s| s.map(n, false).then_some(s)) {
+                    Some(s) => Ok(s.get(0, n).to_vec()),
+                    None => Err(CoreError::Io(io::Error::other(
+                        "the state's memory is not mapped",
+                    ))),
+                }
+            }
+            _ => Err(CoreError::State("the core host gave no state".into())),
+        }
     }
 
     fn unserialize(&mut self, data: &[u8]) -> Result<(), CoreError> {
@@ -825,6 +886,10 @@ impl RetroCore for RemoteCore {
 
     fn rumble(&self) -> Rumble {
         self.rumble.clone()
+    }
+
+    fn gone(&self) -> bool {
+        *self.dead.borrow()
     }
 }
 
@@ -952,6 +1017,10 @@ mod tests {
         assert_eq!(remote.av_info(), local.av_info());
         let state = remote.serialize().unwrap();
         assert_eq!(state, local.serialize().unwrap());
+        assert!(
+            remote.state.as_ref().is_some_and(|s| s.len == 8),
+            "the state came through shared memory"
+        );
         remote.unserialize(&state).unwrap();
         assert_eq!(remote.save_ram(), local.save_ram());
     }
@@ -1019,8 +1088,10 @@ mod tests {
         });
         let mut remote = RemoteCore::new(child, ours).unwrap();
         host.join().unwrap();
+        assert!(!remote.gone(), "gone before anything was asked of it");
         remote.run_frame(ButtonMask::default());
         assert!(remote.serialize().is_err());
         assert!(remote.save_ram().is_none());
+        assert!(remote.gone(), "the host went without the core saying so");
     }
 }

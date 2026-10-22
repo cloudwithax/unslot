@@ -352,3 +352,42 @@ fn an_eject_the_card_refuses_puts_up_a_banner() {
     a.tick_ms(10);
     assert!(a.card_alarm(), "a refused eject raised no alarm");
 }
+
+#[test]
+fn a_core_that_dies_puts_the_cart_out_with_the_alert_and_keeps_the_resume_it_had() {
+    let d = tmp_root_with_carts(&["Emerald"]);
+    let r = StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Emerald");
+    r.write_resume(&[7u8; 64]).unwrap();
+    let mut a = app_playing_in(d.path(), "Emerald");
+    assert!(matches!(a.phase(), Phase::Playing { .. }));
+    assert_eq!(read_slot_state(d.path()).cart, Some("Emerald".into()));
+    a.on_core_died();
+    assert!(
+        matches!(a.phase(), Phase::Ejecting { .. }),
+        "the dead game stayed in, though it is the only cart"
+    );
+    let mut alerted = false;
+    for _ in 0..600 {
+        if matches!(a.phase(), Phase::Shelf) {
+            break;
+        }
+        a.update(1.0 / 60.0);
+        alerted |= a.seat() <= 0.75 && a.alert_alpha() >= 1.0;
+    }
+    assert!(matches!(a.phase(), Phase::Shelf), "the cart never came out");
+    assert!(
+        alerted,
+        "the alert had faded before the cart was out far enough to show it"
+    );
+    a.settle_saves();
+    assert_eq!(
+        r.read_resume().unwrap(),
+        Some(vec![7u8; 64]),
+        "the resume on the card was written over"
+    );
+    assert_eq!(
+        read_slot_state(d.path()).cart,
+        None,
+        "a restart would open the dead game again"
+    );
+}

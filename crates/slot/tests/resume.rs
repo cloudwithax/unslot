@@ -372,7 +372,7 @@ fn a_refused_resume_is_not_offered_to_the_core_a_second_time() {
         "expected exactly one retired state, found {retired:?}"
     );
     assert_eq!(
-        std::fs::read(&retired[0]).expect("read the retired state"),
+        slot_store::read_state(&retired[0]).expect("read the retired state"),
         real_resume,
         "the retired file is not the bytes that were refused"
     );

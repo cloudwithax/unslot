@@ -202,6 +202,7 @@ fn a_retired_resume_stops_being_read_back_but_is_still_there() {
     let d = tempdir().unwrap();
     let r = StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Emerald");
     r.write_resume(&[7u8; 64]).unwrap();
+    let written = std::fs::read(d.path().join("States/GBA/mgba/Emerald/resume.state")).unwrap();
 
     let to = r
         .retire_resume("2026-09-16_23-30-00")
@@ -209,7 +210,7 @@ fn a_retired_resume_stops_being_read_back_but_is_still_there() {
         .expect("nothing was moved");
 
     assert!(r.read_resume().unwrap().is_none(), "still offered");
-    assert_eq!(std::fs::read(&to).unwrap(), [7u8; 64], "the bytes changed");
+    assert_eq!(std::fs::read(&to).unwrap(), written, "the bytes changed");
     assert_eq!(
         to.file_name().unwrap().to_str().unwrap(),
         "resume-refused-2026-09-16_23-30-00.state"
@@ -246,12 +247,45 @@ fn a_second_retirement_in_the_same_second_does_not_overwrite_the_first() {
     let d = tempdir().unwrap();
     let r = StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Emerald");
 
+    let resume = d.path().join("States/GBA/mgba/Emerald/resume.state");
     r.write_resume(&[1u8; 8]).unwrap();
+    let one = std::fs::read(&resume).unwrap();
     let first = r.retire_resume("2026-09-16_23-30-00").unwrap().unwrap();
     r.write_resume(&[2u8; 8]).unwrap();
+    let two = std::fs::read(&resume).unwrap();
     let second = r.retire_resume("2026-09-16_23-30-00").unwrap().unwrap();
 
     assert_ne!(first, second, "the second retirement took the same name");
-    assert_eq!(std::fs::read(&first).unwrap(), [1u8; 8], "the first went");
-    assert_eq!(std::fs::read(&second).unwrap(), [2u8; 8]);
+    assert_eq!(std::fs::read(&first).unwrap(), one, "the first went");
+    assert_eq!(std::fs::read(&second).unwrap(), two);
+}
+
+#[test]
+fn a_state_goes_on_the_card_packed_and_comes_back_as_it_was() {
+    let d = tempdir().unwrap();
+    let r = StateRing::new(d.path(), Platform::Dreamcast, Core::Flycast, "Crazy Taxi 2");
+    let state: Vec<u8> = (0..1 << 20).map(|i| (i / 4096) as u8).collect();
+    r.push(&state, b"png", "2026-08-09_00-00-01").unwrap();
+    r.write_resume(&state).unwrap();
+
+    let dir = d.path().join("States/DC/flycast/Crazy Taxi 2");
+    for name in ["2026-08-09_00-00-01.state", "resume.state"] {
+        let len = std::fs::metadata(dir.join(name)).unwrap().len();
+        assert!(len < state.len() as u64 / 10, "{name} is {len} bytes");
+    }
+    assert_eq!(r.read("2026-08-09_00-00-01").unwrap().0, state);
+    assert_eq!(r.read_resume().unwrap().unwrap(), state);
+}
+
+#[test]
+fn a_state_written_before_packing_still_reads() {
+    let d = tempdir().unwrap();
+    let r = StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Emerald");
+    let dir = d.path().join("States/GBA/mgba/Emerald");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("resume.state"), [7u8; 64]).unwrap();
+    std::fs::write(dir.join("2026-08-09_00-00-01.state"), [8u8; 64]).unwrap();
+
+    assert_eq!(r.read_resume().unwrap().unwrap(), [7u8; 64]);
+    assert_eq!(r.read("2026-08-09_00-00-01").unwrap().0, [8u8; 64]);
 }

@@ -915,11 +915,13 @@ impl LibretroCore {
 
     fn serialize_at(&mut self, size: usize) -> Option<Vec<u8>> {
         let mut buf = vec![0u8; size];
-        let ok = {
-            let _a = Active::bind(&mut self.host);
-            unsafe { (self.api.serialize)(buf.as_mut_ptr() as *mut c_void, size) }
-        };
-        ok.then_some(buf)
+        self.write_state(&mut buf).then_some(buf)
+    }
+
+    /// Has the core write its state into `buf`, which is as long as it said one is. Whether it did.
+    fn write_state(&mut self, buf: &mut [u8]) -> bool {
+        let _a = Active::bind(&mut self.host);
+        unsafe { (self.api.serialize)(buf.as_mut_ptr() as *mut c_void, buf.len()) }
     }
 
     fn with_disk<R>(&mut self, f: impl FnOnce(&DiskControl) -> Option<R>) -> Option<R> {
@@ -1122,6 +1124,23 @@ impl RetroCore for LibretroCore {
         }
         self.serialize_at(size)
             .ok_or_else(|| CoreError::State("serialize refused".into()))
+    }
+
+    fn state_size(&mut self) -> Option<usize> {
+        if self.state_size.is_none() {
+            let size = unsafe { (self.api.serialize_size)() };
+            self.state_size = (size > 0).then_some(size);
+        }
+        self.state_size
+    }
+
+    fn serialize_to(&mut self, buf: &mut [u8]) -> Result<(), CoreError> {
+        if self.write_state(buf) {
+            return Ok(());
+        }
+        // Its state may have grown since it said how long one is: asked again next time.
+        self.state_size = None;
+        Err(CoreError::State("serialize refused".into()))
     }
 
     fn unserialize(&mut self, data: &[u8]) -> Result<(), CoreError> {

@@ -102,6 +102,15 @@ impl RetroCore for MockCore {
         Ok(self.frame.to_le_bytes().to_vec())
     }
 
+    fn state_size(&mut self) -> Option<usize> {
+        Some(8)
+    }
+
+    fn serialize_to(&mut self, buf: &mut [u8]) -> Result<(), CoreError> {
+        buf.copy_from_slice(&self.frame.to_le_bytes());
+        Ok(())
+    }
+
     fn unserialize(&mut self, data: &[u8]) -> Result<(), CoreError> {
         let bytes: [u8; 8] = data
             .try_into()

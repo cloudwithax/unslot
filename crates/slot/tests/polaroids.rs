@@ -48,7 +48,7 @@ fn saving_pushes_a_polaroid_with_its_picture() {
         .expect("list");
     assert_eq!(entries.len(), 1);
     assert_eq!(
-        std::fs::read(&entries[0].state).expect("state"),
+        slot_store::read_state(&entries[0].state).expect("state"),
         [9u8; 1024]
     );
     assert!(

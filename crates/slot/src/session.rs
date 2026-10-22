@@ -479,6 +479,18 @@ impl Session {
                 return;
             }
             Phase::Inserting { cart, .. } => cart.clone(),
+            Phase::Playing { .. } => {
+                let died = !self.reloading
+                    && self
+                        .emu
+                        .as_ref()
+                        .is_some_and(|e| e.state() == CoreState::Failed);
+                if died {
+                    self.emu = None;
+                    self.app.on_core_died();
+                }
+                return;
+            }
             _ => return,
         };
         if self.emu.is_none() {

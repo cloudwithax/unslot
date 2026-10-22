@@ -621,6 +621,13 @@ impl Worker {
         let mut ff = (0u32, 0u32, Duration::ZERO, Instant::now());
         let mut runahead = RunAhead::default();
         while !self.shared.stop.load(Ordering::Relaxed) {
+            if core.gone() {
+                eprintln!("slot: emu: the core is gone");
+                self.shared
+                    .state
+                    .store(CoreState::Failed as u8, Ordering::Release);
+                break;
+            }
             for cmd in self.cmds.try_iter() {
                 self.apply(cmd, core.as_mut(), &mut transport, &mut cable, &link);
             }

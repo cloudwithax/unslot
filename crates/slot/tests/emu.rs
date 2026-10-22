@@ -1116,3 +1116,78 @@ fn a_refresh_redraws_a_paused_core_without_moving_it() {
     );
     assert_eq!(frame_count(&emu), held, "the refresh moved the game on");
 }
+
+/// The mock, gone when told to, as a core in a host process is once the host dies: it gives no
+/// state from then on.
+struct Dying {
+    inner: MockCore,
+    dead: Arc<AtomicBool>,
+}
+
+impl RetroCore for Dying {
+    fn load(&mut self, rom: &Path) -> Result<(), CoreError> {
+        self.inner.load(rom)
+    }
+    fn run_frame(&mut self, input: ButtonMask) {
+        self.inner.run_frame(input);
+    }
+    fn video_xrgb8888(&self) -> &[u8] {
+        self.inner.video_xrgb8888()
+    }
+    fn take_audio(&mut self) -> Vec<i16> {
+        self.inner.take_audio()
+    }
+    fn serialize(&mut self) -> Result<Vec<u8>, CoreError> {
+        if self.gone() {
+            return Err(CoreError::Io(std::io::Error::other(
+                "the core host is gone",
+            )));
+        }
+        self.inner.serialize()
+    }
+    fn unserialize(&mut self, data: &[u8]) -> Result<(), CoreError> {
+        self.inner.unserialize(data)
+    }
+    fn save_ram(&self) -> Option<Vec<u8>> {
+        self.inner.save_ram()
+    }
+    fn load_save_ram(&mut self, data: &[u8]) -> Result<(), CoreError> {
+        self.inner.load_save_ram(data)
+    }
+    fn av_info(&self) -> AvInfo {
+        self.inner.av_info()
+    }
+    fn gone(&self) -> bool {
+        self.dead.load(Ordering::Relaxed)
+    }
+}
+
+#[test]
+fn a_core_that_dies_says_so_and_runs_no_more() {
+    let mut sink = StubSink::new();
+    sink.open(32_768).expect("the stub refused to open");
+    drain(sink.clone());
+    let dead = Arc::new(AtomicBool::new(false));
+    let core = Box::new(Dying {
+        inner: MockCore::new(),
+        dead: dead.clone(),
+    });
+    let emu = EmuHandle::spawn(core, PathBuf::from("mock"), sink.ring(), None, None);
+    emu.set_speed(Speed::Normal);
+    assert!(
+        wait_for(|| emu.state() == CoreState::Ready),
+        "the core never finished loading"
+    );
+    dead.store(true, Ordering::Relaxed);
+    assert!(
+        wait_for(|| emu.state() == CoreState::Failed),
+        "the core died without the emulator saying so"
+    );
+    assert!(
+        emu.snapshot().state().is_none(),
+        "a dead core gave a state to keep"
+    );
+    let shown = emu.published_count();
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(emu.published_count(), shown, "a dead core was run on");
+}

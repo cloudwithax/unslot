@@ -4584,6 +4584,31 @@ impl App {
         self.refuse_out(cart, caught);
     }
 
+    /// The core died under the game. Out the cart comes as an eject takes it, with the alert of
+    /// one that wouldn't open and nothing saved: a dead core has no state to give, so the card's
+    /// is left as it was. The alert's clock starts when the cart starts up, as a seated one's
+    /// would, not with the hold, where the slot front hides it.
+    pub fn on_core_died(&mut self) {
+        let Phase::Playing { cart } = &mut self.phase else {
+            return;
+        };
+        let cart = std::mem::take(cart);
+        self.eject_overlay = match self.layout() {
+            Layout::Framed => self.overlay_slide(),
+            Layout::Native => 0.0,
+        };
+        self.in_game_menu = None;
+        self.end_link();
+        self.close_game_menu();
+        self.pending = None;
+        self.refusal = None;
+        self.phase = Phase::Ejecting {
+            cart,
+            t: -EJECT_HOLD_S,
+        };
+        self.refused_from = Some(0.0);
+    }
+
     fn refuse_out(&mut self, cart: String, caught: f32) {
         let t = (1.0 - caught) * EJECT_S;
         self.phase = Phase::Ejecting { cart, t };
@@ -6459,7 +6484,7 @@ impl App {
         let Some(snapshot) = &self.snapshot else {
             return false;
         };
-        let bytes = match std::fs::read(state) {
+        let bytes = match slot_store::read_state(state) {
             Ok(bytes) => bytes,
             Err(e) => {
                 eprintln!("slot: load: {e}");
