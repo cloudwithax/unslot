@@ -1,13 +1,13 @@
 use slot::drc::Level;
 
 #[test]
-fn the_rate_stays_within_what_the_resampler_can_take() {
+fn the_rate_never_moves_the_pitch_enough_to_hear() {
     let mut level = Level::new();
     for queued in [0, 1, 100, 100_000] {
         for _ in 0..100 {
             let r = level.push(1.0 / 60.0, queued, 2048);
             assert!(
-                (0.5..=1.5).contains(&r),
+                (Level::MIN..=Level::MAX).contains(&r),
                 "rate {r} out of bounds for queued={queued}"
             );
         }

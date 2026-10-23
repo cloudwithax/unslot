@@ -5,8 +5,12 @@ pub fn drc_target(capacity_frames: usize) -> usize {
 }
 
 /// Holds the sound queue at its target by steering how much the sound is stretched: a queue
-/// running low is played slower (at the same pitch) so the core doesn't run dry, and one running
-/// high is played faster so the delay doesn't grow and nothing overflows.
+/// running low is played slower so the core doesn't run dry, and one running high is played
+/// faster so the delay doesn't grow and nothing overflows.
+///
+/// Stretching moves the pitch, so it is kept to 1%, too little to hear. A core that falls further
+/// behind than that runs the queue dry instead: a short gap is gone at once, where a pitch dropped
+/// to match it is heard for as long as the core is slow and glides back after.
 ///
 /// The rate the sound arrives at is not used. A core whose hand-over is batched, or whose thread
 /// waits when the queue is full, delivers unevenly without being slow, and measuring that would
@@ -33,13 +37,13 @@ impl Level {
     /// How fast the part a core that never keeps its rate needs is learned.
     const LEARN: f64 = 0.12;
 
-    /// How far the learned part may take the rate; a fifth short or a tenth ahead.
-    const LEARNED_MAX: f64 = 0.22;
-    const LEARNED_MIN: f64 = -0.12;
+    /// How far the learned part may take the rate, leaving the rest for the queue's own jitter.
+    const LEARNED_MAX: f64 = 0.005;
+    const LEARNED_MIN: f64 = -0.005;
 
-    /// The most the rate may be moved either way, before the resampler takes over.
-    const MIN: f64 = 0.5;
-    const MAX: f64 = 1.5;
+    /// The most the rate may be moved either way, so the pitch never moves enough to hear.
+    pub const MIN: f64 = 0.99;
+    pub const MAX: f64 = 1.01;
 
     /// Takes `dt` since the last update and the queue's level, and gives the rate to play at.
     pub fn push(&mut self, dt: f64, queued_frames: usize, target_frames: usize) -> f64 {
@@ -84,21 +88,21 @@ mod tests {
     }
 
     #[test]
-    fn a_core_running_short_is_slowed_until_the_queue_holds() {
+    fn a_core_a_little_ahead_is_quickened_until_the_queue_holds() {
         let mut level = Level::new();
-        let queued = settle(&mut level, 3200, 3200, 0.9 * 800.0 * 48000.0 / 44100.0, 800.0 * 48000.0 / 44100.0);
+        let queued = settle(&mut level, 3200, 3200, 1.003 * 800.0 * 48000.0 / 44100.0, 800.0 * 48000.0 / 44100.0);
         assert!(queued.abs_diff(3200) < 400, "settled at {queued}");
-        let rate = level.push(1.0 / 60.0, 3200, 3200);
-        assert!(rate > 1.05, "a short core settled at {rate}");
     }
 
     #[test]
-    fn a_core_running_ahead_is_quickened_until_the_queue_holds() {
+    fn a_core_running_short_is_never_slowed_enough_to_hear() {
         let mut level = Level::new();
-        let queued = settle(&mut level, 3200, 3200, 1.1 * 800.0 * 48000.0 / 44100.0, 800.0 * 48000.0 / 44100.0);
-        assert!(queued.abs_diff(3200) < 400, "settled at {queued}");
-        let rate = level.push(1.0 / 60.0, 3200, 3200);
-        assert!(rate < 0.95, "a fast core settled at {rate}");
+        let mut queued = 3200;
+        for _ in 0..600 {
+            let rate = level.push(1.0 / 60.0, queued, 3200);
+            assert!(rate <= 1.01, "a short core was stretched to {rate}");
+            queued = (queued as f64 + 0.67 * 800.0 * rate - 800.0).max(0.0) as usize;
+        }
     }
 
     #[test]
