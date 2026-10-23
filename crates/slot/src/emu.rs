@@ -744,7 +744,7 @@ impl Worker {
                     let last = ran >= ceiling || cost.last(began.elapsed(), budget);
                     let input = match self.shared.turbo.load(Ordering::Relaxed) {
                         true => input.turbo(turbo_frame),
-                        false => input.without_turbo(),
+                        false => input,
                     };
                     turbo_frame = turbo_frame.wrapping_add(1);
                     core.set_frame_skip(!last);

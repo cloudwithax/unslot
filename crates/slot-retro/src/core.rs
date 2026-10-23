@@ -29,10 +29,6 @@ impl ButtonMask {
     pub const L3: u16 = 1 << 14;
     pub const R3: u16 = 1 << 15;
 
-    pub fn without_turbo(self) -> ButtonMask {
-        ButtonMask(self.0 & !(Self::X | Self::Y))
-    }
-
     pub fn turbo(self, frame: u32) -> ButtonMask {
         let mut mask = self.0 & !(Self::X | Self::Y);
         if (frame / 3).is_multiple_of(2) {

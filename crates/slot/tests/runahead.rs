@@ -265,6 +265,31 @@ fn every_frame_of_a_present_gets_the_same_buttons_and_turbo_keeps_its_beat() {
     );
 }
 
+#[test]
+fn x_and_y_reach_a_core_whose_platform_has_no_turbo() {
+    let (core, log) = Recorder::new();
+    let emu = driven(core, PathBuf::from("mock"), 0);
+    emu.set_turbo(false);
+    let held = ButtonMask(ButtonMask::X | ButtonMask::Y);
+    emu.set_input(held);
+    log.lock().expect("the call log").clear();
+    for _ in 0..4 {
+        present(&emu);
+    }
+    let inputs: Vec<u16> = calls(&log)
+        .into_iter()
+        .filter_map(|c| match c {
+            Call::Run { input, .. } => Some(input),
+            _ => None,
+        })
+        .collect();
+    assert!(!inputs.is_empty(), "the core never ran");
+    assert!(
+        inputs.iter().all(|&i| i == held.0),
+        "X and Y did not reach the core: {inputs:?}"
+    );
+}
+
 fn calls_once_it_settles(log: &Log) -> Vec<Call> {
     std::thread::sleep(Duration::from_millis(50));
     log.lock().expect("the call log").clear();
