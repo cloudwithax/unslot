@@ -12,11 +12,11 @@ use slot_store::{
     WallpaperTint, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, RING_MAX, RUN_AHEAD_MAX, VOLUME_MAX,
 };
 use slot_ui::{
-    board_from, board_zoom, draw_empty_slot, draw_footer, draw_ground, draw_slot_name,
-    draw_sticker, ease, footer_ink, grown, lid_at, lid_from, lift_of, on_board, repeat_gap,
-    shelf_cart_at, ButtonLegend, ClockPicker, Draw, FfState, Hud, HudKind, Icon, KeyInput,
-    KeyOutcome, Keyboard, Legend, LinkBadge, ListIcon, ListPage, ListRow, Media, Millis, Mould,
-    Placed, Polaroids, PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow, QuickValue,
+    board_from, board_zoom, centred_hints, draw_empty_slot, draw_footer, draw_ground,
+    draw_slot_name, draw_sticker, ease, footer_ink, grown, lid_at, lid_from, lift_of, on_board,
+    repeat_gap, shelf_cart_at, ButtonLegend, ClockPicker, Draw, FfState, Hud, HudKind, Icon,
+    KeyInput, KeyOutcome, Keyboard, Legend, LinkBadge, ListIcon, ListPage, ListRow, Media, Millis,
+    Mould, Placed, Polaroids, PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow, QuickValue,
     Refusal, Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H, CHIP_U, CHIP_V, CHIP_W, HINT_EDGE,
     HOP_LIFT, MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W,
     TURN_PAD,
@@ -5392,27 +5392,15 @@ impl App {
             });
         }
 
-        if let [cancel, swap, choose] = self.core_legend_faces.as_slice() {
-            let seen = |w: u32| w.saturating_sub(HINT_EDGE) as f32;
-            let swap_x = self.canvas().centred(seen(swap.1));
-            for (tex, w, x) in [
-                (
-                    cancel.0,
-                    cancel.1,
-                    swap_x - CORE_LEGEND_GAP - seen(cancel.1),
-                ),
-                (swap.0, swap.1, swap_x),
-                (choose.0, choose.1, swap_x + seen(swap.1) + CORE_LEGEND_GAP),
-            ] {
-                out.push(Draw::Tex {
-                    x: x.round(),
-                    y: CORE_LEGEND_Y,
-                    w: w as f32,
-                    h: MOUTH_H,
-                    tex,
-                    alpha: lift,
-                });
-            }
+        for (tex, w, x) in centred_hints(self.canvas(), &self.core_legend_faces, CORE_LEGEND_GAP) {
+            out.push(Draw::Tex {
+                x,
+                y: CORE_LEGEND_Y,
+                w: w as f32,
+                h: MOUTH_H,
+                tex,
+                alpha: lift,
+            });
         }
     }
 
@@ -5748,7 +5736,7 @@ impl App {
             self.play_held = None;
             return;
         }
-        let seat = slot_store::core_for(&root, &cart.stem);
+        let seat = slot_store::core_for_platform(&root, &cart.stem, cart.platform);
         let now = self.now();
         let mut picker = CorePicker::open(seat, now);
         if self.core_faces_ready() {
@@ -5766,11 +5754,11 @@ impl App {
     }
 
     fn cores_input(&mut self, cursor: usize, action: Action) {
-        let Some((cart, cores)) = self.shelf_cores() else {
+        let Some((_, cores)) = self.shelf_cores() else {
             self.phase = Phase::Shelf;
             return;
         };
-        let (stem, n) = (cart.stem.clone(), cores.len());
+        let n = cores.len();
         let cursor = cursor.min(n - 1);
         self.phase = match action {
             Action::GbaDown(Btn::Up) => Phase::Cores {
@@ -5780,11 +5768,11 @@ impl App {
                 cursor: (cursor + 1) % n,
             },
             Action::GbaDown(Btn::A) => {
-                if let Some(root) = &self.root {
-                    if let Err(e) = slot_store::write_selected_core(root, &stem, cores[cursor]) {
-                        eprintln!("slot: core for {stem}: {e}");
-                    }
-                }
+                self.write_core(cores[cursor], false);
+                Phase::Shelf
+            }
+            Action::GbaDown(Btn::Y) => {
+                self.write_core(cores[cursor], true);
                 Phase::Shelf
             }
             Action::GbaDown(Btn::B | Btn::Start) | Action::QuickMenu => Phase::Shelf,
@@ -5794,8 +5782,11 @@ impl App {
 
     fn cores_page(&self, cursor: usize) -> Option<ListPage> {
         let (cart, cores) = self.shelf_cores()?;
-        let chosen = self.root.as_deref().map_or(cores[0], |root| {
-            slot_store::core_for_platform(root, &cart.stem, cart.platform)
+        let (chosen, system) = self.root.as_deref().map_or((cores[0], cores[0]), |root| {
+            (
+                slot_store::core_for_platform(root, &cart.stem, cart.platform),
+                slot_store::core_for_system(root, cart.platform),
+            )
         });
         let cursor = cursor.min(cores.len() - 1);
         let rows = cores
@@ -5804,19 +5795,24 @@ impl App {
                 label: c.text().into(),
                 detail: match () {
                     _ if *c == chosen => "In use".into(),
-                    _ if *c == cores[0] => "Default".into(),
+                    _ if *c == system => "Default".into(),
                     _ => String::new(),
                 },
                 bars: None,
                 icon: None,
             })
             .collect();
+        let mut legends = with_action((cores[cursor] != chosen).then_some("This Game"));
+        if cores[cursor] != system {
+            let all = format!("All {}", cart.platform.short_name());
+            legends.push(Legend::new(ButtonLegend::Y, &all));
+        }
         Some(ListPage {
             title: "Core".into(),
             status: slot_ui::label_text(cart),
             cursor,
             rows,
-            legends: with_action((cores[cursor] != chosen).then_some("Use This Core")),
+            legends,
         })
     }
 
@@ -5989,6 +5985,7 @@ impl App {
             Action::GbaDown(Btn::Left) | Action::ShelfLeft => Press::Left,
             Action::GbaDown(Btn::Right) | Action::ShelfRight => Press::Right,
             Action::GbaDown(Btn::A) => Press::Keep,
+            Action::GbaDown(Btn::Y) => Press::KeepAll,
             Action::GbaDown(Btn::B) => Press::Back,
             _ => return,
         };
@@ -5996,9 +5993,10 @@ impl App {
         let Some(picker) = &mut self.core_picker else {
             return;
         };
-        let outcome = picker.press(press, now);
-        if let Outcome::Write(core) = outcome {
-            self.write_core(core);
+        match picker.press(press, now) {
+            Outcome::Write(core) => self.write_core(core, false),
+            Outcome::WriteAll(core) => self.write_core(core, true),
+            Outcome::Nothing | Outcome::Refused => {}
         }
     }
 
@@ -6293,14 +6291,22 @@ impl App {
         }
     }
 
-    fn write_core(&self, core: Core) {
+    /// Sets the core for the game on the shelf, or for every game on its system when `all`,
+    /// which leaves this one following the system.
+    fn write_core(&self, core: Core, all: bool) {
         let (Some(root), Some(cart)) = (
             self.root.clone(),
             self.shelf().carts.get(self.shelf().index),
         ) else {
             return;
         };
-        if let Err(e) = slot_store::write_selected_core(&root, &cart.stem, core) {
+        if all {
+            if let Err(e) = slot_store::write_system_core(&root, cart.platform, core) {
+                eprintln!("slot: core: could not write system_core.txt: {e}");
+                return;
+            }
+        }
+        if let Err(e) = slot_store::write_game_core(&root, &cart.stem, cart.platform, core) {
             eprintln!("slot: core: could not write selected_core.txt: {e}");
         }
     }

@@ -893,6 +893,38 @@ fn choosing_a_core_writes_it_and_closes() {
 }
 
 #[test]
+fn y_on_the_board_sets_the_core_for_every_gba_game() {
+    let (d, mut app) = on_shelf(&["Emerald", "Zzz"]);
+    fake_picker_faces(&mut app);
+    slot_store::write_selected_core(d.path(), "Emerald", Core::Mgba).unwrap();
+    app.apply(Action::GbaDown(Btn::Start));
+    app.apply(Action::GbaDown(Btn::Right));
+    let_it_hop(&mut app);
+    app.apply(Action::GbaDown(Btn::Y));
+    let_it_close(&mut app);
+
+    assert_eq!(app.core_picker(), None);
+    assert_eq!(
+        slot_store::core_for_system(d.path(), Platform::Gba),
+        Core::Gpsp
+    );
+    for stem in ["Emerald", "Zzz"] {
+        assert_eq!(
+            slot_store::core_for_platform(d.path(), stem, Platform::Gba),
+            Core::Gpsp,
+            "{stem} did not follow the system"
+        );
+    }
+
+    app.apply(Action::GbaDown(Btn::Start));
+    assert_eq!(
+        app.core_picker(),
+        Some(Core::Gpsp),
+        "the chip should start in the system's core"
+    );
+}
+
+#[test]
 fn b_closes_the_picker_without_writing() {
     let (d, mut app) = on_shelf(&["Emerald", "Zzz"]);
     fake_picker_faces(&mut app);
@@ -1110,7 +1142,7 @@ struct PickerFaces {
     chips: [TexId; 2],
     blank: TexId,
     shadow: TexId,
-    legend: [(TexId, u32); 3],
+    legend: [(TexId, u32); 4],
 }
 
 fn fake_boot_faces(app: &mut App) -> PickerFaces {
@@ -1122,7 +1154,7 @@ fn fake_boot_faces(app: &mut App) -> PickerFaces {
         chips: [id(904), id(905)],
         blank: id(906),
         shadow: id(907),
-        legend: [(id(908), 60), (id(909), 90), (id(910), 80)],
+        legend: [(id(908), 60), (id(909), 90), (id(910), 80), (id(911), 70)],
     };
     app.set_core_part_faces(f.sockets.to_vec(), f.chips.to_vec(), f.blank, f.shadow);
     app.set_core_legend_faces(f.legend.to_vec());
@@ -1270,6 +1302,7 @@ fn assert_plain_shelf(out: &[Draw], f: &PickerFaces, when: &str) {
         f.legend[0].0,
         f.legend[1].0,
         f.legend[2].0,
+        f.legend[3].0,
     ];
     let drawn: Vec<TexId> = out
         .iter()
@@ -1369,27 +1402,28 @@ fn the_open_cart_rests_over_the_shelf_with_its_lid_turned() {
     );
     assert!(shadow_i < lid_i, "the lid's shadow is drawn over the lid");
 
-    let [cancel, swap, choose] = f.legend;
     let at = |tex| tex_at(&out, tex).expect("a legend hint is missing").1;
     let seen = |w: u32| (w - HINT_EDGE) as f32;
     let y = OUT_H as f32 - MOUTH_H * 2.0;
-    assert_eq!(at(cancel.0), [234.0, y, cancel.1 as f32, MOUTH_H]);
+    for pair in f.legend.windows(2) {
+        let [(left, left_w), (right, _)] = [pair[0], pair[1]];
+        assert_eq!(
+            at(left)[0] + seen(left_w) + 24.0,
+            at(right)[0],
+            "the legend's hints are not side by side"
+        );
+    }
+    let first = at(f.legend[0].0)[0];
+    let (last, last_w) = f.legend[3];
     assert_eq!(
-        at(swap.0)[0] + seen(swap.1) / 2.0,
+        first + (at(last)[0] + seen(last_w) - first) / 2.0,
         OUT_W as f32 / 2.0,
-        "Swap is off the panel's centre"
+        "the legend is off the panel's centre"
     );
-    assert_eq!(
-        at(choose.0)[0],
-        at(swap.0)[0] + seen(swap.1) + 24.0,
-        "Choose is not beside Swap"
-    );
-    assert_eq!(
-        at(cancel.0)[0] + seen(cancel.1) + 24.0,
-        at(swap.0)[0],
-        "Cancel is not beside Swap"
-    );
-    assert_eq!((at(swap.0)[1], at(choose.0)[1]), (y, y));
+    assert!(f
+        .legend
+        .iter()
+        .all(|&(tex, w)| at(tex) == [at(tex)[0], y, w as f32, MOUTH_H]));
 }
 
 #[test]

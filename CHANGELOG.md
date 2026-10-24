@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.4.0
+
+- A core can be set for a whole system as well as for one game. START on a game opens its cores as before: A sets one for that game, and Y for every game on its system. A game given its system's core follows the system from then on. The picks are kept in `Config/system_core.txt`.
+- X and Y reach the game when turbo is off, so a Dreamcast pad has all four face buttons.
+- A core that falls behind no longer pitches its sound down: the sound's rate stays within 1% of the core's.
+
 ## v2.3.0
 
 - Power, on the main menu: Restart, Shut Down, and Reload unslot, which starts unslot again without restarting the device.

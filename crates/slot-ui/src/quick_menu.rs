@@ -773,6 +773,7 @@ pub fn core_button_legends() -> Vec<UndoFace> {
             true,
         ),
         with_hint(button_face(ButtonLegend::A), "Choose", None, false),
+        with_hint(button_face(ButtonLegend::Y), "All GBA", None, false),
     ]
 }
 

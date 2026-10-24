@@ -12,6 +12,8 @@ pub enum Press {
     Left,
     Right,
     Keep,
+    /// Keep the seated core for every game on the system.
+    KeepAll,
     Back,
 }
 
@@ -20,6 +22,7 @@ pub enum Outcome {
     Nothing,
     Refused,
     Write(Core),
+    WriteAll(Core),
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -107,6 +110,10 @@ impl CorePicker {
             Press::Keep => {
                 self.begin_close(now);
                 return Outcome::Write(self.seat);
+            }
+            Press::KeepAll => {
+                self.begin_close(now);
+                return Outcome::WriteAll(self.seat);
             }
             Press::Back => {
                 self.begin_close(now);

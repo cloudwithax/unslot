@@ -70,6 +70,7 @@ fn upload_faces(app: &mut App, c: &mut Compositor) {
         hint_face("B", "Cancel"),
         arrows_hint_face("Swap"),
         hint_face("A", "Choose"),
+        hint_face("Y", "All GBA"),
     ]
     .into_iter()
     .map(|f| (tex(c, f.w, f.h, &f.rgba), f.w))

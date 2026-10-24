@@ -1,5 +1,6 @@
 use slot_store::{
-    core_for, core_for_platform, read_selected_cores, write_selected_core, Core, Platform,
+    core_for, core_for_platform, core_for_system, read_selected_cores, write_game_core,
+    write_selected_core, write_system_core, Core, Platform,
 };
 use tempfile::tempdir;
 
@@ -213,4 +214,56 @@ fn every_system_has_a_core_and_no_core_twice() {
             assert!(!cores[i + 1..].contains(c), "{p:?} lists {c:?} twice");
         }
     }
+}
+
+#[test]
+fn a_game_with_no_line_runs_its_systems_core() {
+    let d = root_with(None);
+    assert_eq!(core_for_system(d.path(), Platform::Gba), Core::Mgba);
+    write_system_core(d.path(), Platform::Gba, Core::Gpsp).unwrap();
+    assert_eq!(core_for_system(d.path(), Platform::Gba), Core::Gpsp);
+    assert_eq!(
+        core_for_platform(d.path(), "Emerald", Platform::Gba),
+        Core::Gpsp
+    );
+    assert_eq!(
+        core_for_system(d.path(), Platform::Arcade),
+        Core::Fbneo,
+        "the GBA's core reached another system"
+    );
+}
+
+#[test]
+fn a_games_own_core_wins_over_its_systems() {
+    let d = root_with(Some("Emerald = mgba\n"));
+    write_system_core(d.path(), Platform::Gba, Core::Gpsp).unwrap();
+    assert_eq!(
+        core_for_platform(d.path(), "Emerald", Platform::Gba),
+        Core::Mgba
+    );
+}
+
+#[test]
+fn a_system_core_the_system_cannot_run_is_ignored() {
+    let d = root_with(None);
+    std::fs::write(d.path().join("Config/system_core.txt"), "arcade = gpsp\n").unwrap();
+    assert_eq!(core_for_system(d.path(), Platform::Arcade), Core::Fbneo);
+}
+
+#[test]
+fn giving_a_game_its_systems_core_lets_it_follow_the_system() {
+    let d = root_with(None);
+    write_game_core(d.path(), "Emerald", Platform::Gba, Core::Gpsp).unwrap();
+    assert_eq!(
+        read_selected_cores(d.path()).get("Emerald"),
+        Some(&Core::Gpsp)
+    );
+
+    write_game_core(d.path(), "Emerald", Platform::Gba, Core::Mgba).unwrap();
+    assert!(read_selected_cores(d.path()).is_empty());
+    write_system_core(d.path(), Platform::Gba, Core::Gpsp).unwrap();
+    assert_eq!(
+        core_for_platform(d.path(), "Emerald", Platform::Gba),
+        Core::Gpsp
+    );
 }

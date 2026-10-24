@@ -4,7 +4,7 @@ use common::{app_booting_at, CLOCK_IS_SET};
 use slot::app::{PageModel, Phase};
 use slot::root::missing_bios;
 use slot_input::{Action, Btn};
-use slot_store::{core_for_platform, write_slot_state, Core, Platform, SlotState};
+use slot_store::{core_for_platform, core_for_system, write_slot_state, Core, Platform, SlotState};
 
 fn card_with(games: &[&str]) -> tempfile::TempDir {
     let d = tempfile::tempdir().unwrap();
@@ -49,6 +49,69 @@ fn start_on_an_arcade_game_picks_its_core_from_a_list() {
     assert_eq!(
         core_for_platform(d.path(), &stem, Platform::Arcade),
         Core::Mame2003Plus
+    );
+}
+
+#[test]
+fn y_on_the_core_list_sets_the_core_for_the_whole_system() {
+    let d = card_with(&["ARCADE/sf2ce.zip", "ARCADE/1941.zip", "CPS1/ffight.zip"]);
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    let stem = a.selected_stem().expect("a game on the shelf").to_string();
+    press(&mut a, Btn::Start);
+    press(&mut a, Btn::Down);
+    let Some(PageModel::List(page)) = a.page_model() else {
+        panic!("no core list: {:?}", a.phase());
+    };
+    let legends: Vec<&str> = page.legends.iter().map(|l| l.label.as_str()).collect();
+    assert!(legends.contains(&"All Arcade"), "{legends:?}");
+    press(&mut a, Btn::Y);
+    assert!(matches!(a.phase(), Phase::Shelf), "{:?}", a.phase());
+
+    assert_eq!(
+        core_for_system(d.path(), Platform::Arcade),
+        Core::Mame2003Plus
+    );
+    for game in ["sf2ce", "1941"] {
+        assert_eq!(
+            core_for_platform(d.path(), game, Platform::Arcade),
+            Core::Mame2003Plus
+        );
+    }
+    assert_eq!(
+        core_for_system(d.path(), Platform::Cps1),
+        Core::Fbneo,
+        "the arcade's core reached CPS-1"
+    );
+
+    // One game back on FinalBurn Neo keeps it, and the list says which is the system's.
+    press(&mut a, Btn::Start);
+    let Some(PageModel::List(page)) = a.page_model() else {
+        panic!("no core list: {:?}", a.phase());
+    };
+    let rows: Vec<(&str, &str)> = page
+        .rows
+        .iter()
+        .map(|r| (r.label.as_str(), r.detail.as_str()))
+        .collect();
+    assert_eq!(rows, [("FinalBurn Neo", ""), ("MAME 2003-Plus", "In use")]);
+    press(&mut a, Btn::Up);
+    press(&mut a, Btn::A);
+    assert_eq!(
+        core_for_platform(d.path(), &stem, Platform::Arcade),
+        Core::Fbneo
+    );
+    press(&mut a, Btn::Start);
+    let Some(PageModel::List(page)) = a.page_model() else {
+        panic!("no core list: {:?}", a.phase());
+    };
+    let rows: Vec<(&str, &str)> = page
+        .rows
+        .iter()
+        .map(|r| (r.label.as_str(), r.detail.as_str()))
+        .collect();
+    assert_eq!(
+        rows,
+        [("FinalBurn Neo", "In use"), ("MAME 2003-Plus", "Default")]
     );
 }
 

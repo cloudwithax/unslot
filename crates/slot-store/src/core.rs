@@ -4,6 +4,9 @@ use std::path::Path;
 use crate::Platform;
 
 pub const SELECTED_CORE_FILE: &str = "Config/selected_core.txt";
+/// The core each system's games run when they have no line of their own, keyed by the system's
+/// folder lower-cased.
+pub const SYSTEM_CORE_FILE: &str = "Config/system_core.txt";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Core {
@@ -252,9 +255,38 @@ pub fn core_for_platform(root: &Path, stem: &str, platform: Platform) -> Core {
         .as_deref()
         .and_then(Core::parse)
         .filter(|core| core.runs(platform))
+        .unwrap_or_else(|| core_for_system(root, platform))
+}
+
+/// The core a system's games run when they have none of their own: the one picked for the
+/// system, or its default.
+pub fn core_for_system(root: &Path, platform: Platform) -> Core {
+    crate::ini::value(root, SYSTEM_CORE_FILE, &platform.key())
+        .as_deref()
+        .and_then(Core::parse)
+        .filter(|core| core.runs(platform))
         .unwrap_or_else(|| Core::default_for(platform))
 }
 
 pub fn write_selected_core(root: &Path, stem: &str, core: Core) -> std::io::Result<()> {
     crate::ini::write(root, SELECTED_CORE_FILE, stem, core.as_str())
+}
+
+/// Gives a game a core of its own, or takes its line away when the core is its system's, so it
+/// follows the system from then on.
+pub fn write_game_core(
+    root: &Path,
+    stem: &str,
+    platform: Platform,
+    core: Core,
+) -> std::io::Result<()> {
+    if core == core_for_system(root, platform) {
+        crate::ini::remove(root, SELECTED_CORE_FILE, stem)
+    } else {
+        write_selected_core(root, stem, core)
+    }
+}
+
+pub fn write_system_core(root: &Path, platform: Platform, core: Core) -> std::io::Result<()> {
+    crate::ini::write(root, SYSTEM_CORE_FILE, &platform.key(), core.as_str())
 }
