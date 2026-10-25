@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.7.1
+
+- Paired Bluetooth controllers and headphones stay paired across a restart. bluez keeps its pairings in `/var/lib/bluetooth`, which BaseOS clears at every boot, so each one had to be paired again. They are now copied to `Config/bluetooth` on the card whenever something pairs or is forgotten and when Bluetooth turns off, and put back before Bluetooth turns on.
+- The PSP's UMD on the shelf looks like a UMD: the round-topped white shell with the disc showing through its window, the game's art on the disc round the white UMD hub, and the PSP logo and the controller on the strip below.
+
 ## v2.7.0
 
 - Cast the screen to a Chromecast or a Google TV over Wi-Fi, under Network → Cast. Pick a TV from the list and it shows what the handheld does, games and menus alike, with the sound; the handheld's speaker and headphones go quiet until the cast stops. A on that TV in the list again stops it, and Y looks for TVs again. The picture keeps its shape, with black bars at the sides. It runs at up to 60 fps, and heavier games, such as Dreamcast ones, at about 35.
