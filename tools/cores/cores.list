@@ -1,0 +1,34 @@
+# The cores unslot downloads rather than ships, by the buildbot's names: what
+# tools/cores/mirror.sh copies into the cores release. Keep it to Core::download_only's.
+vba_next
+vbam
+gambatte
+gearboy
+tgbdual
+nestopia
+quicknes
+snes9x2005_plus
+snes9x2010
+snes9x2002
+mednafen_supafaust
+clownmdemu
+smsplus
+mednafen_pce
+geargrafx
+mednafen_ngp
+mednafen_lynx
+holani
+gearlynx
+swanstation
+mame2003
+mame2000
+mame2010
+fbalpha2012
+fbalpha2012_cps1
+fbalpha2012_cps2
+fbalpha2012_cps3
+fbalpha2012_neogeo
+stella
+vice_x64sc
+crocods
+nekop2

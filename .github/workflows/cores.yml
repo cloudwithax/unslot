@@ -1,0 +1,56 @@
+name: cores
+
+# The cores unslot downloads rather than ships, in the release tagged `cores`: libretro's own
+# builds for the H700, copied from its buildbot by tools/cores/mirror.sh, and the list of them
+# signed with the release key, which the device checks every core against. Run by hand once the
+# buildbot's builds have been tried on a device. The release is a prerelease and never the
+# latest, so the updater, which asks GitHub for the latest, does not take it for unslot's.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-24.04-arm
+    container: rust:1-bullseye
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install unzip, gh and the headers slot builds against
+        run: |
+          set -eu
+          sed -i '/bullseye-security/d' /etc/apt/sources.list
+          apt-get -o Acquire::Check-Valid-Until=false update
+          apt-get install -y --no-install-recommends unzip libgles-dev libegl-dev zlib1g-dev libpng-dev pkg-config
+          curl -fsSL -o /tmp/gh.tar.gz https://github.com/cli/cli/releases/download/v2.62.0/gh_2.62.0_linux_arm64.tar.gz
+          tar -xzf /tmp/gh.tar.gz -C /tmp
+          install /tmp/gh_2.62.0_linux_arm64/bin/gh /usr/local/bin/gh
+
+      - name: Copy the cores
+        run: sh tools/cores/mirror.sh cores
+
+      - name: Sign the list
+        env:
+          UNSLOT_PAK_KEY: ${{ secrets.UNSLOT_PAK_KEY }}
+        run: |
+          set -eu
+          test -n "$UNSLOT_PAK_KEY" || { echo "UNSLOT_PAK_KEY is not set" >&2; exit 1; }
+          cargo run -q --release -p slot --no-default-features --example sign_cores -- cores/cores.txt
+
+      - name: Publish them
+        run: |
+          set -eu
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          repo="$GITHUB_REPOSITORY"
+          if ! gh release view cores --repo "$repo" > /dev/null 2>&1; then
+            gh release create cores --repo "$repo" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "Cores" \
+              --notes "The cores unslot downloads from Settings > Network > Cores: libretro's own builds from its buildbot, unchanged. Their sources are at https://github.com/libretro."
+          fi
+          # The cores go up before the list that names them.
+          gh release upload cores --repo "$repo" --clobber cores/*.so
+          gh release upload cores --repo "$repo" --clobber cores/cores.txt cores/cores.txt.sig

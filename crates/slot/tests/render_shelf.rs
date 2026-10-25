@@ -42,18 +42,14 @@ fn upload_faces(app: &mut App, c: &mut Compositor) {
         app.set_cart_shadow(mould, shadow);
     }
 
-    let sockets = slot_store::Platform::Gba
-        .spec()
-        .cores
+    let sockets = slot_store::Platform::Gba.spec().cores[..slot_ui::SOCKET_U.len()]
         .iter()
         .map(|k| {
             let f = socket_face(*k);
             tex(c, f.w, f.h, &f.rgba)
         })
         .collect();
-    let chips = slot_store::Platform::Gba
-        .spec()
-        .cores
+    let chips = slot_store::Platform::Gba.spec().cores[..slot_ui::SOCKET_U.len()]
         .iter()
         .map(|k| {
             let f = chip_face(Some(*k));
@@ -132,29 +128,29 @@ fn let_it_hop(app: &mut App) {
 }
 
 #[test]
-fn start_draws_the_plain_shelf_on_a_game_boy_cart() {
+fn start_draws_the_plain_shelf_on_a_system_with_one_core() {
     let Some((_g, _s, mut c)) = compositor() else {
         eprintln!("no GL on this host, skipping");
         return;
     };
 
-    let d = common::tmp_root_with_gb_carts(&["Tetris", "Zzz"]);
-    let twin = common::tmp_root_with_gb_carts(&["Tetris", "Zzz"]);
+    let d = common::tmp_root_with_ws_carts(&["Gunpey", "Zzz"]);
+    let twin = common::tmp_root_with_ws_carts(&["Gunpey", "Zzz"]);
     let mut pressed = shelf(&d, &mut c);
     let mut untouched = shelf(&twin, &mut c);
     pressed.apply(Action::GbaDown(Btn::Start));
     let_it_hop(&mut pressed);
     let_it_hop(&mut untouched);
-    let plain = shot(&untouched, &mut c, "gb-plain");
-    let after = shot(&pressed, &mut c, "gb-after-start");
+    let plain = shot(&untouched, &mut c, "ws-plain");
+    let after = shot(&pressed, &mut c, "ws-after-start");
     assert_eq!(
         pressed.core_picker(),
         None,
-        "a Game Boy cart opened the GBA picker"
+        "a WonderSwan cart opened the GBA picker"
     );
     assert!(
         after == plain,
-        "START put something on screen over a Game Boy cart"
+        "START put something on screen over a WonderSwan cart"
     );
 
     let d = common::tmp_root_with_carts(&["Emerald", "Zzz"]);

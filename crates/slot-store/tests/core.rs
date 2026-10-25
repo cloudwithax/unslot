@@ -1,6 +1,6 @@
 use slot_store::{
     core_for, core_for_platform, core_for_system, read_selected_cores, write_game_core,
-    write_selected_core, write_system_core, Core, Platform,
+    write_selected_core, write_system_core, Core, Platform, CORES_DIR,
 };
 use tempfile::tempdir;
 
@@ -200,9 +200,33 @@ fn a_line_naming_a_core_the_platform_cannot_run_is_dropped() {
 }
 
 #[test]
-fn the_picker_board_has_exactly_two_sockets() {
-    // Other systems with more than one core pick from a list, not the GBA's board.
-    assert_eq!(Platform::Gba.spec().cores, [Core::Mgba, Core::Gpsp]);
+fn the_picker_boards_two_sockets_are_the_gbas_own_cores() {
+    // Past these the GBA's cores are downloaded, and once one is it picks from a list instead.
+    let cores = Platform::Gba.spec().cores;
+    assert_eq!(cores[..2], [Core::Mgba, Core::Gpsp]);
+    assert!(cores[2..].iter().all(|c| c.download_only()));
+}
+
+#[test]
+fn every_systems_default_core_comes_with_unslot() {
+    for p in Platform::ALL {
+        assert!(!Core::default_for(p).download_only(), "{p:?}'s default is downloaded");
+    }
+}
+
+#[test]
+fn a_core_not_downloaded_yet_gives_way_to_the_default() {
+    let d = root_with(Some("Mario = nestopia\n"));
+    std::fs::write(d.path().join("Config/system_core.txt"), "nes = quicknes\n").unwrap();
+    assert_eq!(core_for_system(d.path(), Platform::Nes), Core::Fceumm);
+    assert_eq!(core_for_platform(d.path(), "Mario", Platform::Nes), Core::Fceumm);
+
+    std::fs::create_dir(d.path().join(CORES_DIR)).unwrap();
+    std::fs::write(d.path().join(CORES_DIR).join(Core::Nestopia.file_name()), "").unwrap();
+    assert!(Core::Nestopia.installed(d.path()));
+    assert!(!Core::Quicknes.installed(d.path()));
+    assert_eq!(core_for_platform(d.path(), "Mario", Platform::Nes), Core::Nestopia);
+    assert_eq!(core_for_system(d.path(), Platform::Nes), Core::Fceumm);
 }
 
 #[test]

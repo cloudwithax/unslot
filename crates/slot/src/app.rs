@@ -24,6 +24,7 @@ use slot_ui::{
 
 use crate::audio::Sfx;
 use crate::bluetooth::{Bluetooth, BtBusy, BtView};
+use crate::core_downloads::{CoreDownloads, CoresView};
 use crate::core_picker::{Chip, CorePicker, Outcome, Press};
 use crate::link_kind::{link_carried, link_kind, serial_option, LinkKind};
 use crate::link_radio::{radio_jobs, LinkRole, RadioJob, RadioJobs};
@@ -299,6 +300,10 @@ pub enum Phase {
     Updates {
         cursor: usize,
     },
+    /// The cores that do not come with unslot, to download, update or remove.
+    CoreDownloads {
+        cursor: usize,
+    },
     /// Finding labels online, for all the card's systems or one. `note` says why A did nothing.
     GameArt {
         cursor: usize,
@@ -543,6 +548,8 @@ pub struct App {
     services_view: ServicesView,
     updates: Option<Updates>,
     updates_view: UpdatesView,
+    core_downloads: Option<CoreDownloads>,
+    cores_view: CoresView,
     scraper: Option<Scraper>,
     scrape_view: ScrapeView,
     /// The last search: what was typed, and the games it found by system and file name.
@@ -793,6 +800,8 @@ impl App {
             services_view: ServicesView::default(),
             updates: None,
             updates_view: UpdatesView::default(),
+            core_downloads: None,
+            cores_view: CoresView::default(),
             scraper: None,
             scrape_view: ScrapeView::default(),
             search: None,
@@ -833,6 +842,7 @@ impl App {
         services.want(app.wanted());
         app.services = Some(services);
         app.updates = Some(Updates::for_card(root));
+        app.core_downloads = Some(CoreDownloads::for_card(root));
         app.scraper = Some(Scraper::for_card(root));
         app.ss_state = crate::scrape::ss_state(root);
         app.restock_recents();
@@ -947,6 +957,7 @@ impl App {
             | Phase::Devices { .. }
             | Phase::Services { .. }
             | Phase::Updates { .. }
+            | Phase::CoreDownloads { .. }
             | Phase::GameArt { .. }
             | Phase::Cores { .. }
             | Phase::Search { .. } => vertical,
@@ -1211,6 +1222,7 @@ impl App {
             QuickRow::BtDevices
             | QuickRow::Services
             | QuickRow::Updates
+            | QuickRow::Cores
             | QuickRow::GameArt
             | QuickRow::Power
             | QuickRow::Restart
@@ -2258,6 +2270,7 @@ impl App {
             | Phase::Devices { cursor }
             | Phase::Services { cursor, .. }
             | Phase::Updates { cursor }
+            | Phase::CoreDownloads { cursor }
             | Phase::GameArt { cursor, .. } => (3, cursor.to_string()),
             Phase::Cores { cursor } | Phase::Search { cursor } => (1, cursor.to_string()),
             Phase::Keyboard { keys, .. } => (4, format!("{keys:?}")),
@@ -2307,6 +2320,7 @@ impl App {
                 | Phase::Devices { .. }
                 | Phase::Services { .. }
                 | Phase::Updates { .. }
+                | Phase::CoreDownloads { .. }
                 | Phase::GameArt { .. }
                 | Phase::Cores { .. }
                 | Phase::Search { .. }
@@ -2479,6 +2493,7 @@ impl App {
             Phase::TailscaleLogin => self.tailscale_login_input(action),
             Phase::SyncthingId => self.syncthing_id_input(action),
             Phase::Updates { cursor } => self.updates_input(cursor, action),
+            Phase::CoreDownloads { cursor } => self.core_downloads_input(cursor, action),
             Phase::GameArt { cursor, .. } => self.game_art_input(cursor, action),
             Phase::Cores { cursor } => self.cores_input(cursor, action),
             Phase::Search { cursor } => self.search_input(cursor, action),
@@ -2999,6 +3014,91 @@ impl App {
         }
     }
 
+    fn with_cores(&self, f: impl FnOnce(&CoreDownloads)) {
+        if let Some(cores) = &self.core_downloads {
+            f(cores);
+        }
+    }
+
+    fn core_downloads_input(&mut self, cursor: usize, action: Action) {
+        let cores = downloadable_cores();
+        let n = cores.len();
+        let cursor = cursor.min(n - 1);
+        let core = cores[cursor];
+        let v = &self.cores_view;
+        let (pending, installed) = (v.pending(core), v.installed(core));
+        let wanted = !pending && (!installed || v.outdated(core));
+        let cursor = match action {
+            Action::GbaDown(Btn::Up) => (cursor + n - 1) % n,
+            Action::GbaDown(Btn::Down) => (cursor + 1) % n,
+            Action::GbaDown(Btn::A) if wanted => {
+                self.with_cores(|c| c.download(core));
+                cursor
+            }
+            Action::GbaDown(Btn::X) if installed && !pending => {
+                self.with_cores(|c| c.remove(core));
+                cursor
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::Cores,
+                };
+                return;
+            }
+            _ => return,
+        };
+        self.phase = Phase::CoreDownloads { cursor };
+    }
+
+    fn core_downloads_page(&self, cursor: usize) -> ListPage {
+        let v = &self.cores_view;
+        let cores = downloadable_cores();
+        let cursor = cursor.min(cores.len() - 1);
+        let rows = cores
+            .iter()
+            .map(|&c| ListRow {
+                label: c.text().into(),
+                detail: core_state(v, c).unwrap_or_else(|| {
+                    Platform::ALL
+                        .into_iter()
+                        .filter(|p| p.spec().cores.contains(&c))
+                        .map(Platform::dir_name)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }),
+                bars: None,
+                icon: None,
+            })
+            .collect();
+        let status = if let Some((c, _)) = v.downloading {
+            format!("Downloading {}...", c.text())
+        } else if let Some(e) = &v.error {
+            e.clone()
+        } else if v.checking {
+            "Checking for cores...".into()
+        } else {
+            let have = cores.iter().filter(|c| v.installed(**c)).count();
+            format!("{have} of {} downloaded", cores.len())
+        };
+        let core = cores[cursor];
+        let mut legends = vec![back_legend()];
+        if v.installed(core) && !v.pending(core) {
+            legends.push(Legend::new(ButtonLegend::X, "Remove"));
+        }
+        if !v.pending(core) && !v.installed(core) {
+            legends.push(Legend::new(ButtonLegend::A, "Download"));
+        } else if !v.pending(core) && v.outdated(core) {
+            legends.push(Legend::new(ButtonLegend::A, "Update"));
+        }
+        ListPage {
+            title: "Cores".into(),
+            status,
+            cursor,
+            rows,
+            legends,
+        }
+    }
+
     fn tailscale_login_input(&mut self, action: Action) {
         let back = Phase::Services {
             cursor: ServiceRow::Tailscale as usize,
@@ -3346,6 +3446,9 @@ impl App {
                 self.services_page(*cursor, note.as_deref()),
             )),
             Phase::Updates { cursor } => Some(PageModel::List(self.updates_page(*cursor))),
+            Phase::CoreDownloads { cursor } => {
+                Some(PageModel::List(self.core_downloads_page(*cursor)))
+            }
             Phase::Cores { cursor } => self.cores_page(*cursor).map(PageModel::List),
             Phase::Search { cursor } => Some(PageModel::List(self.search_page(*cursor))),
             Phase::GameArt { cursor, note } => Some(PageModel::List(
@@ -3549,6 +3652,12 @@ impl App {
                     self.with_updates(Updates::check);
                 }
             }
+            QuickRow::Cores => {
+                self.phase = Phase::CoreDownloads { cursor: 0 };
+                if self.cores_view.listed.is_none() {
+                    self.with_cores(CoreDownloads::check);
+                }
+            }
             QuickRow::BtDevices => {
                 self.phase = Phase::Devices { cursor: 0 };
                 // Open on what is paired; a search only when there is nothing yet.
@@ -3742,6 +3851,7 @@ impl App {
             | QuickRow::BtDevices
             | QuickRow::Services
             | QuickRow::Updates
+            | QuickRow::Cores
             | QuickRow::GameArt
             | QuickRow::Power
             | QuickRow::Restart
@@ -4231,6 +4341,9 @@ impl App {
         }
         if let Some(updates) = &self.updates {
             self.updates_view = updates.view();
+        }
+        if let Some(cores) = &self.core_downloads {
+            self.cores_view = cores.view();
         }
         if let Some(scraper) = &self.scraper {
             self.scrape_view = scraper.view();
@@ -4856,6 +4969,7 @@ impl App {
             | Phase::TailscaleLogin
             | Phase::SyncthingId
             | Phase::Updates { .. }
+            | Phase::CoreDownloads { .. }
             | Phase::GameArt { .. }
             | Phase::Cores { .. }
             | Phase::Search { .. }
@@ -5727,7 +5841,8 @@ impl App {
         if cores.len() < 2 {
             return;
         }
-        if cart.platform != Platform::Gba {
+        // The GBA's board seats its own two cores; once another is downloaded it has a list.
+        if cart.platform != Platform::Gba || cores[2..].iter().any(|c| c.installed(&root)) {
             let chosen = slot_store::core_for_platform(&root, &cart.stem, cart.platform);
             self.phase = Phase::Cores {
                 cursor: cores.iter().position(|c| *c == chosen).unwrap_or(0),
@@ -5745,6 +5860,13 @@ impl App {
         self.core_picker = Some(picker);
         self.shelf_mut().release_hold();
         self.play_held = None;
+    }
+
+    /// Whether `core` can be opened: it came with unslot or has been downloaded.
+    fn core_on_card(&self, core: Core) -> bool {
+        self.root
+            .as_deref()
+            .map_or(!core.download_only(), |root| core.installed(root))
     }
 
     /// The game on the shelf and the cores its system has.
@@ -5767,6 +5889,11 @@ impl App {
             Action::GbaDown(Btn::Down) => Phase::Cores {
                 cursor: (cursor + 1) % n,
             },
+            Action::GbaDown(Btn::A) if !self.core_on_card(cores[cursor]) => {
+                self.with_cores(|c| c.download(cores[cursor]));
+                Phase::Cores { cursor }
+            }
+            Action::GbaDown(Btn::Y) if !self.core_on_card(cores[cursor]) => return,
             Action::GbaDown(Btn::A) => {
                 self.write_core(cores[cursor], false);
                 Phase::Shelf
@@ -5796,14 +5923,28 @@ impl App {
                 detail: match () {
                     _ if *c == chosen => "In use".into(),
                     _ if *c == system => "Default".into(),
+                    _ if !self.core_on_card(*c) => {
+                        core_state(&self.cores_view, *c).unwrap_or_else(|| "Download".into())
+                    }
                     _ => String::new(),
                 },
                 bars: None,
                 icon: None,
             })
             .collect();
-        let mut legends = with_action((cores[cursor] != chosen).then_some("This Game"));
-        if cores[cursor] != system {
+        let core = cores[cursor];
+        if !self.core_on_card(core) {
+            let pending = self.cores_view.pending(core);
+            return Some(ListPage {
+                title: "Core".into(),
+                status: slot_ui::label_text(cart),
+                cursor,
+                rows,
+                legends: with_action((!pending).then_some("Download")),
+            });
+        }
+        let mut legends = with_action((core != chosen).then_some("This Game"));
+        if core != system {
             let all = format!("All {}", cart.platform.short_name());
             legends.push(Legend::new(ButtonLegend::Y, &all));
         }
@@ -6724,6 +6865,30 @@ fn up(level: u8, step: u8, max: u8) -> u8 {
 }
 
 /// B, which leaves every page for the one it was opened from.
+/// The cores to download, a system's after the one before's, each once.
+fn downloadable_cores() -> Vec<Core> {
+    let mut cores = Vec::new();
+    for p in Platform::ALL {
+        for c in p.spec().cores {
+            if c.download_only() && !cores.contains(c) {
+                cores.push(*c);
+            }
+        }
+    }
+    cores
+}
+
+/// How a downloaded core stands, when it is on the card or on its way.
+fn core_state(v: &CoresView, core: Core) -> Option<String> {
+    match v.downloading {
+        Some((c, pct)) if c == core => Some(format!("{pct}%")),
+        _ if v.queued.contains(&core) => Some("Waiting".into()),
+        _ if v.outdated(core) => Some("Update".into()),
+        _ if v.installed(core) => Some("Downloaded".into()),
+        _ => None,
+    }
+}
+
 fn back_legend() -> Legend {
     Legend::new(ButtonLegend::B, "Back")
 }

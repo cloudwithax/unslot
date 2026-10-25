@@ -78,6 +78,17 @@ pub fn write_gb_cart(d: &TempDir, stem: &str, title: &str) {
     std::fs::write(cart_path(d, CartPlatform::Gb, stem), rom).expect("write rom");
 }
 
+/// A card with WonderSwan games, a system with one core, so START has nothing to pick.
+pub fn tmp_root_with_ws_carts(stems: &[&str]) -> TempDir {
+    let d = tmp_root();
+    for stem in stems {
+        let path = d.path().join("Games/WS").join(format!("{stem}.ws"));
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create WS dir");
+        std::fs::write(path, vec![0u8; 0x100]).expect("write rom");
+    }
+    d
+}
+
 pub fn tmp_root_with_real_carts(stems: &[&str]) -> TempDir {
     let d = tmp_root();
     for stem in stems {

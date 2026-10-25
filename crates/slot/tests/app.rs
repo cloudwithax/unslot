@@ -829,16 +829,25 @@ fn start_on(mut pressed: App, mut untouched: App) -> (Option<Core>, f32, bool) {
 }
 
 #[test]
-fn start_opens_no_picker_on_a_game_boy_cart() {
-    let (_d, gb) = on_shelf_gb(&["Tetris", "Zzz"]);
-    let (_twin, gb_twin) = on_shelf_gb(&["Tetris", "Zzz"]);
-    let (picker, shake, moved) = start_on(gb, gb_twin);
-    assert_eq!(picker, None, "a Game Boy cart opened the GBA picker");
+fn start_opens_no_picker_on_a_system_with_one_core() {
+    let (_d, ws) = booted_on_shelf(common::tmp_root_with_ws_carts(&["Gunpey", "Zzz"]));
+    let (_twin, ws_twin) = booted_on_shelf(common::tmp_root_with_ws_carts(&["Gunpey", "Zzz"]));
+    let (picker, shake, moved) = start_on(ws, ws_twin);
+    assert_eq!(picker, None, "a WonderSwan cart opened the GBA picker");
     assert_eq!(
         shake, 0.0,
-        "START on a Game Boy cart was answered with a refusal shake"
+        "START on a WonderSwan cart was answered with a refusal shake"
     );
     assert!(!moved, "START changed what the shelf draws");
+
+    let (_d, mut gb) = on_shelf_gb(&["Tetris", "Zzz"]);
+    gb.apply(Action::GbaDown(Btn::Start));
+    assert_eq!(gb.core_picker(), None, "a Game Boy cart opened the GBA picker");
+    assert!(
+        matches!(gb.phase(), Phase::Cores { .. }),
+        "a Game Boy cart's cores are a list: {:?}",
+        gb.phase()
+    );
 
     let (_d, gba) = on_shelf(&["Emerald", "Zzz"]);
     let (_twin, gba_twin) = on_shelf(&["Emerald", "Zzz"]);

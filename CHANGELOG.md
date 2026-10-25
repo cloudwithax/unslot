@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.5.0
+
+- 32 more cores to download, under Network → Cores, or from a game's core list, where a core not on the card says Download. They come from unslot's own `cores` release, copied from libretro's buildbot and signed with the release key, and go in `Cores/` on the card, which updates leave alone. X on the Cores page removes one. Each loads on an RG34XXSP, and those tried with a game there ran at full speed.
+- The GBA keeps its board of two cores until another GBA core is downloaded, and from then on lists its cores as other systems do.
+
 ## v2.4.0
 
 - A core can be set for a whole system as well as for one game. START on a game opens its cores as before: A sets one for that game, and Y for every game on its system. A game given its system's core follows the system from then on. The picks are kept in `Config/system_core.txt`.

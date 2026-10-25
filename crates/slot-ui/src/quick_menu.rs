@@ -54,6 +54,8 @@ pub enum QuickRow {
     Services,
     /// unslot's and BaseOS's updates.
     Updates,
+    /// The cores that do not come with unslot, to download.
+    Cores,
     /// Labels for the card's games, found online.
     GameArt,
     /// Restart, Shut Down and Reload unslot.
@@ -70,7 +72,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 44] = [
+const GENERIC: [QuickRow; 45] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -108,6 +110,7 @@ const GENERIC: [QuickRow; 44] = [
     QuickRow::BtDevices,
     QuickRow::Services,
     QuickRow::Updates,
+    QuickRow::Cores,
     QuickRow::GameArt,
     QuickRow::MenuSounds,
     QuickRow::Haptics,
@@ -214,13 +217,14 @@ impl QuickRow {
 
     pub const POWER: [QuickRow; 3] = [QuickRow::Restart, QuickRow::ShutDown, QuickRow::Reload];
 
-    pub const NETWORK: [QuickRow; 7] = [
+    pub const NETWORK: [QuickRow; 8] = [
         QuickRow::Wifi,
         QuickRow::WifiNetworks,
         QuickRow::Bluetooth,
         QuickRow::BtDevices,
         QuickRow::Services,
         QuickRow::Updates,
+        QuickRow::Cores,
         QuickRow::GameArt,
     ];
 
@@ -344,6 +348,7 @@ impl QuickRow {
             | QuickRow::BtDevices
             | QuickRow::Services
             | QuickRow::Updates
+            | QuickRow::Cores
             | QuickRow::GameArt => QuickRow::NETWORK.to_vec(),
             QuickRow::Restart | QuickRow::ShutDown | QuickRow::Reload => QuickRow::POWER.to_vec(),
             QuickRow::Shader | QuickRow::ColourCorrection | QuickRow::Palette | QuickRow::Bezel => {
@@ -454,6 +459,7 @@ impl QuickRow {
             QuickRow::BtDevices => "Devices",
             QuickRow::Services => "Services",
             QuickRow::Updates => "Updates",
+            QuickRow::Cores => "Cores",
             QuickRow::GameArt => "Game Art",
             QuickRow::Power => "Power",
             QuickRow::Restart => "Restart",
@@ -482,6 +488,7 @@ impl QuickRow {
                 | QuickRow::BtDevices
                 | QuickRow::Services
                 | QuickRow::Updates
+                | QuickRow::Cores
                 | QuickRow::GameArt
                 | QuickRow::Power
                 | QuickRow::Restart

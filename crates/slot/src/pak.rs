@@ -55,12 +55,7 @@ pub fn check(bytes: &[u8], key: &[u8; 32]) -> Result<Pak, String> {
     };
     let note = entry("pak")?;
     let sig = entry("pak.sig")?;
-    let sig = hex(std::str::from_utf8(sig).unwrap_or_default().trim())
-        .and_then(|b| <[u8; 64]>::try_from(b).ok())
-        .ok_or("the pack's signature is not one")?;
-    let key = VerifyingKey::from_bytes(key).map_err(|_| "the release key is not one")?;
-    key.verify_strict(note, &Signature::from_bytes(&sig))
-        .map_err(|_| "the pack was not signed by unslot, or was changed since")?;
+    verify("the pack", note, std::str::from_utf8(sig).unwrap_or_default(), key)?;
 
     let note = std::str::from_utf8(note).map_err(|_| "the pack's note is not text")?;
     let field = |key: &str| {
@@ -87,6 +82,17 @@ pub fn check(bytes: &[u8], key: &[u8; 32]) -> Result<Pak, String> {
         version: version.to_string(),
         zip: zip.to_vec(),
     })
+}
+
+/// Checks that `signed`, which complaints call `what`, is what `key` signed, by its signature
+/// in hex.
+pub fn verify(what: &str, signed: &[u8], sig: &str, key: &[u8; 32]) -> Result<(), String> {
+    let sig = hex(sig.trim())
+        .and_then(|b| <[u8; 64]>::try_from(b).ok())
+        .ok_or(format!("{what}'s signature is not one"))?;
+    let key = VerifyingKey::from_bytes(key).map_err(|_| "the release key is not one")?;
+    key.verify_strict(signed, &Signature::from_bytes(&sig))
+        .map_err(|_| format!("{what} was not signed by unslot, or was changed since"))
 }
 
 fn hex(s: &str) -> Option<Vec<u8>> {
@@ -156,6 +162,12 @@ pub mod build {
     /// the key `seed` is the secret half of.
     pub fn signed(version: &str, zip: &[u8], seed: [u8; 32]) -> Vec<u8> {
         pack(version, zip, seed, |_| {})
+    }
+
+    /// `bytes`' signature by the key `seed` is the secret half of, in hex, as `verify` reads it.
+    pub fn sign(bytes: &[u8], seed: [u8; 32]) -> String {
+        let sig = SigningKey::from_bytes(&seed).sign(bytes);
+        sig.to_bytes().iter().map(|b| format!("{b:02x}")).collect()
     }
 
     /// The public half of the key `seed` is the secret half of.

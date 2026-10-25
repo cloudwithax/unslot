@@ -188,6 +188,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::BtDevices,
             QuickRow::Services,
             QuickRow::Updates,
+            QuickRow::Cores,
             QuickRow::GameArt,
             QuickRow::Power,
             QuickRow::Restart,

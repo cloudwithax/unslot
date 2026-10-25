@@ -410,7 +410,7 @@ fn look(
     })
 }
 
-fn backend(root: &Path) -> (Box<dyn UpdateBackend>, Option<BaseOs>) {
+pub(crate) fn backend(root: &Path) -> (Box<dyn UpdateBackend>, Option<BaseOs>) {
     #[cfg(all(feature = "device", unix))]
     {
         let baseos = crate::baseos::var("BASEOS_VERSION")

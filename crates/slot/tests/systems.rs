@@ -42,7 +42,17 @@ fn start_on_an_arcade_game_picks_its_core_from_a_list() {
         .iter()
         .map(|r| (r.label.as_str(), r.detail.as_str()))
         .collect();
-    assert_eq!(rows, [("FinalBurn Neo", "In use"), ("MAME 2003-Plus", "")]);
+    assert_eq!(
+        rows,
+        [
+            ("FinalBurn Neo", "In use"),
+            ("MAME 2003-Plus", ""),
+            ("MAME 2003", "Download"),
+            ("MAME 2000", "Download"),
+            ("MAME 2010", "Download"),
+            ("FB Alpha 2012", "Download")
+        ]
+    );
     press(&mut a, Btn::Down);
     press(&mut a, Btn::A);
     assert!(matches!(a.phase(), Phase::Shelf), "{:?}", a.phase());
@@ -93,7 +103,17 @@ fn y_on_the_core_list_sets_the_core_for_the_whole_system() {
         .iter()
         .map(|r| (r.label.as_str(), r.detail.as_str()))
         .collect();
-    assert_eq!(rows, [("FinalBurn Neo", ""), ("MAME 2003-Plus", "In use")]);
+    assert_eq!(
+        rows,
+        [
+            ("FinalBurn Neo", ""),
+            ("MAME 2003-Plus", "In use"),
+            ("MAME 2003", "Download"),
+            ("MAME 2000", "Download"),
+            ("MAME 2010", "Download"),
+            ("FB Alpha 2012", "Download")
+        ]
+    );
     press(&mut a, Btn::Up);
     press(&mut a, Btn::A);
     assert_eq!(
@@ -109,9 +129,16 @@ fn y_on_the_core_list_sets_the_core_for_the_whole_system() {
         .iter()
         .map(|r| (r.label.as_str(), r.detail.as_str()))
         .collect();
-    assert_eq!(
+assert_eq!(
         rows,
-        [("FinalBurn Neo", "In use"), ("MAME 2003-Plus", "Default")]
+        [
+            ("FinalBurn Neo", "In use"),
+            ("MAME 2003-Plus", "Default"),
+            ("MAME 2003", "Download"),
+            ("MAME 2000", "Download"),
+            ("MAME 2010", "Download"),
+            ("FB Alpha 2012", "Download")
+        ]
     );
 }
 
@@ -252,4 +279,77 @@ fn a_search_that_finds_nothing_says_so() {
     assert_eq!(page.status, "No games match \u{201c}qq\u{201d}");
     press(&mut a, Btn::B);
     assert!(matches!(a.phase(), Phase::Shelf));
+}
+
+#[test]
+fn a_on_a_core_not_downloaded_yet_downloads_it_into_cores() {
+    let d = card_with(&["ARCADE/sf2ce.zip", "ARCADE/1941.zip"]);
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    let stem = a.selected_stem().expect("a game on the shelf").to_string();
+    press(&mut a, Btn::Start);
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::Down);
+    let Some(PageModel::List(page)) = a.page_model() else {
+        panic!("no core list: {:?}", a.phase());
+    };
+    let legends: Vec<&str> = page.legends.iter().map(|l| l.label.as_str()).collect();
+    assert!(legends.contains(&"Download"), "{legends:?}");
+    press(&mut a, Btn::A);
+    assert!(
+        matches!(a.phase(), Phase::Cores { cursor: 2 }),
+        "a core not on the card was chosen: {:?}",
+        a.phase()
+    );
+    assert_eq!(
+        core_for_platform(d.path(), &stem, Platform::Arcade),
+        Core::Fbneo,
+        "a core still downloading was set for the game"
+    );
+
+    let file = d.path().join(slot_store::CORES_DIR).join(Core::Mame2003.file_name());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !file.is_file() {
+        assert!(std::time::Instant::now() < deadline, "the core never came");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    // Once it is on the card the list offers it like any other.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        a.update(0.016);
+        let Some(PageModel::List(page)) = a.page_model() else {
+            panic!("the core list closed: {:?}", a.phase());
+        };
+        if page.rows[2].detail.is_empty() {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{:?}", page.rows[2]);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    press(&mut a, Btn::A);
+    assert!(matches!(a.phase(), Phase::Shelf), "{:?}", a.phase());
+    assert_eq!(
+        core_for_platform(d.path(), &stem, Platform::Arcade),
+        Core::Mame2003
+    );
+}
+
+#[test]
+fn the_gba_board_gives_way_to_a_list_once_another_gba_core_is_downloaded() {
+    let d = card_with(&["GBA/emerald.gba", "GBA/zzz.gba"]);
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    a.apply(Action::GbaDown(Btn::Start));
+    assert!(a.core_picker().is_some(), "{:?}", a.phase());
+
+    let d = card_with(&["GBA/emerald.gba", "GBA/zzz.gba"]);
+    let cores = d.path().join(slot_store::CORES_DIR);
+    std::fs::create_dir_all(&cores).unwrap();
+    std::fs::write(cores.join(Core::VbaNext.file_name()), b"pretend").unwrap();
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    press(&mut a, Btn::Start);
+    assert_eq!(a.core_picker(), None);
+    let Some(PageModel::List(page)) = a.page_model() else {
+        panic!("no core list: {:?}", a.phase());
+    };
+    let labels: Vec<&str> = page.rows.iter().map(|r| r.label.as_str()).collect();
+    assert_eq!(labels, ["mGBA", "gpSP", "VBA Next", "VBA-M"]);
 }

@@ -744,3 +744,54 @@ fn the_sync_line_says_how_far_how_much_and_how_long() {
         "never 100% with some to go"
     );
 }
+
+#[test]
+fn the_cores_page_downloads_a_core_and_removes_it() {
+    use slot_store::{Core, CORES_DIR};
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    let set = SlotState {
+        clock_set: true,
+        ..SlotState::default()
+    };
+    write_slot_state(d.path(), &set).expect("write slot.state");
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    a.apply(Action::QuickMenu);
+    for _ in 0..QuickRow::MAIN.len() {
+        if a.quick_menu() == Some(QuickRow::Network) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    press(&mut a, Btn::A);
+    for _ in 0..QuickRow::NETWORK.len() {
+        if a.quick_menu() == Some(QuickRow::Cores) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    assert_eq!(a.quick_menu(), Some(QuickRow::Cores), "no Cores row");
+    press(&mut a, Btn::A);
+    assert!(
+        matches!(a.phase(), Phase::CoreDownloads { .. }),
+        "{:?}",
+        a.phase()
+    );
+    let n = Core::ALL.iter().filter(|c| c.download_only()).count();
+    until(&mut a, |a| list(a).status == format!("0 of {n} downloaded"));
+    assert_eq!(detail(&a, "VBA Next"), "GBA");
+    assert_eq!(action(&a), Some("Download".to_string()));
+
+    press(&mut a, Btn::A);
+    until(&mut a, |a| detail(a, "VBA Next") == "Downloaded");
+    let file = d.path().join(CORES_DIR).join(Core::VbaNext.file_name());
+    assert!(file.is_file(), "the core is not in {CORES_DIR}");
+    assert_eq!(list(&a).status, format!("1 of {n} downloaded"));
+    assert_eq!(action(&a), None, "A still offers a core already downloaded");
+
+    press(&mut a, Btn::X);
+    until(&mut a, |a| detail(a, "VBA Next") == "GBA");
+    assert!(!file.exists(), "X left the core on the card");
+
+    press(&mut a, Btn::B);
+    assert_eq!(a.quick_menu(), Some(QuickRow::Cores));
+}

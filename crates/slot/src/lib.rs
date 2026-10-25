@@ -10,6 +10,7 @@ pub mod cable;
 pub mod card_log;
 pub mod cart_faces;
 pub mod core;
+pub mod core_downloads;
 pub mod core_picker;
 #[cfg(unix)]
 pub mod crash;

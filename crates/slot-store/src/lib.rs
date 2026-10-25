@@ -18,7 +18,7 @@ pub use cart_shell::{Outline, ShellChoice, ShellFinish, CART_SHELL_FILE, LABELS_
 pub use config::{move_config, CONFIG_DIR};
 pub use core::{
     core_for, core_for_platform, core_for_system, read_selected_cores, write_game_core,
-    write_selected_core, write_system_core, Core, SELECTED_CORE_FILE, SYSTEM_CORE_FILE,
+    write_selected_core, write_system_core, Core, CORES_DIR, SELECTED_CORE_FILE, SYSTEM_CORE_FILE,
 };
 pub use gb_palette::GbPalette;
 pub use gba::{code, header_clean, title, title_code};

@@ -8,11 +8,7 @@ use crate::root;
 const CORE_ENV: &str = "SLOT_CORE";
 
 pub fn dylib_name(core: Core) -> String {
-    format!(
-        "{}_libretro.{}",
-        core.as_str(),
-        std::env::consts::DLL_EXTENSION
-    )
+    core.file_name()
 }
 
 fn candidates(root: &Path, core: Core) -> Vec<PathBuf> {
@@ -20,7 +16,10 @@ fn candidates(root: &Path, core: Core) -> Vec<PathBuf> {
         return vec![PathBuf::from(named)];
     }
     let name = dylib_name(core);
-    let mut paths = vec![root.join("System").join(&name)];
+    let mut paths = vec![
+        root.join("System").join(&name),
+        root.join(slot_store::CORES_DIR).join(&name),
+    ];
     if let Some(dir) = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(Path::to_path_buf))
@@ -505,6 +504,17 @@ mod tests {
         assert_eq!(
             candidates(root, Core::Gpsp)[0],
             root.join("System").join(dylib_name(Core::Gpsp)),
+        );
+    }
+
+    #[test]
+    fn candidates_search_the_downloaded_cores_after_the_system_directory() {
+        let _g = lock();
+        std::env::remove_var(CORE_ENV);
+        let root = Path::new("/some/content/root");
+        assert_eq!(
+            candidates(root, Core::Nestopia)[1],
+            root.join("Cores").join(dylib_name(Core::Nestopia)),
         );
     }
 

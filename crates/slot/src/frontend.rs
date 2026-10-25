@@ -974,17 +974,13 @@ impl UiFaces {
             quick_carets: [false, true].map(quick_caret_face),
             quick_legend: quick_legend_faces(footer_ink(false)),
             quick_legend_light: quick_legend_faces(footer_ink(true)),
-            // The picker's board has a socket for each of the GBA's cores, the only system
-            // with a choice of them.
-            sockets: slot_store::Platform::Gba
-                .spec()
-                .cores
+            // The picker's board has a socket for each of the GBA cores unslot comes with; the
+            // rest are downloaded, and chosen from a list.
+            sockets: slot_store::Platform::Gba.spec().cores[..slot_ui::SOCKET_U.len()]
                 .iter()
                 .map(|c| socket_face(*c))
                 .collect(),
-            chips: slot_store::Platform::Gba
-                .spec()
-                .cores
+            chips: slot_store::Platform::Gba.spec().cores[..slot_ui::SOCKET_U.len()]
                 .iter()
                 .map(|c| chip_face(Some(*c)))
                 .collect(),

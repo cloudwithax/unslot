@@ -7,6 +7,9 @@ pub const SELECTED_CORE_FILE: &str = "Config/selected_core.txt";
 /// The core each system's games run when they have no line of their own, keyed by the system's
 /// folder lower-cased.
 pub const SYSTEM_CORE_FILE: &str = "Config/system_core.txt";
+/// Where the cores that do not come with unslot are kept once downloaded, outside System/ so an
+/// update leaves them be.
+pub const CORES_DIR: &str = "Cores";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Core {
@@ -58,10 +61,42 @@ pub enum Core {
     Retro8,
     Tic80,
     Ppsspp,
+    VbaNext,
+    Vbam,
+    Gambatte,
+    Gearboy,
+    Tgbdual,
+    Nestopia,
+    Quicknes,
+    Snes9x2005Plus,
+    Snes9x2010,
+    Snes9x2002,
+    MednafenSupafaust,
+    Clownmdemu,
+    Smsplus,
+    MednafenPce,
+    Geargrafx,
+    MednafenNgp,
+    MednafenLynx,
+    Holani,
+    Gearlynx,
+    Swanstation,
+    Mame2003,
+    Mame2000,
+    Mame2010,
+    Fbalpha2012,
+    Fbalpha2012Cps1,
+    Fbalpha2012Cps2,
+    Fbalpha2012Cps3,
+    Fbalpha2012Neogeo,
+    Stella,
+    ViceX64sc,
+    Crocods,
+    Nekop2,
 }
 
 impl Core {
-    pub const ALL: [Core; 47] = [
+    pub const ALL: [Core; 79] = [
         Core::Mgba,
         Core::Gpsp,
         Core::Fceumm,
@@ -109,6 +144,38 @@ impl Core {
         Core::Retro8,
         Core::Tic80,
         Core::Ppsspp,
+        Core::VbaNext,
+        Core::Vbam,
+        Core::Gambatte,
+        Core::Gearboy,
+        Core::Tgbdual,
+        Core::Nestopia,
+        Core::Quicknes,
+        Core::Snes9x2005Plus,
+        Core::Snes9x2010,
+        Core::Snes9x2002,
+        Core::MednafenSupafaust,
+        Core::Clownmdemu,
+        Core::Smsplus,
+        Core::MednafenPce,
+        Core::Geargrafx,
+        Core::MednafenNgp,
+        Core::MednafenLynx,
+        Core::Holani,
+        Core::Gearlynx,
+        Core::Swanstation,
+        Core::Mame2003,
+        Core::Mame2000,
+        Core::Mame2010,
+        Core::Fbalpha2012,
+        Core::Fbalpha2012Cps1,
+        Core::Fbalpha2012Cps2,
+        Core::Fbalpha2012Cps3,
+        Core::Fbalpha2012Neogeo,
+        Core::Stella,
+        Core::ViceX64sc,
+        Core::Crocods,
+        Core::Nekop2,
     ];
 
     /// The core's file name without `_libretro` and the extension, as the buildbot names it.
@@ -161,6 +228,38 @@ impl Core {
             Core::Retro8 => "retro8",
             Core::Tic80 => "tic80",
             Core::Ppsspp => "ppsspp",
+            Core::VbaNext => "vba_next",
+            Core::Vbam => "vbam",
+            Core::Gambatte => "gambatte",
+            Core::Gearboy => "gearboy",
+            Core::Tgbdual => "tgbdual",
+            Core::Nestopia => "nestopia",
+            Core::Quicknes => "quicknes",
+            Core::Snes9x2005Plus => "snes9x2005_plus",
+            Core::Snes9x2010 => "snes9x2010",
+            Core::Snes9x2002 => "snes9x2002",
+            Core::MednafenSupafaust => "mednafen_supafaust",
+            Core::Clownmdemu => "clownmdemu",
+            Core::Smsplus => "smsplus",
+            Core::MednafenPce => "mednafen_pce",
+            Core::Geargrafx => "geargrafx",
+            Core::MednafenNgp => "mednafen_ngp",
+            Core::MednafenLynx => "mednafen_lynx",
+            Core::Holani => "holani",
+            Core::Gearlynx => "gearlynx",
+            Core::Swanstation => "swanstation",
+            Core::Mame2003 => "mame2003",
+            Core::Mame2000 => "mame2000",
+            Core::Mame2010 => "mame2010",
+            Core::Fbalpha2012 => "fbalpha2012",
+            Core::Fbalpha2012Cps1 => "fbalpha2012_cps1",
+            Core::Fbalpha2012Cps2 => "fbalpha2012_cps2",
+            Core::Fbalpha2012Cps3 => "fbalpha2012_cps3",
+            Core::Fbalpha2012Neogeo => "fbalpha2012_neogeo",
+            Core::Stella => "stella",
+            Core::ViceX64sc => "vice_x64sc",
+            Core::Crocods => "crocods",
+            Core::Nekop2 => "nekop2",
         }
     }
 
@@ -217,6 +316,38 @@ impl Core {
             Core::Retro8 => "Retro8",
             Core::Tic80 => "TIC-80",
             Core::Ppsspp => "PPSSPP",
+            Core::VbaNext => "VBA Next",
+            Core::Vbam => "VBA-M",
+            Core::Gambatte => "Gambatte",
+            Core::Gearboy => "Gearboy",
+            Core::Tgbdual => "TGB Dual",
+            Core::Nestopia => "Nestopia",
+            Core::Quicknes => "QuickNES",
+            Core::Snes9x2005Plus => "Snes9x 2005 Plus",
+            Core::Snes9x2010 => "Snes9x 2010",
+            Core::Snes9x2002 => "Snes9x 2002",
+            Core::MednafenSupafaust => "Beetle Supafaust",
+            Core::Clownmdemu => "ClownMDEmu",
+            Core::Smsplus => "SMS Plus GX",
+            Core::MednafenPce => "Beetle PCE",
+            Core::Geargrafx => "Geargrafx",
+            Core::MednafenNgp => "Beetle NeoPop",
+            Core::MednafenLynx => "Beetle Lynx",
+            Core::Holani => "Holani",
+            Core::Gearlynx => "Gearlynx",
+            Core::Swanstation => "SwanStation",
+            Core::Mame2003 => "MAME 2003",
+            Core::Mame2000 => "MAME 2000",
+            Core::Mame2010 => "MAME 2010",
+            Core::Fbalpha2012 => "FB Alpha 2012",
+            Core::Fbalpha2012Cps1 => "FB Alpha 2012 CPS-1",
+            Core::Fbalpha2012Cps2 => "FB Alpha 2012 CPS-2",
+            Core::Fbalpha2012Cps3 => "FB Alpha 2012 CPS-3",
+            Core::Fbalpha2012Neogeo => "FB Alpha 2012 Neo Geo",
+            Core::Stella => "Stella",
+            Core::ViceX64sc => "VICE x64sc",
+            Core::Crocods => "CrocoDS",
+            Core::Nekop2 => "Neko Project II",
         }
     }
 
@@ -225,6 +356,26 @@ impl Core {
         Core::ALL
             .into_iter()
             .find(|c| c.as_str().eq_ignore_ascii_case(s))
+    }
+
+    /// The core's library, `mgba_libretro.so` say.
+    pub fn file_name(self) -> String {
+        format!(
+            "{}_libretro.{}",
+            self.as_str(),
+            std::env::consts::DLL_EXTENSION
+        )
+    }
+
+    /// Whether the core is not in System/ and has to be downloaded, as every core from VBA Next
+    /// on is.
+    pub fn download_only(self) -> bool {
+        self.index() >= Core::VbaNext.index()
+    }
+
+    /// Whether the core can be opened: it came with unslot, or it has been downloaded.
+    pub fn installed(self, root: &Path) -> bool {
+        !self.download_only() || root.join(CORES_DIR).join(self.file_name()).is_file()
     }
 
     pub fn runs(self, platform: Platform) -> bool {
@@ -254,7 +405,7 @@ pub fn core_for_platform(root: &Path, stem: &str, platform: Platform) -> Core {
     crate::ini::value(root, SELECTED_CORE_FILE, stem)
         .as_deref()
         .and_then(Core::parse)
-        .filter(|core| core.runs(platform))
+        .filter(|core| core.runs(platform) && core.installed(root))
         .unwrap_or_else(|| core_for_system(root, platform))
 }
 
@@ -264,7 +415,7 @@ pub fn core_for_system(root: &Path, platform: Platform) -> Core {
     crate::ini::value(root, SYSTEM_CORE_FILE, &platform.key())
         .as_deref()
         .and_then(Core::parse)
-        .filter(|core| core.runs(platform))
+        .filter(|core| core.runs(platform) && core.installed(root))
         .unwrap_or_else(|| Core::default_for(platform))
 }
 
