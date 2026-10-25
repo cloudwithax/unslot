@@ -12,6 +12,10 @@
 #   slotbt.sh pair MAC        pair, trust and connect; exits 3 for a Bluetooth LE
 #                             controller that linked up but never bonded
 #   slotbt.sh connect MAC | disconnect MAC | forget MAC
+#
+# bluez keeps its pairings in /var/lib/bluetooth, which is in memory, so they are copied to
+# Config/bluetooth on the card after pairing, forgetting and turning off, and back before
+# bluetoothd starts.
 set -u
 
 BTCTL="${AGS_BLUETOOTHCTL:-bluetoothctl}"
@@ -24,6 +28,8 @@ HCI="${AGS_HCI:-/sys/class/bluetooth/hci0}"
 TIMEOUT="${AGS_TIMEOUT:-timeout}"
 HCI_WAIT_S="${AGS_HCI_WAIT_S:-7}"
 INPUT="${AGS_INPUT:-/sys/class/input}"
+STORE="${AGS_BTSTORE:-/var/lib/bluetooth}"
+SAVED="${AGS_BTSAVED:-$(cd "$(dirname "$0")/.." && pwd)/Config/bluetooth}"
 
 ctl() {
 	t="$1"
@@ -31,7 +37,38 @@ ctl() {
 	$TIMEOUT "$t" $BTCTL "$@"
 }
 
+# Whether bluez's store at $1 has a device in it, one of its ADAPTER/MAC/info files.
+has_devices() {
+	ls "$1"/*/*/info >/dev/null 2>&1
+}
+
+# The saved pairings back, unless bluez already has some of its own since boot.
+restore() {
+	# Power lost between save's two steps leaves only the new copy.
+	[ -d "$SAVED" ] || [ ! -d "$SAVED.new" ] || mv "$SAVED.new" "$SAVED"
+	has_devices "$SAVED" || return 0
+	has_devices "$STORE" && return 0
+	mkdir -p "$STORE"
+	cp -a "$SAVED"/. "$STORE"/ 2>/dev/null || return 0
+	# A bluetoothd already running would not see them.
+	$SYSTEMCTL stop bluetooth >/dev/null 2>&1 || true
+}
+
+# bluez's store onto the card, swapped in whole so a cut-off copy never replaces a good one.
+# One with no devices only replaces saved ones after a forget, not before bluez has run.
+save() {
+	[ -d "$STORE" ] || return 0
+	[ "${1:-}" = forgot ] || has_devices "$STORE" || ! has_devices "$SAVED" || return 0
+	rm -rf "$SAVED.new"
+	mkdir -p "$(dirname "$SAVED")"
+	cp -a "$STORE" "$SAVED.new" 2>/dev/null || { rm -rf "$SAVED.new"; return 0; }
+	rm -rf "$SAVED"
+	mv "$SAVED.new" "$SAVED"
+	sync
+}
+
 bt_up() {
+	restore
 	$RFKILL unblock bluetooth 2>/dev/null || true
 	if [ ! -d "$HCI" ] && [ -f "$SETBT" ]; then
 		/bin/rm -f /tmp/.init_bt
@@ -65,6 +102,7 @@ bt_down() {
 	ctl 3 power off >/dev/null 2>&1 || true
 	killall "$(basename "$BLUEALSA")" 2>/dev/null || true
 	$SYSTEMCTL stop bluetooth >/dev/null 2>&1 || true
+	save
 	$RFKILL block bluetooth 2>/dev/null || true
 	# Blocking cuts the chip's power and its firmware with it, but hci0 stays, so up would
 	# skip the firmware and every command to the chip would time out. Detach it all the way.
@@ -130,7 +168,7 @@ pair)
 	ctl 10 trust "$2" >/dev/null 2>&1 || true
 	# Pairing leaves only the bare link up; connecting brings up the profile.
 	ctl 15 connect "$2" >/dev/null 2>&1 || true
-	came_up "$2" && exit 0
+	came_up "$2" && { save; exit 0; }
 	# A Bluetooth LE controller (HID over GATT) "pairs" without bonding when the kernel's LE
 	# security is not up, and never sends a button. Forget it, or it reconnects forever.
 	info="$(ctl 5 info "$2" 2>/dev/null)"
@@ -138,6 +176,8 @@ pair)
 		ctl 10 remove "$2" >/dev/null 2>&1 || true
 		exit 3
 	fi
+	# Headphones can pair and not connect yet.
+	save
 	exit 1
 	;;
 connect)
@@ -152,7 +192,9 @@ disconnect)
 	;;
 forget)
 	[ -n "${2:-}" ] || exit 2
-	ctl 10 remove "$2" >/dev/null 2>&1
+	ctl 10 remove "$2" >/dev/null 2>&1 && rc=0 || rc=$?
+	save forgot
+	exit "$rc"
 	;;
 *)
 	echo "usage: slotbt.sh up | down | scan SECS | devices | pair MAC | connect MAC | disconnect MAC | forget MAC" >&2

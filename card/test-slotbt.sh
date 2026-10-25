@@ -13,7 +13,8 @@ fail() {
 }
 
 reset() {
-	rm -rf "$TMP/bin" "$TMP"/*.log "$TMP/hci0" "$TMP/input"
+	rm -rf "$TMP/bin" "$TMP"/*.log "$TMP/hci0" "$TMP/input" "$TMP/store" "$TMP/card"
+	mkdir -p "$TMP/store" "$TMP/card/Config"
 	mkdir -p "$TMP/bin" "$TMP/hci0" "$TMP/input/input0" "$TMP/input/input3"
 	# The pad's buttons reach the kernel, as an input device named by its address.
 	echo "aa:bb:cc:dd:ee:01" > "$TMP/input/input3/uniq"
@@ -67,6 +68,7 @@ run() {
 		AGS_BLUEALSA="$TMP/bin/bluealsa" AGS_RFKILL="$TMP/bin/rfkill" \
 		AGS_TIMEOUT="$TMP/bin/timeout" AGS_HCI="$TMP/hci0" AGS_SETBT="$TMP/none.sh" \
 		AGS_HCI_WAIT_S=1 AGS_INPUT="$TMP/input" \
+		AGS_BTSTORE="$TMP/store" AGS_BTSAVED="$TMP/card/Config/bluetooth" \
 		sh "$SCRIPT" "$@"
 }
 
@@ -129,6 +131,53 @@ grep -q 'rtk_hciattach' "$TMP/killall.log" ||
 
 run pair && rc=0 || rc=$?
 [ "$rc" = 2 ] || fail "pair with no device exited $rc, want 2"
+
+# bluez's store, as it keeps a paired device: ADAPTER/MAC/info.
+paired() {
+	mkdir -p "$1/68:8F:C9:B2:16:50/$2"
+	echo "[LinkKey]" > "$1/68:8F:C9:B2:16:50/$2/info"
+}
+SAVED="$TMP/card/Config/bluetooth"
+
+reset
+paired "$SAVED" AA:BB:CC:DD:EE:01
+run up
+[ -f "$TMP/store/68:8F:C9:B2:16:50/AA:BB:CC:DD:EE:01/info" ] ||
+	fail "the pairings saved on the card were not put back after a restart"
+head -1 "$TMP/systemctl.log" | grep -q 'stop bluetooth' ||
+	fail "a bluetoothd already running was left without the pairings put back"
+
+reset
+paired "$SAVED" AA:BB:CC:DD:EE:01
+paired "$TMP/store" AA:BB:CC:DD:EE:02
+run up
+[ -d "$TMP/store/68:8F:C9:B2:16:50/AA:BB:CC:DD:EE:01" ] &&
+	fail "the saved pairings were put over ones bluez made since boot"
+
+reset
+mkdir -p "$SAVED.new"
+paired "$SAVED.new" AA:BB:CC:DD:EE:01
+run up
+[ -f "$TMP/store/68:8F:C9:B2:16:50/AA:BB:CC:DD:EE:01/info" ] ||
+	fail "pairings left half saved by a power cut were lost"
+
+reset
+paired "$TMP/store" AA:BB:CC:DD:EE:01
+run pair AA:BB:CC:DD:EE:01
+[ -f "$SAVED/68:8F:C9:B2:16:50/AA:BB:CC:DD:EE:01/info" ] || fail "a pairing was not saved to the card"
+[ -d "$SAVED.new" ] && fail "the copy being saved was left behind"
+
+reset
+paired "$SAVED" AA:BB:CC:DD:EE:01
+run down
+[ -f "$SAVED/68:8F:C9:B2:16:50/AA:BB:CC:DD:EE:01/info" ] ||
+	fail "turning Bluetooth off before bluez had run wiped the saved pairings"
+
+reset
+paired "$SAVED" AA:BB:CC:DD:EE:01
+run forget AA:BB:CC:DD:EE:01
+[ -d "$SAVED/68:8F:C9:B2:16:50/AA:BB:CC:DD:EE:01" ] &&
+	fail "a forgotten device came back from the card"
 
 if [ "$FAILS" -gt 0 ]; then
 	echo "$FAILS failure(s)"
