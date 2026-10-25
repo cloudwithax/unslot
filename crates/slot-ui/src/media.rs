@@ -299,8 +299,8 @@ const ART: [Art; Media::COUNT] = [
         png: include_bytes!("../../../assets/umd_neutral.png"),
         w: 320,
         h: 325,
-        label: (40, 70, 240, 200),
-        colour: [0x2c, 0x2c, 0x30],
+        label: (18, 15, 284, 284),
+        colour: [0xe6, 0xe6, 0xe2],
     },
     Art {
         png: include_bytes!("../../../assets/fantasy_neutral.png"),
@@ -315,6 +315,9 @@ const ART: [Art; Media::COUNT] = [
 /// 22.5 mm and 58.5 mm of a 60 mm disc.
 const PRINT_INNER: f32 = 22.5 / 60.0;
 const PRINT_OUTER: f32 = 58.5 / 60.0;
+
+/// The UMD's print runs from its white hub to just inside its window: 12.6 mm of 28.4 mm.
+const UMD_PRINT_INNER: f32 = 12.6 / 28.4;
 
 /// How tall a medium may sit in the slot: the Game Boy pak's seated height.
 const SEATED_MAX_H: u32 = 259;
@@ -462,15 +465,18 @@ impl Media {
     }
 
     /// Where on the label box the label may print, for a medium whose print is not the whole box:
-    /// the disc's ring between its hub and rim. Coverage a pixel, row by row over the label box.
+    /// the disc's ring between its hub and rim, the UMD's between its hub and window. Coverage a
+    /// pixel, row by row over the label box.
     pub fn label_mask(self) -> Option<&'static [u8]> {
-        if self != Media::Disc {
-            return None;
-        }
-        static RING: OnceLock<Vec<u8>> = OnceLock::new();
-        Some(RING.get_or_init(|| {
+        static RINGS: [OnceLock<Vec<u8>>; 2] = [const { OnceLock::new() }; 2];
+        let (slot, inner, outer) = match self {
+            Media::Disc => (0, PRINT_INNER, PRINT_OUTER),
+            Media::Umd => (1, UMD_PRINT_INNER, 1.0),
+            _ => return None,
+        };
+        Some(RINGS[slot].get_or_init(|| {
             let (_, _, w, h) = self.label();
-            ring(w, h, PRINT_INNER, PRINT_OUTER)
+            ring(w, h, inner, outer)
         }))
     }
 }
@@ -521,7 +527,7 @@ mod tests {
             let (lx, ly, lw, lh) = m.label();
             let at = |x: u32, y: u32| m.mask()[(y * w + x) as usize];
             let (cx, cy) = (lx + lw / 2, ly + lh / 4);
-            if m != Media::Disc {
+            if m.label_mask().is_none() {
                 assert_eq!(at(cx, cy), 255, "{m:?} has a hole in its label");
             }
             assert_eq!(at(0, 0), 0, "{m:?} fills its top left corner");
@@ -536,6 +542,16 @@ mod tests {
         assert_eq!(at(w / 2, h / 2), 0, "the hub was printed on");
         assert_eq!(at(w / 2, h / 10), 255, "the print is missing above the hub");
         assert_eq!(at(0, 0), 0, "the corner past the rim was printed on");
+    }
+
+    #[test]
+    fn the_umd_prints_round_its_hub_but_not_on_it_or_past_its_window() {
+        let ring = Media::Umd.label_mask().expect("the UMD has a ring");
+        let (_, _, w, h) = Media::Umd.label();
+        let at = |x: u32, y: u32| ring[(y * w + x) as usize];
+        assert_eq!(at(w / 2, h / 2), 0, "the hub was printed on");
+        assert_eq!(at(w / 2, h / 10), 255, "the print is missing above the hub");
+        assert_eq!(at(0, 0), 0, "the corner past the window was printed on");
     }
 
     #[test]

@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -70,6 +71,8 @@ class Medium:
     round_shades: list[tuple[float, float, float, float]] = field(default_factory=list)
     # Patches the tool leaves polished, past the label: a shutter, a screen.
     smooth: list[Box] = field(default_factory=list)
+    # Draws the marks printed on the face once the body is built: logos, icons, lettering.
+    ink: Callable[[Medium], None] | None = None
 
     @property
     def size(self) -> tuple[int, int]:
@@ -80,11 +83,17 @@ def world(m: Medium, x: float, y: float) -> tuple[float, float]:
     return x - m.w / 2, m.h / 2 - y
 
 
-def rounded(points: list[tuple[float, float]], radius: float, steps: int = 8) -> list[tuple[float, float]]:
-    """The polygon through `points` with every corner filleted to `radius`."""
+def rounded(
+    points: list[tuple[float, float]], radius: float, steps: int = 8, closed: bool = True
+) -> list[tuple[float, float]]:
+    """The polygon through `points` with every corner filleted to `radius`, or the open path
+    through them when not `closed`, its two ends left where they are."""
     out: list[tuple[float, float]] = []
     n = len(points)
     for i, here in enumerate(points):
+        if not closed and i in (0, n - 1):
+            out.append(here)
+            continue
         prev, nxt = Vector(points[i - 1]), Vector(points[(i + 1) % n])
         here = Vector(here)
         a, b = (prev - here), (nxt - here)
@@ -381,6 +390,8 @@ def build(m: Medium) -> bpy.types.Object:
         for i, (cx, cy, r, tall) in enumerate(m.knobs):
             unite(body, cylinder(f"knob {i}", r, m.depth - 0.5, m.depth + tall, world(m, cx, cy)))
     finish(body, m.bevel)
+    if m.ink:
+        m.ink(m)
     if m.disc:
         body.data.materials.append(disc_material(m))
     else:
@@ -735,6 +746,111 @@ def arched(w: float, h: float, rise: float, corner: float, steps: int = 12) -> l
     top = [(x, rise - y) for x, y in top]
     pts = top + [(w, h), (0, h)]
     return rounded(pts, corner, 4)
+
+
+# The UMD's disc centre, the radius of its top, and its hub, print and window radii, in mm.
+UMD_C = (32.0, 31.4)
+UMD_TOP = 31.4
+UMD_R = (12.6, 28.4, 29.0)
+# The shell's sides stand this far in above its shoulders, where it widens to its full 64 mm.
+UMD_INSET = 0.6
+UMD_FONT = Path("/usr/share/fonts/opentype/urw-base35/URWGothic-Book.otf")
+
+
+def umd_outline(steps: int = 48) -> list[tuple[float, float]]:
+    """A half circle over the disc, sides that widen a little at the shoulders, and a flat bottom
+    with rounded corners."""
+    cx, cy = UMD_C
+    top = [(cx - UMD_TOP * math.cos(math.pi * i / steps), cy - UMD_TOP * math.sin(math.pi * i / steps))
+           for i in range(steps + 1)]
+
+    def shoulder(x_in: float, x_out: float) -> list[tuple[float, float]]:
+        out = []
+        for i in range(9):
+            t = i / 8
+            out.append((x_in + (x_out - x_in) * t * t * (3 - 2 * t), 46 + 5 * t))
+        return out
+
+    corner, h = 3.5, 65.0
+    right = shoulder(64 - UMD_INSET, 64)
+    for i in range(9):
+        a = math.pi / 2 * i / 8
+        right.append((64 - corner + corner * math.cos(a), h - corner + corner * math.sin(a)))
+    left = []
+    for i in range(9):
+        a = math.pi / 2 + math.pi / 2 * i / 8
+        left.append((corner + corner * math.cos(a), h - corner + corner * math.sin(a)))
+    left += shoulder(UMD_INSET, 0)[::-1]
+    return top + right + left
+
+
+def ink_material(grey: float) -> bpy.types.Material:
+    mat = bpy.data.materials.new("ink")
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes["Principled BSDF"]
+    bsdf.inputs["Base Color"].default_value = (grey, grey, grey, 1)
+    bsdf.inputs["Roughness"].default_value = 0.6
+    return mat
+
+
+def ink_stroke(m: Medium, name: str, path: list[tuple[float, float]], width: float, mat) -> None:
+    """A line `width` across along `path`, half sunk in the face so only its crown shows."""
+    curve = bpy.data.curves.new(name, "CURVE")
+    curve.dimensions = "3D"
+    curve.bevel_depth = width / 2
+    curve.bevel_resolution = 2
+    curve.use_fill_caps = True
+    pts = rounded(path, width * 0.9, 4, closed=False)
+    spline = curve.splines.new("POLY")
+    spline.points.add(len(pts) - 1)
+    for p, (x, y) in zip(spline.points, pts):
+        p.co = (*world(m, x, y), m.depth, 1)
+    curve.materials.append(mat)
+    bpy.context.collection.objects.link(bpy.data.objects.new(name, curve))
+
+
+def ink_text(m: Medium, text: str, cx: float, cy: float, width: float, z: float, mat) -> None:
+    """`text` centred on (cx, cy), scaled to `width` across."""
+    curve = bpy.data.curves.new(text, "FONT")
+    curve.body = text
+    if UMD_FONT.exists():
+        curve.font = bpy.data.fonts.load(str(UMD_FONT))
+    curve.align_x = "CENTER"
+    curve.align_y = "CENTER"
+    curve.extrude = 0.01
+    curve.materials.append(mat)
+    obj = bpy.data.objects.new(text, curve)
+    bpy.context.collection.objects.link(obj)
+    bpy.context.view_layer.update()
+    obj.scale = (width / obj.dimensions.x,) * 3
+    obj.location = (*world(m, cx, cy), z)
+
+
+def umd_ink(m: Medium) -> None:
+    """The PSP logotype at the bottom left, the controller at the bottom right, and the UMD mark
+    on the hub."""
+    mat = ink_material(0.09)
+    # The logotype: two Ps whose bowls stay open at the stem, and an S drawn as a top bar, a
+    # spine and a bottom bar, 1.8 mm tall and 10 mm across.
+    x, y, h, stroke = 1.8, 55.4, 1.8, 0.38
+    for i, x0 in enumerate((x, x + 6.9)):
+        ink_stroke(m, f"P {i}", [(x0, y + h), (x0, y), (x0 + 3.0, y), (x0 + 3.0, y + 0.47 * h),
+                                 (x0 + 0.7, y + 0.47 * h)], stroke, mat)
+    s = x + 3.45
+    ink_stroke(m, "S", [(s + 2.9, y), (s + 1.45, y), (s + 1.3, y + h), (s, y + h)], stroke, mat)
+    # The controller: two shoulders with a dip between, and handles splayed down either side.
+    bx, by, bw, bh = 56.5, 54.7, 4.8, 3.0
+    pad = [(0.08, 0.25), (0.2, 0.05), (0.38, 0.05), (0.45, 0.15), (0.55, 0.15), (0.62, 0.05),
+           (0.8, 0.05), (0.92, 0.25), (1.0, 0.85), (0.92, 1.0), (0.78, 1.0), (0.66, 0.7),
+           (0.34, 0.7), (0.22, 1.0), (0.08, 1.0), (0.0, 0.85)]
+    shape = rounded([(bx + u * bw, by + v * bh) for u, v in pad], 0.4, 4)
+    body = prism("controller", m, shape, m.depth - 0.1, m.depth + 0.03)
+    body.data.materials.append(mat)
+    # The hub's mark.
+    hub = ink_material(0.12)
+    cx, cy = UMD_C
+    ink_text(m, "UMD", cx, cy - 0.8, 19.0, m.depth + 0.06, hub)
+    ink_text(m, "UNIVERSAL MEDIA DISC", cx, cy + 3.6, 19.5, m.depth + 0.06, hub)
 
 
 def new_media() -> list[Medium]:
@@ -1130,19 +1246,24 @@ def new_media() -> list[Medium]:
         )
     )
 
-    # UMD: the round-topped shell with its label on the front.
-    umd = Box(8, 14, 48, 40)
+    # UMD: the shell's top is a half circle round the disc, its window nearly as wide, the disc's
+    # print a ring round the white hub, and the PSP mark and a controller on the strip below.
+    print_r = UMD_R[1]
     out.append(
-        cart(
+        Medium(
             "umd",
-            64,
-            65,
-            4.2,
-            320,
-            umd,
-            Box(3, 61, 10, 2),
-            outline=arched(64, 65, 8, 6),
+            w=64,
+            h=65,
+            depth=4.2,
+            px=320,
+            outline=umd_outline(),
+            label=Box(UMD_C[0] - print_r, UMD_C[1] - print_r, 2 * print_r, 2 * print_r),
+            probe=Box(24, 61.5, 16, 1.5),
             bevel=0.6,
+            circles=[(*UMD_C, UMD_R[2], 0.4)],
+            knobs=[(*UMD_C, UMD_R[0], 0.05)],
+            round_shades=[(*UMD_C, UMD_R[0], 1.6)],
+            ink=umd_ink,
         )
     )
 

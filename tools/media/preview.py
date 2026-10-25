@@ -54,7 +54,7 @@ MEDIA = {
     "floppy525": ((0x26, 0x26, 0x28), (25, 15, 280, 55)),
     "tape": ((0x3a, 0x3a, 0x3e), (29, 22, 302, 79)),
     "cpc3": ((0xd0, 0xd0, 0xcc), (29, 29, 230, 180)),
-    "umd": ((0x2c, 0x2c, 0x30), (40, 70, 240, 200)),
+    "umd": ((0xe6, 0xe6, 0xe2), (18, 15, 284, 284)),
     "fantasy": ((0xe0, 0x50, 0x60), (41, 46, 238, 192)),
 }
 
@@ -91,7 +91,15 @@ def compose(name: str, colour: tuple[int, int, int], box: tuple[int, int, int, i
         out[ring, :3] = art[ring]
     else:
         x, y, lw, lh = box
-        out[y : y + lh, x : x + lw, :3] = label(lw, lh, x * 7)
+        art = label(lw, lh, x * 7)
+        if name == "umd":
+            # The UMD's print: between its white hub and the edge of its window.
+            yy, xx = np.mgrid[0:lh, 0:lw]
+            r = np.hypot(xx - lw / 2 + 0.5, yy - lh / 2 + 0.5) / (lw / 2)
+            ring = (r > 12.6 / 28.4) & (r < 1)
+            out[y : y + lh, x : x + lw, :3][ring] = art[ring]
+        else:
+            out[y : y + lh, x : x + lw, :3] = art
     return Image.fromarray(out.astype(np.uint8), "RGBA")
 
 
