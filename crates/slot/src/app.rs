@@ -505,6 +505,8 @@ pub struct App {
     core_options: Option<(Vec<CoreOption>, usize)>,
     core_options_wanted: bool,
     core_option_pending: Option<(String, String)>,
+    /// The cursor on the TVs to cast to, while that page is over the game.
+    game_cast: Option<usize>,
     /// 0 while the pause footer is off the bottom, 1 when it sits in the carousel's place.
     footer: f32,
     footer_row: Option<QuickRow>,
@@ -519,7 +521,7 @@ pub struct App {
     bolt: Option<TexId>,
     hud_bolt: Option<TexId>,
     /// The footer's Wi-Fi and Bluetooth icons.
-    net_faces: Option<[TexId; 2]>,
+    net_faces: Option<[TexId; 3]>,
     slot_faces: Option<(TexId, TexId)>,
     shelf_platform: slot_ui::Printed,
     shelf_title: slot_ui::Printed,
@@ -771,6 +773,7 @@ impl App {
             core_options: None,
             core_options_wanted: false,
             core_option_pending: None,
+            game_cast: None,
             footer: 0.0,
             footer_row: None,
             states_from_menu: false,
@@ -1152,6 +1155,9 @@ impl App {
         if self.disks.0 < 2 {
             hidden.push(QuickRow::Disc);
         }
+        if !self.state.wifi {
+            hidden.push(QuickRow::PlayCast);
+        }
         hidden
     }
 
@@ -1251,6 +1257,7 @@ impl App {
             QuickRow::Bluetooth => Some(QuickValue::flag(self.state.bluetooth)),
             QuickRow::BtDevices
             | QuickRow::Cast
+            | QuickRow::PlayCast
             | QuickRow::Services
             | QuickRow::Updates
             | QuickRow::Cores
@@ -1541,14 +1548,14 @@ impl App {
         self.state.clock_12h
     }
 
-    pub fn set_net_faces(&mut self, faces: [TexId; 2]) {
+    pub fn set_net_faces(&mut self, faces: [TexId; 3]) {
         self.net_faces = Some(faces);
     }
 
     /// The footer's icons for the networks that are up: Wi-Fi when it has joined one, Bluetooth
-    /// when a device is connected.
+    /// when a device is connected, and a cast while the screen is going to a TV.
     pub fn net_icons(&self) -> Vec<TexId> {
-        let Some([wifi, bt]) = self.net_faces else {
+        let Some([wifi, bt, cast]) = self.net_faces else {
             return Vec::new();
         };
         let mut icons = Vec::new();
@@ -1557,6 +1564,9 @@ impl App {
         }
         if self.bt_view.devices.iter().any(|d| d.connected) {
             icons.push(bt);
+        }
+        if self.cast_view.casting.is_some() {
+            icons.push(cast);
         }
         icons
     }
@@ -1722,11 +1732,11 @@ impl App {
                 .join(format!("{stem}.png"));
             for (at, (_, shelf)) in self.shelves.iter_mut().enumerate() {
                 for i in 0..shelf.carts.len() {
-                    let cart = &mut shelf.carts[i];
+                    let cart = &shelf.carts[i];
                     if cart.platform != *platform || cart.stem != *stem {
                         continue;
                     }
-                    cart.label = Some(label.clone());
+                    shelf.relabel(i, label.clone());
                     // A cart with no face yet gets one with the label when it comes into view.
                     if shelf.face(i).is_some() {
                         self.relabelled.push((at, i));
@@ -2150,6 +2160,12 @@ impl App {
         self.core_options.is_some()
     }
 
+    /// Whether a page is over the game in place of its menu: the core's options, or the TVs to
+    /// cast to.
+    pub fn game_page_open(&self) -> bool {
+        self.core_options.is_some() || self.game_cast.is_some()
+    }
+
     /// Whether the player asked for the core's options, for the session to fetch them.
     pub fn take_core_options_wanted(&mut self) -> bool {
         std::mem::take(&mut self.core_options_wanted)
@@ -2471,6 +2487,12 @@ impl App {
                 return self.core_options_input(action);
             }
             self.core_options = None;
+        }
+        if let (Some(cursor), Phase::Playing { .. }) = (self.game_cast, &self.phase) {
+            if action != Action::Eject {
+                return self.game_cast_input(cursor, action);
+            }
+            self.game_cast = None;
         }
         if let (Some(row), Phase::Playing { .. }) = (self.in_game_menu, &self.phase) {
             if action != Action::Eject {
@@ -3290,10 +3312,30 @@ impl App {
     }
 
     fn cast_input(&mut self, cursor: usize, action: Action) {
+        match self.cast_step(cursor, action) {
+            Some(cursor) => self.phase = Phase::Casting { cursor },
+            None => {
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::Cast,
+                }
+            }
+        }
+    }
+
+    /// The TVs page over a game, which goes back to the game's menu.
+    fn game_cast_input(&mut self, cursor: usize, action: Action) {
+        self.game_cast = self.cast_step(cursor, action);
+        if self.game_cast.is_none() {
+            self.in_game_menu = Some(QuickRow::PlayCast);
+        }
+    }
+
+    /// Works the TVs page: the cursor after `action`, or None to leave it.
+    fn cast_step(&mut self, cursor: usize, action: Action) -> Option<usize> {
         let receivers = self.cast_view.receivers.clone();
         let n = receivers.len().max(1);
         let cursor = cursor.min(n - 1);
-        let cursor = match action {
+        Some(match action {
             Action::GbaDown(Btn::Up) => (cursor + n - 1) % n,
             Action::GbaDown(Btn::Down) => (cursor + 1) % n,
             Action::GbaDown(Btn::Y) => {
@@ -3310,15 +3352,9 @@ impl App {
                 }
                 cursor
             }
-            Action::GbaDown(Btn::B) | Action::QuickMenu => {
-                self.phase = Phase::QuickMenu {
-                    row: QuickRow::Cast,
-                };
-                return;
-            }
-            _ => return,
-        };
-        self.phase = Phase::Casting { cursor };
+            Action::GbaDown(Btn::B) | Action::QuickMenu => return None,
+            _ => cursor,
+        })
     }
 
     fn cast_page(&self, cursor: usize) -> ListPage {
@@ -3617,6 +3653,9 @@ impl App {
         {
             return Some(PageModel::List(self.core_options_page(options, *cursor)));
         }
+        if let (Some(cursor), Phase::Playing { .. }) = (self.game_cast, &self.phase) {
+            return Some(PageModel::List(self.cast_page(cursor)));
+        }
         match &self.phase {
             Phase::Networks { cursor, note } => Some(PageModel::List(
                 self.networks_page(*cursor, note.as_deref()),
@@ -3766,6 +3805,11 @@ impl App {
         match row {
             QuickRow::Resume => self.in_game_menu = None,
             QuickRow::States => self.open_states(),
+            QuickRow::PlayCast => {
+                self.in_game_menu = None;
+                self.game_cast = Some(0);
+                self.with_cast(Cast::search);
+            }
             QuickRow::ExitGame => self.eject(),
             _ => {
                 if let Some(child) = row.child() {
@@ -3914,6 +3958,7 @@ impl App {
             | QuickRow::WallpaperTint
             | QuickRow::Resume
             | QuickRow::States
+            | QuickRow::PlayCast
             | QuickRow::Settings
             | QuickRow::ExitGame
             | QuickRow::PlayScreen
@@ -4051,6 +4096,7 @@ impl App {
             | QuickRow::Bluetooth
             | QuickRow::BtDevices
             | QuickRow::Cast
+            | QuickRow::PlayCast
             | QuickRow::Services
             | QuickRow::Updates
             | QuickRow::Cores
@@ -5009,6 +5055,7 @@ impl App {
             Layout::Native => 0.0,
         };
         self.in_game_menu = None;
+        self.game_cast = None;
         self.end_link();
         self.close_game_menu();
         self.pending = None;
@@ -5347,8 +5394,8 @@ impl App {
                 );
             }
         }
-        if let (Some(_), Phase::Playing { .. }, Some((tex, w, h))) =
-            (&self.core_options, &self.phase, self.page_face)
+        if let (true, Phase::Playing { .. }, Some((tex, w, h))) =
+            (self.game_page_open(), &self.phase, self.page_face)
         {
             slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
             out.push(Draw::Tex {
@@ -5975,6 +6022,7 @@ impl App {
             Layout::Native => 0.0,
         };
         self.in_game_menu = None;
+        self.game_cast = None;
         let cart = match &mut self.phase {
             Phase::Playing { cart } | Phase::Inserting { cart, .. } => std::mem::take(cart),
             _ => return,
@@ -6298,7 +6346,7 @@ impl App {
             let Some(cart) = self.found_cart(&key) else {
                 continue;
             };
-            let face = slot_ui::cart_face_with(cart, crate::label_cache::label_art(&root, cart));
+            let face = crate::label_cache::face(&root, cart);
             self.search_icons.insert(key, ListIcon::of(&face));
         }
     }

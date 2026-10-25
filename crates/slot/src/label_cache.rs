@@ -7,7 +7,9 @@ use std::thread;
 use std::time::UNIX_EPOCH;
 
 use slot_store::Cart;
-use slot_ui::{cover, label_size};
+use slot_ui::{
+    cart_face_with, contain, cover, face_size, label_size, render_of, CartFace, RENDERS,
+};
 
 const DIR: &str = "System/Cache/Labels";
 const HEAD: usize = 24;
@@ -15,12 +17,40 @@ const HEAD: usize = 24;
 pub fn label_art(root: &Path, cart: &Cart) -> Option<Vec<u8>> {
     let src = cart.label.as_deref()?;
     let (w, h) = label_size(cart);
+    cached(src, &cache_path(root, cart), w, h, cover)
+}
+
+/// A cart's face: the picture of the real cart when the scraper found one, else the modelled
+/// cart with its label on.
+pub fn face(root: &Path, cart: &Cart) -> CartFace {
+    let (w, h) = face_size(cart);
+    let render = render_of(cart).and_then(|src| {
+        let at = root
+            .join(DIR)
+            .join(cart.platform.dir_name())
+            .join(RENDERS)
+            .join(format!("{}.rgba", cart.stem));
+        cached(&src, &at, w, h, contain)
+    });
+    match render {
+        Some(rgba) => CartFace { rgba, w, h },
+        None => cart_face_with(cart, label_art(root, cart)),
+    }
+}
+
+/// `src` drawn `w` by `h` by `draw`, from the copy at `cached` while it is of `src` as it is.
+fn cached(
+    src: &Path,
+    cached: &Path,
+    w: u32,
+    h: u32,
+    draw: fn(&Path, u32, u32) -> Option<Vec<u8>>,
+) -> Option<Vec<u8>> {
     let stamp = stamp(src)?;
-    let cached = cache_path(root, cart);
-    if let Some(art) = read(&cached, stamp, w, h) {
+    if let Some(art) = read(cached, stamp, w, h) {
         return art;
     }
-    let art = cover(src, w, h);
+    let art = draw(src, w, h);
     if let Some(dir) = cached.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -31,7 +61,7 @@ pub fn label_art(root: &Path, cart: &Cart) -> Option<Vec<u8>> {
     bytes.extend_from_slice(&cw.to_le_bytes());
     bytes.extend_from_slice(&ch.to_le_bytes());
     bytes.extend_from_slice(art.as_deref().unwrap_or_default());
-    if let Err(e) = std::fs::write(&cached, &bytes) {
+    if let Err(e) = std::fs::write(cached, &bytes) {
         eprintln!("slot: label cache: {}: {e}", cached.display());
     }
     art

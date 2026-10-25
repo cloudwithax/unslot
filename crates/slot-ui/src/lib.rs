@@ -1,5 +1,5 @@
 mod art;
-pub use art::cover;
+pub use art::{contain, cover, is_cutout};
 mod bitmaps;
 pub use bitmaps::{
     link_port, link_port_light, slot_back, slot_back_light, slot_front, slot_front_light, Mould,
@@ -51,11 +51,12 @@ pub use board::{
     SLIDE_SHARE, SLIDE_UP, SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W, TURN_PAD,
 };
 pub use cart::{
-    cart_backing, cart_box, cart_face, cart_face_with, cart_interior, clean_label, gb_label_panel,
-    gb_shell_of, is_clear, label_colour, label_panel, label_size, label_tags, label_text, mould_of,
-    mould_shadow, neutral_shell, seated_box, shows_interior, CartFace, CART_H, CART_W, GBC_LABEL_H,
-    GBC_LABEL_W, GBC_LABEL_X, GBC_LABEL_Y, GB_CART_H, GB_CART_W, GB_LABEL_H, GB_LABEL_W,
-    GB_LABEL_X, GB_LABEL_Y, LABEL_H, LABEL_W, LABEL_WELL, LABEL_X, LABEL_Y,
+    cart_backing, cart_box, cart_face, cart_face_with, cart_interior, clean_label, face_size,
+    gb_label_panel, gb_shell_of, is_clear, label_colour, label_panel, label_size, label_tags,
+    label_text, mould_of, mould_shadow, neutral_shell, render_of, seated_box, shows_interior,
+    CartFace, CART_H, CART_W, GBC_LABEL_H, GBC_LABEL_W, GBC_LABEL_X, GBC_LABEL_Y, GB_CART_H,
+    GB_CART_W, GB_LABEL_H, GB_LABEL_W, GB_LABEL_X, GB_LABEL_Y, LABEL_H, LABEL_W, LABEL_WELL,
+    LABEL_X, LABEL_Y, RENDERS,
 };
 pub use clock::{
     clock_label, date_time, date_time_text, hhmm, set_clock_hint_face, time_text,

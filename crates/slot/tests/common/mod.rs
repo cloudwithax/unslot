@@ -608,6 +608,11 @@ pub fn app_playing_with(root: &Path, stem: &str, snapshot: Box<dyn Snapshot>) ->
     )
 }
 
+/// Playing `state.cart`, with the rest of `state` as the card has it.
+pub fn app_playing_with_state(root: &Path, state: SlotState) -> App {
+    seated(root, StubSnapshot::boxed(), state)
+}
+
 fn seated(root: &Path, snapshot: Box<dyn Snapshot>, state: SlotState) -> App {
     write_slot_state(root, &state).expect("write slot.state");
     let mut a = App::boot(root);

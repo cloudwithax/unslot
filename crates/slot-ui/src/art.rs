@@ -10,6 +10,68 @@ pub fn cover_bytes(bytes: &[u8], w: u32, h: u32) -> Option<Vec<u8>> {
     cover_rgba(&src, sw, sh, w, h)
 }
 
+/// Below this a pixel of a cutout counts as clear: renders carry a faint fringe.
+const CLEAR_BELOW: u8 = 16;
+
+/// The picture's visible part fitted whole inside `w` by `h`, centred across and standing on the
+/// bottom, clear round it. Averaged premultiplied, so a cutout's clear ground does not darken
+/// its rim.
+pub fn contain(path: &Path, w: u32, h: u32) -> Option<Vec<u8>> {
+    let (src, sw, sh) = decode(path)?;
+    let seen = |x: u32, y: u32| src[((y * sw + x) * 4 + 3) as usize] >= CLEAR_BELOW;
+    let xs = (0..sw).filter(|&x| (0..sh).any(|y| seen(x, y)));
+    let (x0, x1) = (xs.clone().next()?, xs.last()? + 1);
+    let ys = (0..sh).filter(|&y| (x0..x1).any(|x| seen(x, y)));
+    let (y0, y1) = (ys.clone().next()?, ys.last()? + 1);
+    let (cw, ch) = (x1 - x0, y1 - y0);
+    let mut cut = Vec::with_capacity((cw * ch * 4) as usize);
+    for y in y0..y1 {
+        for px in src[((y * sw + x0) * 4) as usize..((y * sw + x1) * 4) as usize].chunks_exact(4) {
+            let a = u32::from(px[3]);
+            cut.extend((0..3).map(|c| ((u32::from(px[c]) * a + 127) / 255) as u8));
+            cut.push(px[3]);
+        }
+    }
+    let scale = (w as f32 / cw as f32).min(h as f32 / ch as f32);
+    let fw = ((cw as f32 * scale).round() as u32).clamp(1, w);
+    let fh = ((ch as f32 * scale).round() as u32).clamp(1, h);
+    let fitted = cover_rgba(&cut, cw, ch, fw, fh)?;
+    let (ox, oy) = ((w - fw) / 2, h - fh);
+    let mut out = vec![0u8; (w * h * 4) as usize];
+    for (i, px) in fitted.chunks_exact(4).enumerate() {
+        let (x, y) = (i as u32 % fw, i as u32 / fw);
+        let a = u32::from(px[3]);
+        let at = (((oy + y) * w + ox + x) * 4) as usize;
+        if a > 0 {
+            for c in 0..3 {
+                out[at + c] = ((u32::from(px[c]) * 255 + a / 2) / a).min(255) as u8;
+            }
+        }
+        out[at + 3] = px[3];
+    }
+    Some(out)
+}
+
+/// Whether a picture is a cutout, its edge all but clear, as a render of a whole cart is; not a
+/// scan or a photo with its ground left in.
+pub fn is_cutout(bytes: &[u8]) -> bool {
+    let Some((px, w, h)) = decode_bytes(bytes) else {
+        return false;
+    };
+    if w < 2 || h < 2 {
+        return false;
+    }
+    let edge = (0..w)
+        .flat_map(|x| [(x, 0), (x, h - 1)])
+        .chain((1..h - 1).flat_map(|y| [(0, y), (w - 1, y)]));
+    let (mut clear, mut all) = (0usize, 0usize);
+    for (x, y) in edge {
+        all += 1;
+        clear += usize::from(px[((y * w + x) * 4 + 3) as usize] < CLEAR_BELOW);
+    }
+    clear * 20 >= all * 19
+}
+
 fn cover_rgba(src: &[u8], sw: u32, sh: u32, w: u32, h: u32) -> Option<Vec<u8>> {
     if sw == 0 || sh == 0 {
         return None;

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use slot_store::gb::Class;
 use slot_store::{Cart, Outline, Platform};
 
@@ -193,6 +195,10 @@ fn shadow(w: u32, h: u32, mask: &[u8]) -> CartFace {
 }
 
 pub fn cart_face(cart: &Cart) -> CartFace {
+    let (w, h) = face_size(cart);
+    if let Some(rgba) = render_of(cart).and_then(|p| art::contain(&p, w, h)) {
+        return CartFace { rgba, w, h };
+    }
     let (lw, lh) = label_size(cart);
     let art = cart.label.as_deref().and_then(|p| art::cover(p, lw, lh));
     cart_face_with(cart, art)
@@ -202,9 +208,10 @@ pub fn is_clear(cart: &Cart) -> bool {
     mould_of(cart).has_clear() && shell_for(cart).finish != Finish::Solid
 }
 
-/// Whether the shelf draws this cart's coloured interior under its plastic: any clear cart.
+/// Whether the shelf draws this cart's coloured interior under its plastic: any clear cart, but
+/// for one drawn from a picture of the real thing.
 pub fn shows_interior(cart: &Cart) -> bool {
-    is_clear(cart)
+    is_clear(cart) && render_of(cart).is_none()
 }
 
 /// The back plastic, with the game's colour blended onto it by the same overlay as the shells, at
@@ -259,6 +266,23 @@ pub fn cart_backing(shell: Option<GbShell>) -> CartFace {
         w: s.w,
         h: s.h,
     }
+}
+
+/// Where the scraper keeps a picture of a game's real cart, beside its label.
+pub const RENDERS: &str = "Renders";
+
+/// The picture of the game's real cart, drawn whole in place of the modelled one, when the
+/// scraper found one: `Renders/<the label's name>` beside its label.
+pub fn render_of(cart: &Cart) -> Option<PathBuf> {
+    let label = cart.label.as_deref()?;
+    let path = label.parent()?.join(RENDERS).join(label.file_name()?);
+    path.is_file().then_some(path)
+}
+
+/// The size of a cart's face: its mould's.
+pub fn face_size(cart: &Cart) -> (u32, u32) {
+    let s = spec(mould_of(cart));
+    (s.w, s.h)
 }
 
 pub fn label_size(cart: &Cart) -> (u32, u32) {

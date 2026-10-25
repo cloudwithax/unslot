@@ -4,7 +4,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use common::{app_booting_at, tmp_root_with_carts, CLOCK_IS_SET};
+use common::{app_booting_at, app_playing_with_state, tmp_root_with_carts, CLOCK_IS_SET};
 use slot::app::{App, PageModel, Phase};
 use slot::wifi::SimWifi;
 use slot_input::{Action, Btn};
@@ -626,7 +626,7 @@ fn game_art_labels_what_it_finds_and_shows_it_without_a_restart() {
 fn the_footer_shows_wi_fi_once_it_has_joined_a_network() {
     let (_d, mut a) = on_network_list();
     let (wifi, bt) = (slot_ui::TexId::from_raw(901), slot_ui::TexId::from_raw(902));
-    a.set_net_faces([wifi, bt]);
+    a.set_net_faces([wifi, bt, slot_ui::TexId::from_raw(903)]);
     assert!(a.net_icons().is_empty(), "an icon before joining anything");
     let at = row_of(&a, "Cafe Guest");
     go_to_row(&mut a, at);
@@ -818,6 +818,8 @@ fn the_cores_page_downloads_a_core_and_removes_it() {
 #[test]
 fn cast_is_offered_with_the_wifi_on_and_casts_to_the_tv_picked() {
     let (_d, mut a) = on_network_list();
+    let cast = slot_ui::TexId::from_raw(903);
+    a.set_net_faces([slot_ui::TexId::from_raw(901), slot_ui::TexId::from_raw(902), cast]);
     press(&mut a, Btn::B);
     assert_eq!(a.quick_menu(), Some(QuickRow::WifiNetworks));
     for _ in 0..QuickRow::NETWORK.len() {
@@ -836,8 +838,40 @@ fn cast_is_offered_with_the_wifi_on_and_casts_to_the_tv_picked() {
     until(&mut a, |a| list(a).status == "Casting to Living Room TV");
     assert_eq!(list(&a).rows[0].detail, "Casting");
     assert_eq!(action(&a).as_deref(), Some("Stop"));
+    assert!(a.net_icons().contains(&cast), "no cast icon in the footer while casting");
     press(&mut a, Btn::A);
     until(&mut a, |a| list(a).status == "Pick a TV to cast the screen to");
+    assert!(!a.net_icons().contains(&cast), "the cast icon outlived the cast");
+}
+
+#[test]
+fn cast_is_in_the_menu_over_a_game_and_b_goes_back_to_it() {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    let set = SlotState {
+        cart: Some("Emerald".to_string()),
+        clock_set: true,
+        wifi: true,
+        ..SlotState::default()
+    };
+    let mut a = app_playing_with_state(d.path(), set);
+    assert!(matches!(a.phase(), Phase::Playing { .. }), "{:?}", a.phase());
+    a.apply(Action::QuickMenu);
+    for _ in 0..QuickRow::PLAY.len() {
+        if a.in_game_menu() == Some(QuickRow::PlayCast) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    assert_eq!(a.in_game_menu(), Some(QuickRow::PlayCast), "no Cast row over the game");
+    press(&mut a, Btn::A);
+    assert_eq!(a.in_game_menu(), None);
+    until(&mut a, |a| !list(a).rows.is_empty());
+    assert_eq!(list(&a).rows[0].label, "Living Room TV");
+    press(&mut a, Btn::A);
+    until(&mut a, |a| list(a).status == "Casting to Living Room TV");
+    press(&mut a, Btn::B);
+    assert_eq!(a.in_game_menu(), Some(QuickRow::PlayCast));
+    assert!(matches!(a.phase(), Phase::Playing { .. }), "{:?}", a.phase());
 }
 
 #[test]
@@ -845,4 +879,5 @@ fn cast_is_hidden_with_the_wifi_off() {
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
     let (a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
     assert!(a.hidden_rows().contains(&QuickRow::Cast));
+    assert!(a.in_game_hidden().contains(&QuickRow::PlayCast));
 }

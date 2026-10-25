@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.8.0
+
+- Game Art fetches the game's real cartridge or disc. When ScreenScraper has a render of the actual cart, under physical media, the shelf draws that cart as it is in place of unslot's model. Failing that, the scan of the real label goes on the model, and only after that the box art and logo as before. Renders are kept in `Labels/<system>/Renders` next to the labels. Games that already have a label keep it; delete the label and fetch again to get the real one.
+- Cast is in the menu over a game too, so a game can be put on the TV without leaving it. B on the list of TVs goes back to the menu.
+- The footer shows a cast icon next to Wi-Fi and Bluetooth while the screen is being cast.
+
 ## v2.7.1
 
 - Paired Bluetooth controllers and headphones stay paired across a restart. bluez keeps its pairings in `/var/lib/bluetooth`, which BaseOS clears at every boot, so each one had to be paired again. They are now copied to `Config/bluetooth` on the card whenever something pairs or is forgotten and when Bluetooth turns off, and put back before Bluetooth turns on.

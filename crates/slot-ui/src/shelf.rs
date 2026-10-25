@@ -1,11 +1,13 @@
 use slot_gfx::{Canvas, Draw, TexId, OUT_H};
 use slot_store::{Cart, Platform};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use crate::bitmaps::Mould;
 use crate::board::{board_in, Placed};
 use crate::cart::{
-    cart_box, is_clear, label_colour, label_rect, label_text, mould_of, CART_H, CART_W,
+    cart_box, label_colour, label_rect, label_text, mould_of, render_of, shows_interior, CART_H,
+    CART_W,
 };
 use crate::hud::Millis;
 use crate::slot_chrome::{draw_empty_slot, MOUTH_H};
@@ -54,6 +56,8 @@ pub struct Shelf {
     backings: [Option<TexId>; Mould::COUNT],
     shells: Vec<OnceLock<Mould>>,
     clears: Vec<OnceLock<bool>>,
+    /// Whether each cart is drawn from a picture of the real one, which casts no mould's shadow.
+    reals: Vec<OnceLock<bool>>,
     starred: Vec<bool>,
     star: Option<(TexId, f32, f32)>,
     ride: f32,
@@ -66,6 +70,7 @@ impl Shelf {
         Shelf {
             shells: carts.iter().map(|_| OnceLock::new()).collect(),
             clears: carts.iter().map(|_| OnceLock::new()).collect(),
+            reals: carts.iter().map(|_| OnceLock::new()).collect(),
             faces: vec![None; carts.len()],
             interiors: vec![None; carts.len()],
             starred: vec![false; carts.len()],
@@ -92,7 +97,23 @@ impl Shelf {
         let (Some(cell), Some(cart)) = (self.clears.get(i), self.carts.get(i)) else {
             return false;
         };
-        *cell.get_or_init(|| is_clear(cart))
+        *cell.get_or_init(|| shows_interior(cart))
+    }
+
+    fn real(&self, i: usize) -> bool {
+        let (Some(cell), Some(cart)) = (self.reals.get(i), self.carts.get(i)) else {
+            return false;
+        };
+        *cell.get_or_init(|| render_of(cart).is_some())
+    }
+
+    /// Gives cart `i` the label at `path`, which may come with a picture of the real cart.
+    pub fn relabel(&mut self, i: usize, path: PathBuf) {
+        if let Some(cart) = self.carts.get_mut(i) {
+            cart.label = Some(path);
+            self.clears[i] = OnceLock::new();
+            self.reals[i] = OnceLock::new();
+        }
     }
 
     pub fn restock(&mut self, carts: Vec<Cart>) -> Vec<TexId> {
@@ -104,6 +125,7 @@ impl Shelf {
             .collect();
         self.shells = carts.iter().map(|_| OnceLock::new()).collect();
         self.clears = carts.iter().map(|_| OnceLock::new()).collect();
+        self.reals = carts.iter().map(|_| OnceLock::new()).collect();
         self.faces = vec![None; carts.len()];
         self.interiors = vec![None; carts.len()];
         self.starred = vec![false; carts.len()];
@@ -430,7 +452,7 @@ impl Shelf {
             }
             let x = x + shake;
             let y = foot_y(ch as f32) - h;
-            if alpha < 1.0 {
+            if alpha < 1.0 && !self.real(i) {
                 if let Some(tex) = self.shadows[self.shell(i).index()] {
                     out.push(Draw::Tex {
                         x,

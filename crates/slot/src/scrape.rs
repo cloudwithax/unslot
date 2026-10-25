@@ -535,8 +535,14 @@ fn work(
                     Some(png) => {
                         let dir = root.join("Labels").join(cart.platform.dir_name());
                         let path = dir.join(format!("{}.png", cart.stem));
-                        let written =
-                            std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, png));
+                        let renders = dir.join(slot_ui::RENDERS);
+                        let written = match &found.render {
+                            Some(render) => std::fs::create_dir_all(&renders).and_then(|()| {
+                                std::fs::write(renders.join(format!("{}.png", cart.stem)), render)
+                            }),
+                            None => std::fs::create_dir_all(&dir),
+                        };
+                        let written = written.and_then(|()| std::fs::write(&path, png));
                         match written {
                             Ok(()) => set(&mut |v| v.made.push((cart.platform, cart.stem.clone()))),
                             Err(e) => {
@@ -564,10 +570,11 @@ fn work(
     }
 }
 
-/// What one game's search came to: its label once drawn, and whether ScreenScraper was the one
-/// that turned it away.
+/// What one game's search came to: its label once drawn, a picture of its real cart to draw in
+/// place of the model, and whether ScreenScraper was the one that turned it away.
 struct Found {
     png: Option<Vec<u8>>,
+    render: Option<Vec<u8>>,
     turned_away: bool,
 }
 
@@ -586,7 +593,7 @@ fn label_for(
         true => None,
     };
     let png = |bytes: Option<Vec<u8>>| bytes.filter(|b| b.starts_with(b"\x89PNG"));
-    let (mut logo, mut boxart) = (None, None);
+    let (mut logo, mut boxart, mut texture, mut render) = (None, None, None, None);
     let mut turned_away = false;
 
     if let Some(login) = login {
@@ -602,6 +609,9 @@ fn label_for(
             Ok(art) => {
                 logo = png(art.logo);
                 boxart = png(art.boxart);
+                texture = art.texture;
+                // Only a clean cutout stands in for the model; a photo on its ground does not.
+                render = png(art.render).filter(|b| slot_ui::is_cutout(b));
             }
             Err(e) => {
                 eprintln!(
@@ -614,7 +624,7 @@ fn label_for(
     }
 
     for set in sets {
-        if logo.is_some() {
+        if logo.is_some() || texture.is_some() || render.is_some() {
             break;
         }
         let dat = load_dat(fetch, root, dats, set)?;
@@ -638,17 +648,29 @@ fn label_for(
 
     let (w, h) = slot_ui::label_size(cart);
     let hue = slot_ui::hue_of(slot_ui::label_colour(&slot_ui::label_text(cart)));
+    let made = |logo, boxart| slot_ui::scraped_label(logo, boxart, hue, w * 2, h * 2);
+    // The real label first, as scanned off the cart; then one made from the logo or the box. A
+    // render alone still makes one, so the cart is known to have art.
+    let png = texture
+        .as_deref()
+        .and_then(|scan| made(None, Some(scan)))
+        .or_else(|| made(logo.as_deref(), boxart.as_deref()))
+        .or_else(|| made(None, render.as_deref()));
     Ok(Found {
-        png: slot_ui::scraped_label(logo.as_deref(), boxart.as_deref(), hue, w * 2, h * 2),
+        png,
+        render,
         turned_away,
     })
 }
 
-/// ScreenScraper's art for one game: its logo and its box, either of which may be missing.
+/// ScreenScraper's art for one game: its logo, its box, the scan of its cart's label and a
+/// render of the whole cart, any of which may be missing.
 #[derive(Default)]
 struct SsArt {
     logo: Option<Vec<u8>>,
     boxart: Option<Vec<u8>>,
+    texture: Option<Vec<u8>>,
+    render: Option<Vec<u8>>,
 }
 
 /// ScreenScraper's logo and box art for one game, fetched from the `jeuInfos` answer. An error
@@ -671,6 +693,13 @@ fn ss_art(
     }
     if let Some(url) = ss_media(&answer, "box-2D") {
         art.boxart = fetch.get(&url)?;
+    }
+    // The physical media: the label as scanned, and the cart or disc drawn whole.
+    if let Some(url) = ss_media(&answer, "support-texture") {
+        art.texture = fetch.get(&url)?;
+    }
+    if let Some(url) = ss_media(&answer, "support-2D") {
+        art.render = fetch.get(&url)?;
     }
     Ok(art)
 }
@@ -1050,5 +1079,65 @@ game (
         );
         assert_eq!(v.missed, 0, "a skipped game was counted as missed");
         assert!(d.path().join("Labels/GBA/whatever.png").exists());
+    }
+
+    #[test]
+    fn a_real_label_and_a_render_of_the_cart_come_before_the_logo() {
+        /// SimFetch, with ScreenScraper knowing every game's label scan and cart render.
+        struct PhysicalSs(SimFetch);
+        impl Fetch for PhysicalSs {
+            fn get(&mut self, url: &str) -> Result<Option<Vec<u8>>, String> {
+                if url.starts_with(SS_API) {
+                    let media = |kind: &str| {
+                        format!(r#"{{"type":"{kind}","region":"us","url":"https://ss/{kind}"}}"#)
+                    };
+                    let kinds = ["support-texture", "support-2D"].map(media).join(",");
+                    return Ok(Some(format!(r#"{{"medias":[{kinds}]}}"#).into_bytes()));
+                }
+                match url.strip_prefix("https://ss/") {
+                    Some("support-texture") => Ok(Some(sim_png(16, 16, [10, 20, 240, 255]))),
+                    // Clear all round: a cutout of the cart.
+                    Some("support-2D") => {
+                        let mut img = vec![0u8; 24 * 24 * 4];
+                        for y in 4..20 {
+                            for x in 4..20 {
+                                img[(y * 24 + x) * 4..][..4]
+                                    .copy_from_slice(&[0, 200, 0, 255]);
+                            }
+                        }
+                        Ok(Some(encode_rgba(&img, 24, 24)))
+                    }
+                    _ => self.0.get(url),
+                }
+            }
+        }
+        fn encode_rgba(rgba: &[u8], w: u32, h: u32) -> Vec<u8> {
+            let mut out = Vec::new();
+            let mut enc = png::Encoder::new(&mut out, w, h);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.write_header().unwrap().write_image_data(rgba).unwrap();
+            out
+        }
+        let d = tempfile::tempdir().unwrap();
+        let games = d.path().join("Games/GBA");
+        std::fs::create_dir_all(&games).unwrap();
+        std::fs::write(games.join("whatever.gba"), [0u8; 8]).unwrap();
+        std::fs::create_dir_all(d.path().join("Config")).unwrap();
+        std::fs::write(d.path().join(SS_CONF), "devid=d\ndevpassword=p\n").unwrap();
+        let carts = slot_store::scan(d.path()).unwrap();
+        let s = Scraper::spawn(Box::new(PhysicalSs(SimFetch)), d.path());
+        s.fetch(carts);
+        let start = std::time::Instant::now();
+        while (s.view().running || s.view().done < 1) && start.elapsed().as_secs() < 10 {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(s.view().made, [(Platform::Gba, "whatever".to_string())]);
+        let cart = &slot_store::scan(d.path()).unwrap()[0];
+        let (w, h) = slot_ui::label_size(cart);
+        let label = slot_ui::cover(cart.label.as_deref().unwrap(), w, h).unwrap();
+        assert_eq!(label[..4], [10, 20, 240, 255], "the label is not the scan of the real one");
+        let render = slot_ui::render_of(cart).expect("the render was not kept");
+        assert!(slot_ui::is_cutout(&std::fs::read(render).unwrap()));
     }
 }

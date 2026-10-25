@@ -794,3 +794,51 @@ fn every_other_systems_media_casts_a_black_shadow_of_its_own_outline() {
         );
     }
 }
+
+/// A picture `w` by `h` of a green cart standing `pad` in from its clear edge.
+fn cutout(w: u32, h: u32, pad: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut enc = png::Encoder::new(&mut out, w, h);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    let inside = |x: u32, y: u32| (pad..w - pad).contains(&x) && (pad..h - pad).contains(&y);
+    let rgba: Vec<u8> = (0..w * h)
+        .flat_map(|i| match inside(i % w, i / w) {
+            true => [0x20, 0xc0, 0x40, 0xff],
+            false => [0, 0, 0, 0],
+        })
+        .collect();
+    enc.write_header()
+        .expect("png header")
+        .write_image_data(&rgba)
+        .expect("png data");
+    out
+}
+
+#[test]
+fn only_a_picture_with_a_clear_edge_counts_as_a_cutout() {
+    assert!(slot_ui::is_cutout(&cutout(100, 50, 10)));
+    assert!(!slot_ui::is_cutout(&cutout(100, 50, 0)), "a picture on its ground");
+    assert!(!slot_ui::is_cutout(b"not a png"));
+}
+
+#[test]
+fn a_picture_of_the_real_cart_is_drawn_whole_in_place_of_the_model() {
+    let d = tmp_root();
+    write_rom(&d, "Real.gba", "REAL");
+    write_label(&d, "Real.png", 64, 64, |_, _| [0xd0, 0x20, 0xa0]);
+    let renders = d.path().join("Labels/GBA").join(slot_ui::RENDERS);
+    std::fs::create_dir_all(&renders).unwrap();
+    std::fs::write(renders.join("Real.png"), cutout(100, 50, 10)).unwrap();
+    let cart = &scan(d.path()).unwrap()[0];
+    assert!(slot_ui::render_of(cart).is_some());
+    let face = cart_face(cart);
+    assert_eq!((face.w, face.h), (CART_W, CART_H));
+    // Its clear edge is trimmed away and it fills the width, standing on the bottom.
+    for x in [0, CART_W / 2, CART_W - 1] {
+        assert_eq!(pixel(&face, x, CART_H - 1), [0x20, 0xc0, 0x40], "at {x}");
+        assert_eq!(pixel_alpha(&face, x, CART_H - 1), 0xff, "at {x}");
+    }
+    assert_eq!(pixel_alpha(&face, CART_W / 2, 0), 0, "the model shows above it");
+    assert!(!slot_ui::shows_interior(cart), "a board shows behind the real cart");
+}

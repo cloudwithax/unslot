@@ -365,6 +365,7 @@ fn the_in_game_pages_hold_their_rows_in_order() {
             QuickRow::Resume,
             QuickRow::States,
             QuickRow::Settings,
+            QuickRow::PlayCast,
             QuickRow::ExitGame
         ]
     );

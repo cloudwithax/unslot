@@ -174,7 +174,7 @@ impl Session {
             actions.extend(self.gestures.feed(ev, now));
         }
         actions.extend(self.gestures.tick(now));
-        if !latched && (self.app.in_game_menu().is_some() || self.app.core_options_open()) {
+        if !latched && (self.app.in_game_menu().is_some() || self.app.game_page_open()) {
             actions.extend(self.gestures.drop_ff_latch());
         }
         for action in actions {
@@ -189,7 +189,7 @@ impl Session {
             return;
         };
         let to_game = self.playing() && self.app.in_game_menu().is_none();
-        let to_game = to_game && !self.app.core_options_open();
+        let to_game = to_game && !self.app.game_page_open();
         emu.set_sticks(if to_game { sticks } else { [0; 4] });
     }
 
@@ -220,7 +220,7 @@ impl Session {
         if trace() {
             eprintln!("slot: {action:?} in {:?}", self.app.phase());
         }
-        let menu_open = self.app.in_game_menu().is_some() || self.app.core_options_open();
+        let menu_open = self.app.in_game_menu().is_some() || self.app.game_page_open();
         match action {
             Action::RewindStart if !menu_open => self.rewinding = true,
             Action::RewindStop => self.rewinding = false,
@@ -438,7 +438,7 @@ impl Session {
     fn held(&self) -> bool {
         self.app.game_menu_open()
             || self.app.in_game_menu().is_some()
-            || self.app.core_options_open()
+            || self.app.game_page_open()
             || self.app.shutting_down()
     }
 
