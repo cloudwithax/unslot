@@ -24,6 +24,7 @@ use slot_ui::{
 
 use crate::audio::Sfx;
 use crate::bluetooth::{Bluetooth, BtBusy, BtView};
+use crate::cast::{Cast, CastBusy, CastView};
 use crate::core_downloads::{CoreDownloads, CoresView};
 use crate::core_picker::{Chip, CorePicker, Outcome, Press};
 use crate::link_kind::{link_carried, link_kind, serial_option, LinkKind};
@@ -289,6 +290,10 @@ pub enum Phase {
     Devices {
         cursor: usize,
     },
+    /// The TVs on the network to cast the screen to.
+    Casting {
+        cursor: usize,
+    },
     /// SSH, file sharing, Syncthing, Tailscale and the VPN. `note` says why the last change went
     /// nowhere.
     Services {
@@ -552,6 +557,8 @@ pub struct App {
     wifi_view: WifiView,
     bluetooth: Option<Bluetooth>,
     bt_view: BtView,
+    cast: Option<Cast>,
+    cast_view: CastView,
     services: Option<Services>,
     services_view: ServicesView,
     updates: Option<Updates>,
@@ -811,6 +818,8 @@ impl App {
             wifi_view: WifiView::default(),
             bluetooth: None,
             bt_view: BtView::default(),
+            cast: None,
+            cast_view: CastView::default(),
             services: None,
             services_view: ServicesView::default(),
             updates: None,
@@ -857,6 +866,7 @@ impl App {
             }
             app.bluetooth = Some(bluetooth);
         }
+        app.cast = Some(Cast::for_card(root));
         let services = Services::for_card(root);
         services.want(app.wanted());
         app.services = Some(services);
@@ -974,6 +984,7 @@ impl App {
             Phase::QuickMenu { .. }
             | Phase::Networks { .. }
             | Phase::Devices { .. }
+            | Phase::Casting { .. }
             | Phase::Services { .. }
             | Phase::Updates { .. }
             | Phase::CoreDownloads { .. }
@@ -1239,6 +1250,7 @@ impl App {
             QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
             QuickRow::Bluetooth => Some(QuickValue::flag(self.state.bluetooth)),
             QuickRow::BtDevices
+            | QuickRow::Cast
             | QuickRow::Services
             | QuickRow::Updates
             | QuickRow::Cores
@@ -1435,7 +1447,7 @@ impl App {
         // A disc is only swapped from inside a game.
         let mut hidden = vec![QuickRow::Disc];
         if !self.state.wifi {
-            hidden.push(QuickRow::WifiNetworks);
+            hidden.extend([QuickRow::WifiNetworks, QuickRow::Cast]);
         }
         match self.bluetooth.is_some() {
             true if !self.state.bluetooth => hidden.push(QuickRow::BtDevices),
@@ -2305,6 +2317,7 @@ impl App {
             Phase::SetClock { picker, .. } => (3, format!("{picker:?}")),
             Phase::Networks { cursor, .. }
             | Phase::Devices { cursor }
+            | Phase::Casting { cursor }
             | Phase::Services { cursor, .. }
             | Phase::Updates { cursor }
             | Phase::CoreDownloads { cursor }
@@ -2355,6 +2368,7 @@ impl App {
             self.phase,
             Phase::Networks { .. }
                 | Phase::Devices { .. }
+                | Phase::Casting { .. }
                 | Phase::Services { .. }
                 | Phase::Updates { .. }
                 | Phase::CoreDownloads { .. }
@@ -2527,6 +2541,7 @@ impl App {
             Phase::QuickMenu { row } => self.quick_menu_input(row, action),
             Phase::Networks { cursor, .. } => self.networks_input(cursor, action),
             Phase::Devices { cursor } => self.devices_input(cursor, action),
+            Phase::Casting { cursor } => self.cast_input(cursor, action),
             Phase::Services { cursor, .. } => self.services_input(cursor, action),
             Phase::TailscaleLogin => self.tailscale_login_input(action),
             Phase::SyncthingId => self.syncthing_id_input(action),
@@ -3268,6 +3283,92 @@ impl App {
         }
     }
 
+    fn with_cast(&self, f: impl FnOnce(&Cast)) {
+        if let Some(cast) = &self.cast {
+            f(cast);
+        }
+    }
+
+    fn cast_input(&mut self, cursor: usize, action: Action) {
+        let receivers = self.cast_view.receivers.clone();
+        let n = receivers.len().max(1);
+        let cursor = cursor.min(n - 1);
+        let cursor = match action {
+            Action::GbaDown(Btn::Up) => (cursor + n - 1) % n,
+            Action::GbaDown(Btn::Down) => (cursor + 1) % n,
+            Action::GbaDown(Btn::Y) => {
+                self.with_cast(Cast::search);
+                cursor
+            }
+            Action::GbaDown(Btn::A) => {
+                match receivers.get(cursor) {
+                    Some(r) if self.cast_view.casting.as_ref() == Some(&r.name) => {
+                        self.with_cast(Cast::stop)
+                    }
+                    Some(r) => self.with_cast(|c| c.start(r)),
+                    None => self.with_cast(Cast::search),
+                }
+                cursor
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::Cast,
+                };
+                return;
+            }
+            _ => return,
+        };
+        self.phase = Phase::Casting { cursor };
+    }
+
+    fn cast_page(&self, cursor: usize) -> ListPage {
+        let v = &self.cast_view;
+        let casting_to = |name: &String| v.casting.as_ref() == Some(name);
+        let rows: Vec<ListRow> = v
+            .receivers
+            .iter()
+            .map(|r| ListRow {
+                label: r.name.clone(),
+                detail: match casting_to(&r.name) {
+                    true => "Casting".into(),
+                    false => r.model.clone(),
+                },
+                bars: None,
+                icon: None,
+            })
+            .collect();
+        let status = match (&v.busy, &v.error, &v.casting) {
+            (CastBusy::Searching, ..) => "Looking for TVs...".to_string(),
+            (CastBusy::Connecting(name), ..) => format!("Connecting to {name}..."),
+            (CastBusy::Idle, Some(error), _) => error.clone(),
+            (CastBusy::Idle, None, Some(name)) => format!("Casting to {name}"),
+            (CastBusy::Idle, None, None) if rows.is_empty() => {
+                "No TVs found. Press Y to look again".to_string()
+            }
+            (CastBusy::Idle, None, None) => "Pick a TV to cast the screen to".to_string(),
+        };
+        let picked = v.receivers.get(cursor.min(v.receivers.len().saturating_sub(1)));
+        let legends = vec![
+            back_legend(),
+            Legend::new(ButtonLegend::Y, "Search"),
+            Legend::new(
+                ButtonLegend::A,
+                match picked {
+                    Some(r) if casting_to(&r.name) => "Stop",
+                    Some(_) => "Cast",
+                    None => "Search",
+                },
+            ),
+        ];
+        ListPage {
+            title: "Cast".into(),
+            status,
+            cursor: cursor.min(rows.len().saturating_sub(1)),
+            rows,
+            legends,
+        }
+    }
+
     fn with_wifi(&self, f: impl FnOnce(&Wifi)) {
         if let Some(wifi) = &self.wifi {
             f(wifi);
@@ -3522,6 +3623,7 @@ impl App {
             )),
             Phase::Keyboard { keys, .. } => Some(PageModel::Keys(keys.clone())),
             Phase::Devices { cursor } => Some(PageModel::List(self.devices_page(*cursor))),
+            Phase::Casting { cursor } => Some(PageModel::List(self.cast_page(*cursor))),
             Phase::Services { cursor, note } => Some(PageModel::List(
                 self.services_page(*cursor, note.as_deref()),
             )),
@@ -3752,6 +3854,11 @@ impl App {
                     self.with_cores(CoreDownloads::check);
                 }
             }
+            QuickRow::Cast => {
+                self.phase = Phase::Casting { cursor: 0 };
+                // TVs come and go, so each visit looks again.
+                self.with_cast(Cast::search);
+            }
             QuickRow::BtDevices => {
                 self.phase = Phase::Devices { cursor: 0 };
                 // Open on what is paired; a search only when there is nothing yet.
@@ -3943,6 +4050,7 @@ impl App {
             | QuickRow::WifiNetworks
             | QuickRow::Bluetooth
             | QuickRow::BtDevices
+            | QuickRow::Cast
             | QuickRow::Services
             | QuickRow::Updates
             | QuickRow::Cores
@@ -4427,6 +4535,7 @@ impl App {
             self.wifi_view = wifi.view();
         }
         if let Some(bluetooth) = &self.bluetooth {
+            bluetooth.watch(matches!(self.phase, Phase::Devices { .. }));
             let view = bluetooth.view();
             // Sound goes to connected headphones, and back to the speaker when they go.
             if view.audio().map(|d| &d.mac) != self.bt_view.audio().map(|d| &d.mac) {
@@ -4435,6 +4544,9 @@ impl App {
                 );
             }
             self.bt_view = view;
+        }
+        if let Some(cast) = &self.cast {
+            self.cast_view = cast.view();
         }
         if let Some(updates) = &self.updates {
             self.updates_view = updates.view();
@@ -5121,6 +5233,7 @@ impl App {
             }
             Phase::Networks { .. }
             | Phase::Devices { .. }
+            | Phase::Casting { .. }
             | Phase::Services { .. }
             | Phase::TailscaleLogin
             | Phase::SyncthingId

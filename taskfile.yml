@@ -20,6 +20,10 @@ vars:
     nodosumi:ff1d603f8037dd6c5baec850999f9650677622d1
     flycast:6bb0fc3e18dac4b01694f488c7a71f5930e8a648
     ppsspp:5f2d4afbdced51ac056af25a05fd182a1175b558
+  # What libslotcast.so, which casting to a TV runs on, is built from: x264, Opus and mbedTLS.
+  SLOTCAST: >-
+    b35605ace3ddf7c1a5d67a2eb553f034aef41d55 ddbe48383984d56acd9e1ab6a090c54ca6b735a6
+    068ff080b369adfac81509f9b57b2afabaf82dc5
   SLOT_IN_PROCESS: >-
     --test bios --test core --test core_options --test e2e --test emu --test gb_palette_recolour --test gpsp
     --test link_ui --test mgba_gb_link --test mgba_link --test render_colour_correction
@@ -349,6 +353,29 @@ tasks:
           file "vendor/${c}_libretro.so" | grep -q aarch64
         done
 
+  cast:lib:
+    desc: >-
+      Build libslotcast.so, x264, Opus and mbedTLS from their pinned commits, natively on an
+      aarch64 Linux box or cross-compiled in cores/gles/Dockerfile
+    status:
+      - |
+        set -- {{.SLOTCAST}}
+        m=vendor/libslotcast.so.meta
+        grep -qx "x264=$1" $m && grep -qx "opus=$2" $m && grep -qx "mbedtls=$3" $m
+    cmds:
+      - |
+        set -eu
+        run="sh slotcast/build.sh {{.SLOTCAST}} target-device/slotcast vendor/libslotcast.so"
+        if [ "$(uname -s)-$(uname -m)" = "Linux-aarch64" ]; then
+          sh -c "$run"
+        else
+          docker build -q -t unslot-gles cores/gles > /dev/null
+          # Docker runs this as root; the files go back to whoever builds them.
+          docker run --rm -v "$PWD":/src -w /src unslot-gles sh -c "$run; s=\$?; \
+            chown -R $(id -u):$(id -g) target-device/slotcast vendor; exit \$s"
+        fi
+        file vendor/libslotcast.so | grep -q aarch64
+
   core:gpsp:update:
     desc: Refetch gpSP's source archive and rebuild the core from it, even if the set is current
     cmds:
@@ -401,7 +428,7 @@ tasks:
 
   dist:device:
     desc: Build the SD2 tree for an H700 device, OUT defaults to ./dist-device
-    deps: [core:device, core:gpsp, core:fetch, core:gles, services, build:device]
+    deps: [core:device, core:gpsp, core:fetch, core:gles, cast:lib, services, build:device]
     vars:
       OUT: '{{.OUT | default "dist-device"}}'
       UID: {sh: id -u}
@@ -421,7 +448,9 @@ tasks:
       - for c in {{.FETCHED}}; do cp "vendor/${c}_libretro.so" {{.OUT}}/System/; done
       - for spec in {{.GLES_CORES}}; do cp "vendor/${spec%%:*}_libretro.so" {{.OUT}}/System/; done
       - cp -R vendor/PPSSPP {{.OUT}}/System/PPSSPP
+      - cp vendor/libslotcast.so {{.OUT}}/System/
       - cp -r licenses {{.OUT}}/System/licenses
+      - cp vendor/libslotcast.so.meta {{.OUT}}/System/licenses/libslotcast.meta
       - |
         set -eu
         # Where each source-built core came from, for its licence's source offer.

@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::SyncSender;
 use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -11,6 +12,27 @@ pub fn ring_capacity(sample_rate: u32) -> usize {
 }
 
 const MAX_WAIT: Duration = Duration::from_millis(50);
+
+/// Where the sound goes to a TV as well, while casting: a copy of each stretch the output plays.
+static CAST: Mutex<Option<SyncSender<Vec<i16>>>> = Mutex::new(None);
+static CASTING: AtomicBool = AtomicBool::new(false);
+
+/// Starts sending what the output plays to `tap`, or stops with None.
+pub fn set_cast_tap(tap: Option<SyncSender<Vec<i16>>>) {
+    let mut t = CAST.lock().unwrap_or_else(|e| e.into_inner());
+    CASTING.store(tap.is_some(), Ordering::Relaxed);
+    *t = tap;
+}
+
+/// A copy of `played` for the cast, dropped when its encoder is behind.
+fn cast_tap(played: &[i16]) {
+    if !CASTING.load(Ordering::Relaxed) {
+        return;
+    }
+    if let Some(tap) = &*CAST.lock().unwrap_or_else(|e| e.into_inner()) {
+        let _ = tap.try_send(played.to_vec());
+    }
+}
 
 struct Inner {
     buf: Vec<i16>,
@@ -169,6 +191,11 @@ impl Ring {
             self.priming.store(true, Ordering::Relaxed);
         }
         if self.muted() {
+            out.fill(0);
+        }
+        cast_tap(out);
+        // The TV plays it instead.
+        if CASTING.load(Ordering::Relaxed) {
             out.fill(0);
         }
     }
