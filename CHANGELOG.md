@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.6.0
 
 - Nodosumi comes with unslot and runs Dreamcast games, with Flycast as the other choice. An update replaces `System/`, so a Nodosumi copied there by hand used to be swapped back for Flycast. Saves and states made under Flycast's name stay in `States/DC/flycast`.
 - HDMI out. With a cable in, unslot draws on the TV at 720p and sends the sound there; pull it out and unslot comes back on the panel. A game in play is saved and picks up where it was. Closing the lid while on the TV doesn't put the game to sleep. Ported from slotPlus.
