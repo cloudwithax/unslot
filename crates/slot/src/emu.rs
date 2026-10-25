@@ -6,6 +6,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::cable::{self, Cable};
+use crate::cheevos::{Start, Tracker};
 use slot_retro::{
     AvInfo, ButtonMask, CoreError, CoreOption, Link, LinkChannel, RetroCore, Rumble, Sticks, GBA_H,
     GBA_W, NETPACKET_RELIABLE,
@@ -89,6 +90,7 @@ enum Cmd {
     Options(Sender<Vec<CoreOption>>),
     SetDisk(u32),
     Refresh,
+    Cheevos(Start),
 }
 
 struct Shared {
@@ -119,6 +121,8 @@ struct Shared {
     locked: AtomicBool,
     present_ns: AtomicU64,
     requested: AtomicBool,
+    /// What the game's achievements have said, for the frontend to show.
+    cheevos: Mutex<Vec<slot_cheevos::Notice>>,
     clock: Mutex<Clock>,
     clocked: Condvar,
 }
@@ -189,6 +193,7 @@ impl EmuHandle {
             locked: AtomicBool::new(false),
             present_ns: AtomicU64::new(PRESENT.as_nanos() as u64),
             requested: AtomicBool::new(false),
+            cheevos: Mutex::new(Vec::new()),
             clock: Mutex::new(Clock::default()),
             clocked: Condvar::new(),
         });
@@ -253,6 +258,16 @@ impl EmuHandle {
 
     pub fn begin_cable(&self, player: u8, transport: Box<dyn LinkChannel>) {
         request(&self.cmds, &self.shared, Cmd::BeginCable(player, transport));
+    }
+
+    /// Follows the game's achievements from now on.
+    pub fn start_cheevos(&self, start: Start) {
+        let _ = self.cmds.send(Cmd::Cheevos(start));
+    }
+
+    /// What the game's achievements have said since last asked.
+    pub fn take_cheevos(&self) -> Vec<slot_cheevos::Notice> {
+        std::mem::take(&mut *self.shared.cheevos.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
     pub fn end_link(&self) {
@@ -620,6 +635,7 @@ impl Worker {
         let mut cable_wait = Duration::ZERO;
         let mut ff = (0u32, 0u32, Duration::ZERO, Instant::now());
         let mut runahead = RunAhead::default();
+        let mut tracker: Option<Tracker> = None;
         while !self.shared.stop.load(Ordering::Relaxed) {
             if core.gone() {
                 eprintln!("slot: emu: the core is gone");
@@ -629,7 +645,26 @@ impl Worker {
                 break;
             }
             for cmd in self.cmds.try_iter() {
-                self.apply(cmd, core.as_mut(), &mut transport, &mut cable, &link);
+                match cmd {
+                    Cmd::Cheevos(start) => tracker = Tracker::start(start, &rom),
+                    Cmd::Load(_) => {
+                        self.apply(cmd, core.as_mut(), &mut transport, &mut cable, &link);
+                        if let Some(t) = &tracker {
+                            t.reset();
+                        }
+                    }
+                    cmd => self.apply(cmd, core.as_mut(), &mut transport, &mut cable, &link),
+                }
+            }
+            if let Some(t) = &tracker {
+                let notices = t.take();
+                if !notices.is_empty() {
+                    self.shared
+                        .cheevos
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .extend(notices);
+                }
             }
             self.shared.disks.store(
                 u64::from(core.disk_count()) << 32 | u64::from(core.disk_index()),
@@ -720,6 +755,9 @@ impl Worker {
                     if let Err(e) = core.unserialize(&state) {
                         eprintln!("slot: rewind: {e}");
                     }
+                    if let Some(t) = &tracker {
+                        t.reset();
+                    }
                     core.set_frame_skip(false);
                     core.run_frame(ButtonMask(0));
                     self.publish(core.video_xrgb8888(), shape_of(core.as_ref()));
@@ -787,16 +825,27 @@ impl Worker {
                                 }
                             }
                         }
-                        None if ahead > 0 => match runahead.run(core.as_mut(), input, ahead) {
-                            Ok(()) => shown = true,
-                            Err(e) => {
-                                eprintln!("slot: run-ahead: {e}, off for this game");
-                                runahead.refused = true;
+                        None => {
+                            match ahead {
+                                0 if speed == Speed::Normal => {
+                                    // One frame a present: the core can go on with it while
+                                    // this one shows.
+                                    core.run_frame_overlapped(input)
+                                }
+                                0 => core.run_frame(input),
+                                _ => match runahead.run(core.as_mut(), input, ahead) {
+                                    Ok(()) => shown = true,
+                                    Err(e) => {
+                                        eprintln!("slot: run-ahead: {e}, off for this game");
+                                        runahead.refused = true;
+                                    }
+                                },
                             }
-                        },
-                        // One frame a present: the core can go on with it while this one shows.
-                        None if speed == Speed::Normal => core.run_frame_overlapped(input),
-                        None => core.run_frame(input),
+                            // Run-ahead ends back on the frame the game is really at.
+                            if let Some(t) = tracker.as_mut() {
+                                t.frame(core.as_mut());
+                            }
+                        }
                     }
                     let took = frame_began.elapsed();
                     if last {
@@ -930,6 +979,11 @@ impl Worker {
                 }
             }
 
+            if ceiling == 0 || rewinding || cable.is_some() {
+                if let Some(t) = &tracker {
+                    t.idle();
+                }
+            }
             if let Some((began, core_time)) = fast_span.take() {
                 post_cost = blend(post_cost, began.elapsed().saturating_sub(core_time));
             }
@@ -1057,6 +1111,8 @@ impl Worker {
             Cmd::Options(reply) => {
                 let _ = reply.send(core.core_options());
             }
+            // Taken by the loop, which keeps the tracker.
+            Cmd::Cheevos(_) => {}
             Cmd::SetDisk(index) => match core.set_disk(index) {
                 Ok(()) => eprintln!("slot: emu: disc {} is in", index + 1),
                 Err(e) => eprintln!("slot: emu: disc {}: {e}", index + 1),

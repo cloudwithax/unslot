@@ -37,6 +37,24 @@ fn lid_close_flushes_resume_before_dozing() {
 }
 
 #[test]
+fn closing_the_lid_while_on_a_tv_keeps_the_game_playing() {
+    let d = tmp_root_with_carts(&["Emerald"]);
+    let mut a = app_playing_in(d.path(), "Emerald");
+    a.set_external_display(true);
+    a.apply(Action::LidClose);
+    assert!(matches!(a.phase(), Phase::Playing { .. }));
+}
+
+#[test]
+fn switching_display_leaves_the_game_resumable() {
+    let d = tmp_root_with_carts(&["Emerald"]);
+    let mut a = app_playing_in(d.path(), "Emerald");
+    a.switch_display();
+    let r = StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Emerald");
+    assert!(r.read_resume().unwrap().is_some());
+}
+
+#[test]
 fn lid_open_returns_to_the_game_without_a_button() {
     let d = tmp_root_with_carts(&["Emerald"]);
     let mut a = app_playing_in(d.path(), "Emerald");

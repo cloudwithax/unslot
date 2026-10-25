@@ -430,7 +430,7 @@ const SPECS: [Spec; Platform::COUNT] = [
         name: "Dreamcast",
         dir: "DC",
         extensions: &["chd", "cdi", "gdi", "cue", "m3u"],
-        cores: &[Core::Flycast],
+        cores: &[Core::Nodosumi, Core::Flycast],
         shoulders: true,
         triggers: true,
         turbo: false,

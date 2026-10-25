@@ -291,3 +291,13 @@ fn giving_a_game_its_systems_core_lets_it_follow_the_system() {
         Core::Gpsp
     );
 }
+
+#[test]
+fn nodosumi_comes_with_unslot_and_runs_dreamcast_games_unless_told_otherwise() {
+    assert_eq!(Core::default_for(Platform::Dreamcast), Core::Nodosumi);
+    assert!(!Core::Nodosumi.download_only());
+    assert!(Core::Nodosumi.file_name().starts_with("nodosumi_libretro."));
+    let d = root_with(None);
+    assert_eq!(core_for_platform(d.path(), "Crazy Taxi 2", Platform::Dreamcast), Core::Nodosumi);
+    assert!(Core::Flycast.runs(Platform::Dreamcast));
+}

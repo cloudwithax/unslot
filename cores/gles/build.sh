@@ -2,7 +2,8 @@
 # Builds the cores that draw with the GPU for the H700's Mali, against OpenGL ES. The buildbot's
 # aarch64 builds of these are made for desktop GL, which BaseOS does not have.
 #
-#   build.sh CORE COMMIT WORK OUT        CORE is parallel_n64, flycast, flycast_xtreme, ppsspp or vecx
+#   build.sh CORE COMMIT WORK OUT        CORE is parallel_n64, flycast, flycast_xtreme, nodosumi,
+#                                       ppsspp or vecx
 #
 # Runs on an aarch64 Debian bullseye box, as the release does, or cross-compiles from an amd64 one
 # (cores/gles/Dockerfile); bullseye's glibc is older than the device's, so what it builds loads
@@ -76,6 +77,14 @@ flycast_xtreme)
 	CPUFLAGS="$cpu" make -C "$work" -j"$jobs" platform=arm64 ARCH=arm64 HAVE_OPENMP=0 \
 		CC=${cross}gcc CXX=${cross}g++ CC_AS=${cross}gcc
 	built="$work/km_flycast_xtreme_libretro.so"
+	;;
+nodosumi)
+	# unslot's own Dreamcast core, descended from Redream, with an AArch64 JIT.
+	fetch cloudwithax/nodosumi
+	# shellcheck disable=SC2046
+	cmake -S "$work" -B "$work/build" $(cmake_cross) -DBUILD_LIBRETRO=ON -DA64_JIT=ON
+	cmake --build "$work/build" -j"$jobs"
+	built="$(find "$work/build" -name nodosumi_libretro.so | head -n 1)"
 	;;
 ppsspp)
 	fetch hrydgard/ppsspp

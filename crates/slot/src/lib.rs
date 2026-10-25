@@ -7,6 +7,7 @@ pub mod boot_time;
 pub mod bootlogo;
 pub mod build_info;
 pub mod cable;
+pub mod cheevos;
 pub mod card_log;
 pub mod cart_faces;
 pub mod core;

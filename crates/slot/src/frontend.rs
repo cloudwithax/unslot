@@ -178,6 +178,8 @@ struct Clocks {
     ink: [u8; 3],
     sync: Option<String>,
     sync_tex: Option<TexId>,
+    cheevo: Option<String>,
+    cheevo_tex: Option<TexId>,
 }
 
 struct ShelfLook {
@@ -895,6 +897,14 @@ impl Frontend {
     pub fn poweroff(&mut self) {
         self.session.app_mut().poweroff();
     }
+
+    pub fn switch_display(&mut self) {
+        self.session.app_mut().switch_display();
+    }
+
+    pub fn set_external_display(&mut self, on: bool) {
+        self.session.app_mut().set_external_display(on);
+    }
 }
 
 fn link_legend_faces(ink: [u8; 3]) -> Vec<UndoFace> {
@@ -1078,6 +1088,16 @@ fn sync_clock(app: &mut App, compositor: &mut Compositor, clocks: &mut Clocks) {
             (id, f.w, f.h)
         });
         app.set_sync_face(face);
+    }
+    let cheevo = app.cheevo_text();
+    if cheevo != clocks.cheevo {
+        clocks.cheevo = cheevo.clone();
+        let face = cheevo.map(|line| {
+            let f = slot_ui::line_toast_face(&line);
+            let id = upload_rgba(compositor, &mut clocks.cheevo_tex, f.w, f.h, &f.rgba);
+            (id, f.w, f.h)
+        });
+        app.set_cheevo_face(face);
     }
     let platform_shown = app.slot_text().unwrap_or_default();
     if platform_shown != clocks.platform {

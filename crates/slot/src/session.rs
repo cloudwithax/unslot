@@ -299,6 +299,9 @@ impl Session {
             }
         }
         if let Some(emu) = &self.emu {
+            for notice in emu.take_cheevos() {
+                self.app.on_cheevo(&notice);
+            }
             if let Some(disc) = self.app.take_disc() {
                 emu.set_disk(disc);
             }
@@ -562,6 +565,17 @@ impl Session {
         };
         emu.set_volume(self.app.output_volume());
         emu.set_driven(self.driven);
+        if let (None, Some(console), Some(account)) = (
+            player,
+            crate::cheevos::console_for(platform, core),
+            self.app.cheevos_account(),
+        ) {
+            emu.start_cheevos(crate::cheevos::Start {
+                account,
+                console,
+                http: std::sync::Arc::new(crate::cheevos::Curl),
+            });
+        }
         self.app.set_snapshot(Box::new(emu.snapshot()));
         self.emu = Some(emu);
     }

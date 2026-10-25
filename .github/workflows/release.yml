@@ -49,7 +49,7 @@ jobs:
           done
           test "$(ls "$out"/System/*_libretro.so | wc -l)" -ge 47
           # The GPU cores are built for GLES; one linking desktop GL would not load on BaseOS.
-          for c in parallel_n64 flycast ppsspp vecx; do
+          for c in parallel_n64 nodosumi flycast ppsspp vecx; do
             ! readelf -d "$out/System/${c}_libretro.so" | grep -q 'libGL\.so\|libOpenGL\|libGLX'
           done
           test -f "$out/System/PPSSPP/ppge_atlas.zim"

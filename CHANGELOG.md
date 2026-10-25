@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Nodosumi comes with unslot and runs Dreamcast games, with Flycast as the other choice. An update replaces `System/`, so a Nodosumi copied there by hand used to be swapped back for Flycast. Saves and states made under Flycast's name stay in `States/DC/flycast`.
+- HDMI out. With a cable in, unslot draws on the TV at 720p and sends the sound there; pull it out and unslot comes back on the panel. A game in play is saved and picks up where it was. Closing the lid while on the TV doesn't put the game to sleep. Ported from slotPlus.
+- RetroAchievements, under Network → RetroAchievements. Sign in with your username and password. Only the token RetroAchievements sends back is kept, in `Config/retroachievements.conf`, and entering no username signs you out. Unlocks, mastery and leaderboard scores pop up at the top of the screen. It is softcore only, and the Dreamcast, N64 and PSP cores are left out because they run in their own process. The rcheevos glue comes from machomano's slot-cheevos.
+
 ## v2.5.0
 
 - 32 more cores to download, under Network → Cores, or from a game's core list, where a core not on the card says Download. They come from unslot's own `cores` release, copied from libretro's buildbot and signed with the release key, and go in `Cores/` on the card, which updates leave alone. X on the Cores page removes one. Each loads on an RG34XXSP, and those tried with a game there ran at full speed.

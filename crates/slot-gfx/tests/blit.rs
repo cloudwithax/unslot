@@ -53,3 +53,11 @@ fn the_overlay_drops_by_the_strip_when_it_slides_away() {
     let mid = slot_gfx::lifted_rect((640, 480), 0.5).1;
     assert!(0 < mid && mid < 53);
 }
+
+#[test]
+fn a_720p_tv_fills_its_height_rather_than_showing_a_small_box() {
+    let (_, _, w, h) = blit_rect((1280, 720), 0.0);
+    assert_eq!((w, h), (1080, 720));
+    let (_, _, w, h) = blit_rect((1440, 960), 0.0);
+    assert_eq!((w, h), (1440, 960), "a whole scale that fills is kept");
+}

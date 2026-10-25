@@ -17,6 +17,7 @@ vars:
   GLES_CORES: >-
     vecx:8f671cc9d737f2890c3ce19e177e2984dcae121f
     parallel_n64:a8280501a71c1bcd4c85c5b8bfe75cfa62cd6127
+    nodosumi:ff1d603f8037dd6c5baec850999f9650677622d1
     flycast:6bb0fc3e18dac4b01694f488c7a71f5930e8a648
     ppsspp:5f2d4afbdced51ac056af25a05fd182a1175b558
   SLOT_IN_PROCESS: >-
@@ -322,7 +323,7 @@ tasks:
 
   core:gles:
     desc: >-
-      Build the GPU cores (ParaLLEl N64, Flycast, PPSSPP) and vecx against OpenGL ES from their
+      Build the GPU cores (ParaLLEl N64, Nodosumi, Flycast, PPSSPP) and vecx against OpenGL ES from their
       pinned commits, natively on an aarch64 Linux box or cross-compiled in cores/gles/Dockerfile
     status:
       - |

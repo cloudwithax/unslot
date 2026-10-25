@@ -19,6 +19,7 @@ pub const GET_LOG_INTERFACE: c_uint = 27;
 pub const GET_PERF_INTERFACE: c_uint = 28;
 pub const GET_SAVE_DIRECTORY: c_uint = 31;
 pub const SET_SYSTEM_AV_INFO: c_uint = 32;
+pub const SET_MEMORY_MAPS: c_uint = 36 | 0x10000;
 pub const SET_GEOMETRY: c_uint = 37;
 pub const GET_FASTFORWARDING: c_uint = 49 | 0x10000;
 pub const GET_INPUT_BITMASKS: c_uint = 51 | 0x10000;
@@ -41,6 +42,27 @@ pub const DEVICE_INDEX_ANALOG_BUTTON: c_uint = 2;
 pub const MEMORY_SAVE_RAM: c_uint = 0;
 pub const MEMORY_RTC: c_uint = 1;
 pub const JOYPAD_MASK: c_uint = 256;
+
+/// `retro_memory_descriptor`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct MemoryDescriptor {
+    pub flags: u64,
+    pub ptr: *mut c_void,
+    pub offset: usize,
+    pub start: usize,
+    pub select: usize,
+    pub disconnect: usize,
+    pub len: usize,
+    pub addrspace: *const c_char,
+}
+
+/// `retro_memory_map`.
+#[repr(C)]
+pub struct MemoryMap {
+    pub descriptors: *const MemoryDescriptor,
+    pub num_descriptors: c_uint,
+}
 
 pub const NETPACKET_UNRELIABLE: i32 = 0;
 pub const NETPACKET_RELIABLE: i32 = 1 << 0;

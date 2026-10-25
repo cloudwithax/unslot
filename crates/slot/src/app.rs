@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -38,6 +38,9 @@ use crate::video_mode::{self, VideoMode};
 use crate::wifi::{Busy, Network, Security, Wifi, WifiView};
 
 pub const INSERT_S: f32 = 0.73;
+/// How long an achievement's line stays up, and how long it takes to fade in and out.
+const CHEEVO_MS: Millis = 4000;
+const CHEEVO_FADE_MS: Millis = 250;
 const INSERT_HOLD_S: f32 = 0.28;
 
 pub const SEATED_AT: f32 = INSERT_S - INSERT_HOLD_S;
@@ -340,6 +343,9 @@ pub enum Typing {
     /// The player's ScreenScraper username, then their password.
     SsUser,
     SsPassword(String),
+    /// The player's RetroAchievements username, then their password.
+    RaUser,
+    RaPassword(String),
     /// A game's name to look for, from the shelf or, `again`, from the last search's results.
     Search {
         again: bool,
@@ -456,6 +462,8 @@ pub struct App {
     link_transport: Option<(u16, Box<dyn LinkChannel>)>,
     restarting: bool,
     reloading: bool,
+    /// Whether the picture is on a TV through HDMI rather than on the panel.
+    external_display: bool,
     act_at: Millis,
     root: Option<PathBuf>,
     state: SlotState,
@@ -573,6 +581,12 @@ pub struct App {
     rescanned: Option<Vec<Cart>>,
     /// The line saying how far Syncthing has got.
     sync_face: Option<(TexId, u32, u32)>,
+    /// Lines from the game's achievements waiting to be shown, the first since `cheevo_since`.
+    cheevo_lines: VecDeque<String>,
+    cheevo_since: Millis,
+    cheevo_face: Option<(TexId, u32, u32)>,
+    /// A RetroAchievements sign in waiting on the network.
+    ra_sign_in: Option<std::sync::mpsc::Receiver<Result<crate::cheevos::Account, String>>>,
 }
 
 /// What a search was for and what it found.
@@ -715,6 +729,7 @@ impl App {
             link_transport: None,
             restarting: false,
             reloading: false,
+            external_display: false,
             act_at: 0,
             root: None,
             state: SlotState::default(),
@@ -815,6 +830,10 @@ impl App {
             rescan_again: false,
             rescanned: None,
             sync_face: None,
+            cheevo_lines: VecDeque::new(),
+            cheevo_since: 0,
+            cheevo_face: None,
+            ra_sign_in: None,
         }
     }
 
@@ -1224,6 +1243,7 @@ impl App {
             | QuickRow::Updates
             | QuickRow::Cores
             | QuickRow::GameArt
+            | QuickRow::Achievements
             | QuickRow::Power
             | QuickRow::Restart
             | QuickRow::ShutDown
@@ -2069,6 +2089,23 @@ impl App {
         self.settle_saves();
     }
 
+    /// Saves everything, as for power off, before slot exits to move the picture to or from a
+    /// TV: the screen's size is fixed once it opens, so slot starts again on the new one.
+    pub fn switch_display(&mut self) {
+        if self.link_active() {
+            self.end_link();
+        }
+        self.close_game_menu();
+        self.remember_shelf();
+        self.flush_resume();
+        self.settle_saves();
+    }
+
+    /// Says the picture is on a TV, where closing the lid should not put the game to sleep.
+    pub fn set_external_display(&mut self, on: bool) {
+        self.external_display = on;
+    }
+
     pub fn core_picker(&self) -> Option<Core> {
         self.core_picker.map(|p| p.seat())
     }
@@ -2366,6 +2403,7 @@ impl App {
     fn act(&mut self, action: Action) {
         self.track_held_dir(action);
         match action {
+            Action::LidClose | Action::LidOpen if self.external_display => return,
             Action::LidClose => return self.doze(),
             Action::LidOpen => return self.wake(),
             Action::PowerPress => {
@@ -3368,6 +3406,9 @@ impl App {
                     Typing::Search { again: false } => Phase::Shelf,
                     Typing::RootPassword { .. } => Phase::Services { cursor, note: None },
                     Typing::SsUser | Typing::SsPassword(_) => Phase::GameArt { cursor, note: None },
+                    Typing::RaUser | Typing::RaPassword(_) => Phase::QuickMenu {
+                        row: QuickRow::Achievements,
+                    },
                     _ => Phase::Networks { cursor, note: None },
                 };
             }
@@ -3393,6 +3434,45 @@ impl App {
                 Typing::SsPassword(user) => {
                     let note = self.save_ss_login(&user, &text);
                     self.phase = Phase::GameArt { cursor, note };
+                }
+                Typing::RaUser if text.is_empty() => {
+                    let line = match self.root.as_deref().map(crate::cheevos::sign_out) {
+                        Some(Ok(())) => "Signed out of RetroAchievements".to_string(),
+                        Some(Err(e)) => format!("Could not sign out: {e}"),
+                        None => "No card to sign out on".to_string(),
+                    };
+                    self.cheevo_line(line);
+                    self.phase = Phase::QuickMenu {
+                        row: QuickRow::Achievements,
+                    };
+                }
+                Typing::RaUser => {
+                    self.phase = Phase::Keyboard {
+                        keys: Keyboard::new(
+                            &format!("RetroAchievements password for {text}"),
+                            "",
+                            true,
+                            1,
+                            64,
+                        ),
+                        typing: Typing::RaPassword(text),
+                        cursor,
+                    };
+                }
+                Typing::RaPassword(user) => {
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    let spawned = std::thread::Builder::new()
+                        .name("slot-ra-sign-in".into())
+                        .spawn(move || {
+                            let _ = tx.send(crate::cheevos::sign_in(&user, &text));
+                        });
+                    if spawned.is_ok() {
+                        self.ra_sign_in = Some(rx);
+                        self.cheevo_line("Signing in to RetroAchievements...".into());
+                    }
+                    self.phase = Phase::QuickMenu {
+                        row: QuickRow::Achievements,
+                    };
                 }
                 Typing::RootPassword { then } => {
                     self.state.password = Some(text);
@@ -3646,6 +3726,20 @@ impl App {
                     note: None,
                 }
             }
+            QuickRow::Achievements => {
+                let user = self.cheevos_account().map(|a| a.user).unwrap_or_default();
+                self.phase = Phase::Keyboard {
+                    keys: Keyboard::new(
+                        "RetroAchievements username, or none to sign out",
+                        &user,
+                        false,
+                        0,
+                        64,
+                    ),
+                    typing: Typing::RaUser,
+                    cursor: 0,
+                };
+            }
             QuickRow::Updates => {
                 self.phase = Phase::Updates { cursor: 0 };
                 if self.updates_view.unslot.stage == Stage::Unchecked {
@@ -3853,6 +3947,7 @@ impl App {
             | QuickRow::Updates
             | QuickRow::Cores
             | QuickRow::GameArt
+            | QuickRow::Achievements
             | QuickRow::Power
             | QuickRow::Restart
             | QuickRow::ShutDown
@@ -4087,6 +4182,8 @@ impl App {
         }
         self.timers();
         self.poll_link();
+        self.poll_ra_sign_in();
+        self.expire_cheevo();
         let now = self.now();
         let ready = self.core_faces_ready();
         if let Some(picker) = &mut self.core_picker {
@@ -4620,6 +4717,65 @@ impl App {
         self.sync_face = face;
     }
 
+    /// The RetroAchievements account on the card, if one has signed in.
+    pub fn cheevos_account(&self) -> Option<crate::cheevos::Account> {
+        crate::cheevos::account(self.root.as_deref()?)
+    }
+
+    pub fn on_cheevo(&mut self, notice: &slot_cheevos::Notice) {
+        eprintln!("slot: cheevos: {notice:?}");
+        if let Some(line) = crate::cheevos::line(notice) {
+            self.cheevo_line(line);
+        }
+    }
+
+    fn cheevo_line(&mut self, line: String) {
+        if self.cheevo_lines.is_empty() {
+            self.cheevo_since = self.now();
+        }
+        self.cheevo_lines.push_back(line);
+    }
+
+    /// The achievement line on screen now, if there is one.
+    pub fn cheevo_text(&self) -> Option<String> {
+        self.cheevo_lines.front().cloned()
+    }
+
+    pub fn set_cheevo_face(&mut self, face: Option<(TexId, u32, u32)>) {
+        self.cheevo_face = face;
+    }
+
+    fn poll_ra_sign_in(&mut self) {
+        let Some(rx) = &self.ra_sign_in else {
+            return;
+        };
+        let line = match rx.try_recv() {
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                "RetroAchievements did not sign you in".to_string()
+            }
+            Ok(Err(e)) => e,
+            Ok(Ok(account)) => match self.root.as_deref() {
+                Some(root) => match crate::cheevos::save_account(root, &account) {
+                    Ok(()) => format!("Signed in to RetroAchievements as {}", account.user),
+                    Err(e) => format!("Could not save the sign in: {e}"),
+                },
+                None => "No card to keep the sign in on".to_string(),
+            },
+        };
+        self.ra_sign_in = None;
+        // In place of the line saying it was signing in.
+        self.cheevo_lines.clear();
+        self.cheevo_line(line);
+    }
+
+    fn expire_cheevo(&mut self) {
+        if !self.cheevo_lines.is_empty() && self.now() >= self.cheevo_since + CHEEVO_MS {
+            self.cheevo_lines.pop_front();
+            self.cheevo_since = self.now();
+        }
+    }
+
     fn toggle_favorite(&mut self) {
         let Some(cart) = self.shelf().carts.get(self.shelf().index) else {
             return;
@@ -5100,6 +5256,20 @@ impl App {
             self.draw_game_menu(menu, out);
         }
         self.hud.draw(self.canvas(), self.now(), out);
+        if let Some((tex, w, h)) = self.cheevo_face {
+            let (w, h) = (w as f32, h as f32);
+            let shown = self.now().saturating_sub(self.cheevo_since);
+            let left = CHEEVO_MS.saturating_sub(shown);
+            let alpha = (shown.min(left) as f32 / CHEEVO_FADE_MS as f32).min(1.0);
+            out.push(Draw::Tex {
+                x: self.canvas().centred(w).floor(),
+                y: 12.0,
+                w,
+                h,
+                tex,
+                alpha,
+            });
+        }
     }
 
     pub fn screen_shake(&self) -> f32 {

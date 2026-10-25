@@ -43,10 +43,27 @@ pub fn set_route(device: Option<String>) {
     }
 }
 
+/// The H700's HDMI sound card, tried before the speaker while the picture is on a TV.
+const HDMI_DEVICES: [&str; 2] = ["plughw:CARD=ahubhdmi,DEV=0", "plughw:ahubhdmi"];
+
+static HDMI: AtomicBool = AtomicBool::new(false);
+
+/// Sends the sound to the TV with the picture. Set once, before the sound is first opened; unlike
+/// the Bluetooth route, headphones coming and going leave it alone.
+pub fn set_hdmi(on: bool) {
+    HDMI.store(on, Ordering::Relaxed);
+}
+
 fn devices() -> Vec<String> {
     let route = ROUTE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let hdmi = if HDMI.load(Ordering::Relaxed) {
+        &HDMI_DEVICES[..]
+    } else {
+        &[]
+    };
     route
         .into_iter()
+        .chain(hdmi.iter().map(|d| d.to_string()))
         .chain(DEVICES.iter().map(|d| d.to_string()))
         .collect()
 }

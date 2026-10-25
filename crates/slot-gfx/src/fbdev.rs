@@ -167,6 +167,13 @@ impl FbdevSurface {
         FbdevSurface::open(hint)
     }
 
+    /// Opens the screen at a size unslot already knows, such as the HDMI framebuffer it has just
+    /// set up, rather than asking the panel: fb0's mode file can still name the size it had.
+    pub fn sized(size: (u32, u32)) -> Result<Self, GfxError> {
+        eprintln!("slot: fb0 set to {}x{}", size.0, size.1);
+        FbdevSurface::open(size)
+    }
+
     fn open(hint: (u32, u32)) -> Result<Self, GfxError> {
         let egl = Egl::load()?;
         let gles = open("libGLESv2.so.2").or_else(|_| open("libGLESv2.so"))?;

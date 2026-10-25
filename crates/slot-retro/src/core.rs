@@ -170,6 +170,14 @@ pub trait RetroCore: Send {
     fn start_link(&mut self, _client_id: u16) {}
     fn pump_link(&mut self) {}
     fn stop_link(&mut self) {}
+    /// The core's libretro memory map (descriptors, count) for RetroAchievements; null if none.
+    fn memory_map(&self) -> (*const std::ffi::c_void, u32) {
+        (std::ptr::null(), 0)
+    }
+    /// retro_get_memory_data/size for a libretro memory id.
+    fn memory_region(&mut self, _id: u32) -> Option<(*mut u8, usize)> {
+        None
+    }
     /// Whether the core has stopped for good, as one in a host process has once the host dies.
     fn gone(&self) -> bool {
         false

@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use slot::frontend::Frontend;
 use slot::input::DeviceInput;
 use slot::panel_turn::{panel_turn, PanelTurn};
+use slot_gfx::hdmi::{self, CableWatch};
 use slot_gfx::{Compositor, FbdevSurface, Surface};
 use slot_power::{trace_first_frame, DevicePlatform};
 
@@ -69,13 +70,26 @@ pub fn run() {
     let _ = std::thread::Builder::new()
         .name("slot-fonts".into())
         .spawn(slot_ui::warm_fonts);
+    // The picture goes to a TV if one is plugged in, before the screen opens: its size is fixed
+    // from then on. The sound follows it, so this comes before the sound opens too.
+    let hdmi_paths = hdmi::Paths::default();
+    let switchable = hdmi_paths.switchable();
+    let synced = hdmi::sync(
+        &hdmi_paths,
+        hdmi::panel_for(slot::baseos::var("BASEOS_TARGET").as_deref()),
+    );
+    slot::audio::set_hdmi(synced.on_tv);
     let audio = std::thread::Builder::new()
         .name("slot-audio-open".into())
         .spawn(slot::audio::opened_sink);
     let root = std::env::var_os("SLOT_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(CARD));
-    let mut surface = match FbdevSurface::new() {
+    let opened = match synced.fb {
+        Some(size) => FbdevSurface::sized(size),
+        None => FbdevSurface::new(),
+    };
+    let mut surface = match opened {
         Ok(s) => s,
         Err(e) => {
             eprintln!("slot: {e}");
@@ -93,11 +107,16 @@ pub fn run() {
     slot::boot_time::mark("compositor");
     let panel = surface.window_size();
     let env = |key| std::env::var(key).ok();
-    let turn = panel_turn(
-        panel,
-        slot::baseos::var("BASEOS_PANEL_ROTATION_CCW").as_deref(),
-        env("SLOT_ROTATE").as_deref(),
-    );
+    // A TV is never mounted on its side, whichever way the panel is.
+    let turn = if synced.on_tv {
+        PanelTurn::None
+    } else {
+        panel_turn(
+            panel,
+            slot::baseos::var("BASEOS_PANEL_ROTATION_CCW").as_deref(),
+            env("SLOT_ROTATE").as_deref(),
+        )
+    };
     let turned = turn != PanelTurn::None;
     let window = if turned { (panel.1, panel.0) } else { panel };
     eprintln!(
@@ -133,6 +152,8 @@ pub fn run() {
     };
     slot::boot_time::mark("audio");
     let mut frontend = Frontend::boot_with(Box::new(platform), sink);
+    frontend.set_external_display(synced.on_tv);
+    let mut cable = switchable.then(|| CableWatch::new(hdmi_paths, synced.cable));
     slot::boot_time::mark("frontend");
     frontend.upload_boot_faces(&mut compositor);
     slot::boot_time::mark("faces");
@@ -162,6 +183,12 @@ pub fn run() {
         if frontend.reloading() {
             // init starts the frontend again once slot is gone.
             frontend.reload();
+            return;
+        }
+        if cable.as_mut().is_some_and(|c| c.changed(began)) {
+            // The same: slot starts again, and the picture goes where the cable now says.
+            eprintln!("slot: hdmi cable changed, starting again");
+            frontend.switch_display();
             return;
         }
         frontend.step_emulator(pacer.period, STEP_TIMEOUT);

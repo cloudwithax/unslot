@@ -14,6 +14,7 @@ device = ["slot-gfx/device"]
 slot-gfx = { path = "../slot-gfx", default-features = false }
 slot-input = { path = "../slot-input" }
 slot-power = { path = "../slot-power" }
+slot-cheevos = { path = "../slot-cheevos" }
 slot-retro = { path = "../slot-retro" }
 slot-store = { path = "../slot-store" }
 slot-ui = { path = "../slot-ui" }

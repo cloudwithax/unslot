@@ -95,7 +95,10 @@ fn open_named(
     paths: &[PathBuf],
 ) -> Option<Box<dyn RetroCore>> {
     #[cfg(feature = "device")]
-    if matches!(core, Core::Flycast | Core::ParallelN64 | Core::Ppsspp)
+    if matches!(
+        core,
+        Core::Nodosumi | Core::Flycast | Core::ParallelN64 | Core::Ppsspp
+    )
         && palette.is_none()
         && link.is_none()
     {

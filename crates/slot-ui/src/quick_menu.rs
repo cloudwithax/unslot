@@ -58,6 +58,8 @@ pub enum QuickRow {
     Cores,
     /// Labels for the card's games, found online.
     GameArt,
+    /// Signing in to RetroAchievements, or out.
+    Achievements,
     /// Restart, Shut Down and Reload unslot.
     Power,
     Restart,
@@ -72,7 +74,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 45] = [
+const GENERIC: [QuickRow; 46] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -118,6 +120,7 @@ const GENERIC: [QuickRow; 45] = [
     QuickRow::Restart,
     QuickRow::ShutDown,
     QuickRow::Reload,
+    QuickRow::Achievements,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -217,7 +220,7 @@ impl QuickRow {
 
     pub const POWER: [QuickRow; 3] = [QuickRow::Restart, QuickRow::ShutDown, QuickRow::Reload];
 
-    pub const NETWORK: [QuickRow; 8] = [
+    pub const NETWORK: [QuickRow; 9] = [
         QuickRow::Wifi,
         QuickRow::WifiNetworks,
         QuickRow::Bluetooth,
@@ -226,6 +229,7 @@ impl QuickRow {
         QuickRow::Updates,
         QuickRow::Cores,
         QuickRow::GameArt,
+        QuickRow::Achievements,
     ];
 
     pub const GENERAL: [QuickRow; 9] = [
@@ -349,7 +353,8 @@ impl QuickRow {
             | QuickRow::Services
             | QuickRow::Updates
             | QuickRow::Cores
-            | QuickRow::GameArt => QuickRow::NETWORK.to_vec(),
+            | QuickRow::GameArt
+            | QuickRow::Achievements => QuickRow::NETWORK.to_vec(),
             QuickRow::Restart | QuickRow::ShutDown | QuickRow::Reload => QuickRow::POWER.to_vec(),
             QuickRow::Shader | QuickRow::ColourCorrection | QuickRow::Palette | QuickRow::Bezel => {
                 QuickRow::PLAY_SCREEN.to_vec()
@@ -461,6 +466,7 @@ impl QuickRow {
             QuickRow::Updates => "Updates",
             QuickRow::Cores => "Cores",
             QuickRow::GameArt => "Game Art",
+            QuickRow::Achievements => "RetroAchievements",
             QuickRow::Power => "Power",
             QuickRow::Restart => "Restart",
             QuickRow::ShutDown => "Shut Down",
@@ -490,6 +496,7 @@ impl QuickRow {
                 | QuickRow::Updates
                 | QuickRow::Cores
                 | QuickRow::GameArt
+                | QuickRow::Achievements
                 | QuickRow::Power
                 | QuickRow::Restart
                 | QuickRow::ShutDown
