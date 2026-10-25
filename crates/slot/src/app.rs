@@ -4427,6 +4427,7 @@ impl App {
             self.wifi_view = wifi.view();
         }
         if let Some(bluetooth) = &self.bluetooth {
+            bluetooth.watch(matches!(self.phase, Phase::Devices { .. }));
             let view = bluetooth.view();
             // Sound goes to connected headphones, and back to the speaker when they go.
             if view.audio().map(|d| &d.mac) != self.bt_view.audio().map(|d| &d.mac) {

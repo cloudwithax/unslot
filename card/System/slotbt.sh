@@ -7,7 +7,10 @@
 #   slotbt.sh scan SECS       look for devices for SECS seconds
 #   slotbt.sh devices         every device bluez knows, one a line:
 #                             DEV mac|paired|connected|icon|name
-#   slotbt.sh pair MAC        pair, trust and connect
+#                             connected means usable: paired, and for a controller, its
+#                             buttons reaching the kernel as an input device
+#   slotbt.sh pair MAC        pair, trust and connect; exits 3 for a Bluetooth LE
+#                             controller that linked up but never bonded
 #   slotbt.sh connect MAC | disconnect MAC | forget MAC
 set -u
 
@@ -16,9 +19,11 @@ SYSTEMCTL="${AGS_SYSTEMCTL:-systemctl}"
 SETBT="${AGS_SETBT:-/mnt/vendor/ctrl/setBluetooth.sh}"
 BLUEALSA="${AGS_BLUEALSA:-bluealsa}"
 RFKILL="${AGS_RFKILL:-rfkill}"
+HCIATTACH="${AGS_HCIATTACH:-rtk_hciattach}"
 HCI="${AGS_HCI:-/sys/class/bluetooth/hci0}"
 TIMEOUT="${AGS_TIMEOUT:-timeout}"
 HCI_WAIT_S="${AGS_HCI_WAIT_S:-7}"
+INPUT="${AGS_INPUT:-/sys/class/input}"
 
 ctl() {
 	t="$1"
@@ -39,6 +44,10 @@ bt_up() {
 	fi
 	[ -f "$SETBT" ] && /bin/sh "$SETBT" enable >/dev/null 2>&1
 	$SYSTEMCTL start bluetooth >/dev/null 2>&1 || true
+	# setBluetooth.sh brought hci0 up before bluetoothd was there, and the 4.9 kernel only
+	# registers LE security (SMP) when bluetoothd powers the radio on. Without it a Bluetooth
+	# LE controller links up but never pairs, so power it off for bluetoothd to power it on.
+	ctl 3 power off >/dev/null 2>&1 || true
 	n=0
 	until ctl 3 power on 2>/dev/null | grep -q succeeded; do
 		n=$((n + 1))
@@ -57,30 +66,54 @@ bt_down() {
 	killall "$(basename "$BLUEALSA")" 2>/dev/null || true
 	$SYSTEMCTL stop bluetooth >/dev/null 2>&1 || true
 	$RFKILL block bluetooth 2>/dev/null || true
+	# Blocking cuts the chip's power and its firmware with it, but hci0 stays, so up would
+	# skip the firmware and every command to the chip would time out. Detach it all the way.
+	killall "$(basename "$HCIATTACH")" 2>/dev/null || true
 	return 0
 }
 
-# bluetoothctl colours its output and prefixes prompts; keep only the plain field values.
-field() {
-	sed 's/\x1b\[[0-9;]*m//g' | sed -n "s/^[[:space:]]*$1: //p" | head -n 1
+# The `info MAC` commands on stdin, run in one bluetoothctl, as `DEV` lines. bluez says a
+# device is connected as soon as a link is up, even one that never pairs or never sends a
+# button press, so a device only counts as connected once it is paired, and a controller
+# once the kernel has an input device for it (its uniq is the controller's address).
+report() {
+	inputs=" $(cat "$INPUT"/input*/uniq 2>/dev/null | tr 'a-f\n' 'A-F ') "
+	ctl 5 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | awk -v inputs="$inputs" '
+function flush() {
+	if (mac == "") return
+	if (name == "") name = alias
+	up = conn == "yes" && paired == "yes"
+	if (up && (icon == "input-gaming" || icon == "input-joystick") && index(inputs, " " mac " ") == 0) up = 0
+	printf "DEV %s|%s|%s|%s|%s\n", mac, paired, up ? "yes" : "no", icon, name
+	mac = ""
+}
+$1 == "Device" && $3 ~ /^\(/ { flush(); mac = toupper($2); name = alias = paired = conn = icon = ""; next }
+{ line = $0; sub(/^[ \t]+/, "", line) }
+line ~ /^Name: / { name = substr(line, 7) }
+line ~ /^Alias: / { alias = substr(line, 8) }
+line ~ /^Paired: / { paired = substr(line, 9) }
+line ~ /^Connected: / { conn = substr(line, 12) }
+line ~ /^Icon: / { icon = substr(line, 7) }
+END { flush() }'
 }
 
 bt_devices() {
-	ctl 5 devices 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | sed -n 's/^Device \([0-9A-Fa-f:]\{17\}\) .*/\1/p' |
-		while read -r mac; do
-			info="$(ctl 5 info "$mac" 2>/dev/null)"
-			name="$(printf '%s\n' "$info" | field Name)"
-			[ -n "$name" ] || name="$(printf '%s\n' "$info" | field Alias)"
-			printf 'DEV %s|%s|%s|%s|%s\n' "$mac" \
-				"$(printf '%s\n' "$info" | field Paired)" \
-				"$(printf '%s\n' "$info" | field Connected)" \
-				"$(printf '%s\n' "$info" | field Icon)" \
-				"$name"
-		done
+	ctl 5 devices 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | sed -n 's/^Device \([0-9A-Fa-f:]\{17\}\) .*/info \1/p' |
+		report
 }
 
 connected() {
-	ctl 5 info "$1" 2>/dev/null | field Connected | grep -q yes
+	echo "info $1" | report | grep -q '^DEV [^|]*|yes|yes|'
+}
+
+# A controller's input device turns up a moment after its link does.
+came_up() {
+	n=0
+	until connected "$1"; do
+		n=$((n + 1))
+		[ "$n" -ge 10 ] && return 1
+		sleep 0.5
+	done
 }
 
 case "${1:-}" in
@@ -97,12 +130,20 @@ pair)
 	ctl 10 trust "$2" >/dev/null 2>&1 || true
 	# Pairing leaves only the bare link up; connecting brings up the profile.
 	ctl 15 connect "$2" >/dev/null 2>&1 || true
-	connected "$2"
+	came_up "$2" && exit 0
+	# A Bluetooth LE controller (HID over GATT) "pairs" without bonding when the kernel's LE
+	# security is not up, and never sends a button. Forget it, or it reconnects forever.
+	info="$(ctl 5 info "$2" 2>/dev/null)"
+	if printf '%s\n' "$info" | grep -q 00001812- && printf '%s\n' "$info" | grep -q 'Bonded: no'; then
+		ctl 10 remove "$2" >/dev/null 2>&1 || true
+		exit 3
+	fi
+	exit 1
 	;;
 connect)
 	[ -n "${2:-}" ] || exit 2
 	ctl 15 connect "$2" >/dev/null 2>&1 || true
-	connected "$2"
+	came_up "$2"
 	;;
 disconnect)
 	[ -n "${2:-}" ] || exit 2

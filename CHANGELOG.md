@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.6.1
+
+- Bluetooth LE controllers pair, the Xbox Wireless Controller among them. The radio was powered on before bluetoothd was running, and BaseOS's kernel only turns on LE security when bluetoothd powers it, so an LE pad linked up but never paired. Turning Bluetooth on now hands the power to bluetoothd.
+- A controller only shows as Connected once its buttons reach unslot, and headphones once they are paired. bluez called a device connected the moment a link came up, so a pad that was never going to work showed as Connected, on and off.
+- The Devices list no longer reorders as things connect and drop, so A acts on the device it is on. It refreshes every second while it is open, and reads every device in one go instead of one at a time.
+- A pad that links up but never pairs is forgotten, so it stops reconnecting in a loop, and the page says so.
+- Bluetooth works again after being turned off and on. Turning it off cut the chip's power, and turning it on did not load the chip's firmware again, so it stopped answering until a restart.
+
 ## v2.6.0
 
 - Nodosumi comes with unslot and runs Dreamcast games, with Flycast as the other choice. An update replaces `System/`, so a Nodosumi copied there by hand used to be swapped back for Flycast. Saves and states made under Flycast's name stay in `States/DC/flycast`.

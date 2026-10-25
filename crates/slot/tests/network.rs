@@ -263,7 +263,7 @@ fn on_device_list() -> (tempfile::TempDir, App) {
         "{:?}",
         a.phase()
     );
-    until(&mut a, |a| a.bt_view().devices.len() == 3);
+    until(&mut a, |a| a.bt_view().devices.len() == 4);
     (d, a)
 }
 
@@ -282,7 +282,7 @@ fn bluetooth_searches_when_nothing_is_paired_and_pairs_headphones_with_a() {
     let page = list(&a);
     assert_eq!(
         page.rows[0].label, "WH-1000XM4",
-        "the connected device is not first"
+        "the paired device is not first"
     );
     assert_eq!(page.rows[0].detail, "Connected");
     assert_eq!(page.status, "1 device connected");
@@ -300,6 +300,25 @@ fn a_device_that_will_not_pair_says_so() {
     press(&mut a, Btn::A);
     until(&mut a, |a| a.bt_view().error.is_some());
     assert_eq!(list(&a).status, "Could not connect to Stubborn");
+}
+
+#[test]
+fn a_bluetooth_le_controller_that_never_bonds_says_so_instead_of_connected() {
+    let (_d, mut a) = on_device_list();
+    let at = list(&a)
+        .rows
+        .iter()
+        .position(|r| r.label == "Xbox Wireless Controller")
+        .expect("listed");
+    go_to_row(&mut a, at);
+    press(&mut a, Btn::A);
+    until(&mut a, |a| a.bt_view().error.is_some());
+    let page = list(&a);
+    assert_eq!(
+        page.status,
+        "Xbox Wireless Controller would not pair. Turn Bluetooth off and on, then try again"
+    );
+    assert!(page.rows.iter().all(|r| r.detail != "Connected"));
 }
 
 #[test]

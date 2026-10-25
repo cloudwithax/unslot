@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -13,6 +14,8 @@ pub const SEARCH_S: u32 = 10;
 
 /// How often the paired devices are looked over while the radio is on.
 const POLL: Duration = Duration::from_secs(5);
+/// How often while the devices page is open, so it shows what changed straight away.
+const WATCH_POLL: Duration = Duration::from_secs(1);
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Kind {
@@ -68,14 +71,23 @@ impl BtView {
     }
 }
 
+/// How pairing or connecting a device went.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Link {
+    Up,
+    Failed,
+    /// A Bluetooth LE controller that linked up but never bonded.
+    NeedsLe,
+}
+
 pub trait BtBackend: Send {
     fn up(&mut self) -> Result<(), String>;
     fn down(&mut self);
     fn search(&mut self, secs: u32);
     fn devices(&mut self) -> Vec<Device>;
-    /// Pairs, trusts and connects. True once it is connected.
-    fn pair(&mut self, mac: &str) -> bool;
-    fn connect(&mut self, mac: &str) -> bool;
+    /// Pairs, trusts and connects.
+    fn pair(&mut self, mac: &str) -> Link;
+    fn connect(&mut self, mac: &str) -> Link;
     fn disconnect(&mut self, mac: &str);
     fn forget(&mut self, mac: &str);
 }
@@ -93,20 +105,26 @@ enum Job {
 pub struct Bluetooth {
     jobs: Sender<Job>,
     view: Arc<Mutex<BtView>>,
+    watching: Arc<AtomicBool>,
 }
 
 impl Bluetooth {
     pub fn spawn(backend: Box<dyn BtBackend>) -> Bluetooth {
         let (jobs, rx) = channel();
         let view = Arc::new(Mutex::new(BtView::default()));
-        let shared = view.clone();
+        let watching = Arc::new(AtomicBool::new(false));
+        let (shared, watched) = (view.clone(), watching.clone());
         let spawned = std::thread::Builder::new()
             .name("slot-bluetooth".into())
-            .spawn(move || work(backend, rx, shared));
+            .spawn(move || work(backend, rx, shared, watched));
         if let Err(e) = spawned {
             eprintln!("slot: bluetooth: {e}");
         }
-        Bluetooth { jobs, view }
+        Bluetooth {
+            jobs,
+            view,
+            watching,
+        }
     }
 
     pub fn for_card(root: &Path) -> Bluetooth {
@@ -115,6 +133,11 @@ impl Bluetooth {
 
     pub fn view(&self) -> BtView {
         self.view.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Whether the devices are on screen, and so looked over every second.
+    pub fn watch(&self, on: bool) {
+        self.watching.store(on, Ordering::Relaxed);
     }
 
     pub fn turn_on(&self) {
@@ -156,7 +179,12 @@ pub fn present_by(said: Option<&str>) -> bool {
     !matches!(said.map(str::trim), Some("0" | "no" | "false"))
 }
 
-fn work(mut radio: Box<dyn BtBackend>, jobs: Receiver<Job>, view: Arc<Mutex<BtView>>) {
+fn work(
+    mut radio: Box<dyn BtBackend>,
+    jobs: Receiver<Job>,
+    view: Arc<Mutex<BtView>>,
+    watching: Arc<AtomicBool>,
+) {
     let set = |f: &dyn Fn(&mut BtView)| f(&mut view.lock().unwrap_or_else(|e| e.into_inner()));
     let name_of = |mac: &str| {
         view.lock()
@@ -168,7 +196,11 @@ fn work(mut radio: Box<dyn BtBackend>, jobs: Receiver<Job>, view: Arc<Mutex<BtVi
     };
     loop {
         let on = view.lock().unwrap_or_else(|e| e.into_inner()).on;
-        let job = match jobs.recv_timeout(POLL) {
+        let poll = match watching.load(Ordering::Relaxed) {
+            true => WATCH_POLL,
+            false => POLL,
+        };
+        let job = match jobs.recv_timeout(poll) {
             Ok(job) => job,
             Err(RecvTimeoutError::Timeout) if on => {
                 let devices = radio.devices();
@@ -231,7 +263,7 @@ fn work(mut radio: Box<dyn BtBackend>, jobs: Receiver<Job>, view: Arc<Mutex<BtVi
                         false => BtBusy::Connecting(name.clone()),
                     }
                 });
-                let ok = match pairing {
+                let link = match pairing {
                     true => radio.pair(&mac),
                     false => radio.connect(&mac),
                 };
@@ -239,9 +271,13 @@ fn work(mut radio: Box<dyn BtBackend>, jobs: Receiver<Job>, view: Arc<Mutex<BtVi
                 set(&|v| {
                     v.busy = BtBusy::Idle;
                     v.devices = sorted(devices.clone());
-                    if !ok {
-                        v.error = Some(format!("Could not connect to {name}"));
-                    }
+                    v.error = match link {
+                        Link::Up => None,
+                        Link::Failed => Some(format!("Could not connect to {name}")),
+                        Link::NeedsLe => Some(format!(
+                            "{name} would not pair. Turn Bluetooth off and on, then try again"
+                        )),
+                    };
                 });
             }
             Job::Disconnect(mac) if on => {
@@ -259,14 +295,11 @@ fn work(mut radio: Box<dyn BtBackend>, jobs: Receiver<Job>, view: Arc<Mutex<BtVi
     }
 }
 
-/// Connected first, then paired, then the rest, each by name.
+/// Paired first, then the rest, each by name. A device connecting or dropping keeps its
+/// place, so the one under the cursor stays the one A acts on.
 fn sorted(mut devices: Vec<Device>) -> Vec<Device> {
     devices.sort_by(|a, b| {
-        (!a.connected, !a.paired, a.name.to_lowercase()).cmp(&(
-            !b.connected,
-            !b.paired,
-            b.name.to_lowercase(),
-        ))
+        (!a.paired, a.name.to_lowercase(), &a.mac).cmp(&(!b.paired, b.name.to_lowercase(), &b.mac))
     });
     devices
 }
@@ -334,6 +367,14 @@ impl DeviceBt {
     fn ran(&self, args: &[&str]) -> bool {
         self.script(args).status.success()
     }
+
+    fn linked(&self, args: &[&str]) -> Link {
+        match self.script(args).status.code() {
+            Some(0) => Link::Up,
+            Some(3) => Link::NeedsLe,
+            _ => Link::Failed,
+        }
+    }
 }
 
 impl BtBackend for DeviceBt {
@@ -356,12 +397,12 @@ impl BtBackend for DeviceBt {
         parse_devices(&String::from_utf8_lossy(&self.script(&["devices"]).stdout))
     }
 
-    fn pair(&mut self, mac: &str) -> bool {
-        self.ran(&["pair", mac])
+    fn pair(&mut self, mac: &str) -> Link {
+        self.linked(&["pair", mac])
     }
 
-    fn connect(&mut self, mac: &str) -> bool {
-        self.ran(&["connect", mac])
+    fn connect(&mut self, mac: &str) -> Link {
+        self.linked(&["connect", mac])
     }
 
     fn disconnect(&mut self, mac: &str) {
@@ -374,7 +415,7 @@ impl BtBackend for DeviceBt {
 }
 
 /// A pretend radio with a controller and some headphones nearby. The speaker named "Stubborn"
-/// never pairs.
+/// never pairs, and the "Xbox Wireless Controller" links up over Bluetooth LE but never bonds.
 #[derive(Default)]
 pub struct SimBt {
     up: bool,
@@ -384,11 +425,12 @@ pub struct SimBt {
 }
 
 impl SimBt {
-    fn nearby() -> [(&'static str, &'static str, Kind); 3] {
+    fn nearby() -> [(&'static str, &'static str, Kind); 4] {
         [
             ("AA:00:00:00:00:01", "8BitDo Pro 2", Kind::Controller),
             ("AA:00:00:00:00:02", "WH-1000XM4", Kind::Audio),
             ("AA:00:00:00:00:03", "Stubborn", Kind::Audio),
+            ("AA:00:00:00:00:04", "Xbox Wireless Controller", Kind::Controller),
         ]
     }
 }
@@ -422,12 +464,11 @@ impl BtBackend for SimBt {
             .collect()
     }
 
-    fn pair(&mut self, mac: &str) -> bool {
-        if SimBt::nearby()
-            .iter()
-            .any(|(m, n, _)| *m == mac && *n == "Stubborn")
-        {
-            return false;
+    fn pair(&mut self, mac: &str) -> Link {
+        match SimBt::nearby().iter().find(|(m, ..)| *m == mac) {
+            Some((_, "Stubborn", _)) => return Link::Failed,
+            Some((_, "Xbox Wireless Controller", _)) => return Link::NeedsLe,
+            _ => {}
         }
         if !self.paired.iter().any(|p| p == mac) {
             self.paired.push(mac.into());
@@ -435,14 +476,14 @@ impl BtBackend for SimBt {
         self.connect(mac)
     }
 
-    fn connect(&mut self, mac: &str) -> bool {
+    fn connect(&mut self, mac: &str) -> Link {
         if !self.paired.iter().any(|p| p == mac) {
-            return false;
+            return Link::Failed;
         }
         if !self.connected.iter().any(|c| c == mac) {
             self.connected.push(mac.into());
         }
-        true
+        Link::Up
     }
 
     fn disconnect(&mut self, mac: &str) {
@@ -475,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn connected_devices_come_first_then_paired_ones() {
+    fn paired_devices_come_first_and_connecting_one_does_not_move_it() {
         let d = |name: &str, paired, connected| Device {
             mac: name.into(),
             name: name.into(),
@@ -483,16 +524,22 @@ mod tests {
             paired,
             connected,
         };
-        let order: Vec<String> = sorted(vec![
-            d("zed", false, false),
-            d("bee", true, false),
-            d("ant", false, false),
-            d("cat", true, true),
-        ])
-        .into_iter()
-        .map(|d| d.name)
-        .collect();
-        assert_eq!(order, ["cat", "bee", "ant", "zed"]);
+        let order = |devices| -> Vec<String> {
+            sorted(devices).into_iter().map(|d: Device| d.name).collect()
+        };
+        assert_eq!(
+            order(vec![
+                d("zed", false, false),
+                d("bee", true, false),
+                d("ant", false, false),
+                d("cat", true, true),
+            ]),
+            ["bee", "cat", "ant", "zed"]
+        );
+        assert_eq!(
+            order(vec![d("bee", true, true), d("cat", true, false)]),
+            order(vec![d("bee", true, false), d("cat", true, true)]),
+        );
     }
 
     #[test]
@@ -520,20 +567,27 @@ mod tests {
         bt.turn_on();
         settled(&bt, |v| v.on && v.busy == BtBusy::Idle);
         bt.search();
-        let view = settled(&bt, |v| v.devices.len() == 3);
+        let view = settled(&bt, |v| v.devices.len() == 4);
         assert!(view.audio().is_none());
 
         bt.pair("AA:00:00:00:00:02");
         let view = settled(&bt, |v| v.audio().is_some());
         assert_eq!(view.audio().map(|d| d.name.as_str()), Some("WH-1000XM4"));
-        assert_eq!(
-            view.devices[0].name, "WH-1000XM4",
-            "the connected one is not first"
-        );
+        assert_eq!(view.devices[0].name, "WH-1000XM4", "the paired one is not first");
 
         bt.pair("AA:00:00:00:00:03");
         let view = settled(&bt, |v| v.error.is_some());
         assert_eq!(view.error.as_deref(), Some("Could not connect to Stubborn"));
+
+        bt.pair("AA:00:00:00:00:04");
+        let view = settled(&bt, |v| v.error.as_deref().is_some_and(|e| e.contains("Xbox")));
+        assert_eq!(
+            view.error.as_deref(),
+            Some(
+                "Xbox Wireless Controller would not pair. Turn Bluetooth off and on, then try again"
+            )
+        );
+        assert!(!view.devices.iter().any(|d| d.name.starts_with("Xbox") && d.connected));
 
         bt.forget("AA:00:00:00:00:02");
         let view = settled(&bt, |v| v.audio().is_none());
