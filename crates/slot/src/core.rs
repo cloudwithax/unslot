@@ -140,7 +140,8 @@ fn open_remote(
         }
         _ => Command::new(&exe),
     };
-    cmd.arg("--core-host")
+    cmd.env(slot_ftrace::CHILD_VAR, "1")
+        .arg("--core-host")
         .arg(root)
         .arg(core.as_str())
         .arg(platform.key())

@@ -11,6 +11,7 @@
 
 use std::ffi::{c_void, CStr};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::sync::Arc;
 
 type Ptr = *mut c_void;
 
@@ -47,6 +48,7 @@ const GL_SYNC_FLUSH_COMMANDS_BIT: u32 = 1;
 const BUFFERS: usize = 3;
 /// How long to wait on the GPU for a frame it should have drawn a frame ago.
 const WAIT_NS: u64 = 100_000_000;
+const EGL_SYNC_FENCE_KHR: u32 = 0x30F9;
 
 #[repr(C)]
 struct IonAllocation {
@@ -86,11 +88,36 @@ struct Fns {
     delete_sync: unsafe extern "C" fn(Ptr),
 }
 
-/// One buffer: the ION memory, the CPU's mapping of it, and the GPU's image of it to draw into.
-struct Buffer {
+/// EGL's fences, which unlike GL's can be waited on from a thread with no context.
+#[derive(Clone, Copy)]
+struct EglSync {
+    create: unsafe extern "C" fn(Ptr, u32, *const i32) -> Ptr,
+    client_wait: unsafe extern "C" fn(Ptr, Ptr, i32, u64) -> i32,
+    destroy: unsafe extern "C" fn(Ptr, Ptr) -> u32,
+}
+
+/// A buffer's memory as the CPU maps it, kept while anything may read it.
+struct Mapping {
     fd: OwnedFd,
     map: *const u8,
     len: usize,
+}
+
+// SAFETY: the mapping is only read, and only once the GPU is done writing it.
+unsafe impl Send for Mapping {}
+unsafe impl Sync for Mapping {}
+
+impl Drop for Mapping {
+    fn drop(&mut self) {
+        // SAFETY: mapped once, by `buffer`, and unmapped here once.
+        unsafe { libc::munmap(self.map as *mut c_void, self.len) };
+    }
+}
+
+/// One buffer: the ION memory, the CPU's mapping of it, and the GPU's image of it to draw into.
+struct Buffer {
+    /// Shared with a frame lent out of it, until that is done with.
+    mem: Arc<Mapping>,
     image: Ptr,
     texture: u32,
     fbo: u32,
@@ -99,9 +126,10 @@ struct Buffer {
 }
 
 pub(crate) struct IonFrames {
-    ion: OwnedFd,
+    ion: Arc<OwnedFd>,
     display: Ptr,
     fns: Fns,
+    sync: Option<EglSync>,
     size: (u32, u32),
     buffers: Vec<Buffer>,
     turn: usize,
@@ -147,20 +175,61 @@ impl IonFrames {
                 client_wait_sync: fun(f(c"glClientWaitSync")?),
                 delete_sync: fun(f(c"glDeleteSync")?),
             };
+            let sync = (|| {
+                Ok::<_, String>(EglSync {
+                    create: fun(f(c"eglCreateSyncKHR")?),
+                    client_wait: fun(f(c"eglClientWaitSyncKHR")?),
+                    destroy: fun(f(c"eglDestroySyncKHR")?),
+                })
+            })()
+            .ok();
             let fd = libc::open(c"/dev/ion".as_ptr(), libc::O_RDWR | libc::O_CLOEXEC);
             if fd < 0 {
                 return Err(format!("/dev/ion: {}", std::io::Error::last_os_error()));
             }
             Ok(IonFrames {
-                ion: OwnedFd::from_raw_fd(fd),
+                ion: Arc::new(OwnedFd::from_raw_fd(fd)),
                 display,
                 fns,
+                sync,
                 size: (0, 0),
                 buffers: Vec::new(),
                 turn: 0,
                 fresh: false,
             })
         }
+    }
+
+    /// Ready for frames on the EGL context current on this thread, its display and functions
+    /// found through libEGL and libGLESv2 themselves, as the compositor keeps neither.
+    pub(crate) fn for_current() -> Result<Self, String> {
+        let open = |names: [&str; 2]| {
+            unsafe { libloading::Library::new(names[0]).or_else(|_| libloading::Library::new(names[1])) }
+                .map_err(|e| e.to_string())
+        };
+        let egl = open(["libEGL.so.1", "libEGL.so"])?;
+        let gles = open(["libGLESv2.so.2", "libGLESv2.so"])?;
+        // SAFETY: each is named for the function it is typed as.
+        let made = unsafe {
+            let display: unsafe extern "C" fn() -> Ptr =
+                *egl.get(b"eglGetCurrentDisplay").map_err(|e| e.to_string())?;
+            let get_proc: unsafe extern "C" fn(*const std::ffi::c_char) -> *const c_void =
+                *egl.get(b"eglGetProcAddress").map_err(|e| e.to_string())?;
+            let display = display();
+            if display.is_null() {
+                return Err("no EGL display current".into());
+            }
+            IonFrames::new(display, |name| {
+                match gles.get::<unsafe extern "C" fn()>(name.to_bytes()) {
+                    Ok(f) => *f as *const c_void,
+                    Err(_) => get_proc(name.as_ptr()),
+                }
+            })
+        };
+        // The context they serve keeps both loaded; letting go would only drop a reference.
+        std::mem::forget(egl);
+        std::mem::forget(gles);
+        made
     }
 
     /// The `w` by `h` frame in framebuffer `from` into `out` as XRGB8888, top row first, turned
@@ -170,11 +239,54 @@ impl IonFrames {
         let Some(take) = self.turn_in(from, w, h, flip) else {
             return false;
         };
-        let b = &self.buffers[take];
+        let b = &self.buffers[take].mem;
         let n = out.len().min(b.len);
         // SAFETY: the mapping is `b.len` long, and the GPU is done with it.
         unsafe { std::ptr::copy_nonoverlapping(b.map, out.as_mut_ptr(), n) };
         true
+    }
+
+    /// Whether frames can be lent, to be waited on and read on another thread.
+    pub(crate) fn can_lend(&self) -> bool {
+        self.sync.is_some()
+    }
+
+    /// Has the GPU copy the frame in framebuffer `from` into a buffer not lent out, as `read`
+    /// does, and lends it, for whoever has it to wait on and read while the GPU goes on. Leaves
+    /// `from` bound. None when every buffer is lent out; Err when the buffers cannot be had.
+    pub(crate) fn lend(
+        &mut self,
+        from: u32,
+        w: u32,
+        h: u32,
+        flip: bool,
+    ) -> Result<Option<LentFrame>, ()> {
+        let sync = self.sync.ok_or(())?;
+        if !self.ready_for(w, h) {
+            return Err(());
+        }
+        let Some(i) = self.buffers.iter().position(|b| Arc::strong_count(&b.mem) == 1) else {
+            return Ok(None);
+        };
+        self.copy_in(from, i, w, h, flip);
+        // SAFETY: the display is live; the fence follows the copy, flushed for it to be done.
+        let fence = unsafe {
+            let fence = (sync.create)(self.display, EGL_SYNC_FENCE_KHR, std::ptr::null());
+            (self.fns.flush)();
+            (self.fns.bind_framebuffer)(GL_FRAMEBUFFER, from);
+            fence
+        };
+        if fence.is_null() {
+            return Ok(None);
+        }
+        Ok(Some(LentFrame {
+            mem: self.buffers[i].mem.clone(),
+            ion: self.ion.clone(),
+            display: self.display,
+            sync,
+            fence,
+            waited: false,
+        }))
     }
 
     /// As `read`, leaving the frame in its buffer: which of them it is in, with the buffers to map
@@ -188,7 +300,7 @@ impl IonFrames {
     ) -> Option<(usize, Option<Vec<OwnedFd>>)> {
         let take = self.turn_in(from, w, h, flip)?;
         let fds = std::mem::take(&mut self.fresh)
-            .then(|| self.buffers.iter().map(|b| b.fd.try_clone()).collect())
+            .then(|| self.buffers.iter().map(|b| b.mem.fd.try_clone()).collect())
             .and_then(|fds: std::io::Result<Vec<_>>| fds.ok());
         Some((take, fds))
     }
@@ -196,38 +308,13 @@ impl IonFrames {
     /// Has the GPU copy the frame in framebuffer `from` into the next buffer, and gives the one
     /// holding the frame before, done and out of the cache, to read.
     fn turn_in(&mut self, from: u32, w: u32, h: u32, flip: bool) -> Option<usize> {
-        if self.size != (w, h) {
-            self.release();
-            for _ in 0..BUFFERS {
-                match self.buffer(w, h) {
-                    Ok(b) => self.buffers.push(b),
-                    Err(e) => {
-                        eprintln!("slot: gpu core: no cached frames {w}x{h}: {e}");
-                        self.release();
-                        return None;
-                    }
-                }
-            }
-            self.size = (w, h);
-            self.turn = 0;
-            self.fresh = true;
+        if !self.ready_for(w, h) {
+            return None;
         }
+        self.copy_in(from, self.turn, w, h, flip);
         let f = &self.fns;
         unsafe {
             let this = &mut self.buffers[self.turn];
-            (f.bind_framebuffer)(GL_READ_FRAMEBUFFER, from);
-            (f.bind_framebuffer)(GL_DRAW_FRAMEBUFFER, this.fbo);
-            // A blit is cut by the scissor, which a core may leave on.
-            let scissor = (f.is_enabled)(GL_SCISSOR_TEST) != 0;
-            if scissor {
-                (f.disable)(GL_SCISSOR_TEST);
-            }
-            let (w, h) = (w as i32, h as i32);
-            let (y0, y1) = if flip { (h, 0) } else { (0, h) };
-            (f.blit)(0, 0, w, h, 0, y0, w, y1, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-            if scissor {
-                (f.enable)(GL_SCISSOR_TEST);
-            }
             if let Some(old) = this.fence.take() {
                 (f.delete_sync)(old);
             }
@@ -247,10 +334,53 @@ impl IonFrames {
             // The GPU wrote behind the cache's back: have it drop what it holds of the buffer.
             let mut sync = IonFd {
                 handle: 0,
-                fd: b.fd.as_raw_fd(),
+                fd: b.mem.fd.as_raw_fd(),
             };
             libc::ioctl(self.ion.as_raw_fd(), ION_IOC_SYNC as _, &mut sync);
             Some(take)
+        }
+    }
+
+    /// Buffers for `w` by `h` frames, made again when the size has changed. False when they
+    /// cannot be had.
+    fn ready_for(&mut self, w: u32, h: u32) -> bool {
+        if self.size == (w, h) {
+            return true;
+        }
+        self.release();
+        for _ in 0..BUFFERS {
+            match self.buffer(w, h) {
+                Ok(b) => self.buffers.push(b),
+                Err(e) => {
+                    eprintln!("slot: gpu core: no cached frames {w}x{h}: {e}");
+                    self.release();
+                    return false;
+                }
+            }
+        }
+        self.size = (w, h);
+        self.turn = 0;
+        self.fresh = true;
+        true
+    }
+
+    /// Has the GPU copy the `w` by `h` frame in framebuffer `from` into buffer `i`.
+    fn copy_in(&self, from: u32, i: usize, w: u32, h: u32, flip: bool) {
+        let f = &self.fns;
+        unsafe {
+            (f.bind_framebuffer)(GL_READ_FRAMEBUFFER, from);
+            (f.bind_framebuffer)(GL_DRAW_FRAMEBUFFER, self.buffers[i].fbo);
+            // A blit is cut by the scissor, which a core may leave on.
+            let scissor = (f.is_enabled)(GL_SCISSOR_TEST) != 0;
+            if scissor {
+                (f.disable)(GL_SCISSOR_TEST);
+            }
+            let (w, h) = (w as i32, h as i32);
+            let (y0, y1) = if flip { (h, 0) } else { (0, h) };
+            (f.blit)(0, 0, w, h, 0, y0, w, y1, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            if scissor {
+                (f.enable)(GL_SCISSOR_TEST);
+            }
         }
     }
 
@@ -320,9 +450,11 @@ impl IonFrames {
                 attrs.as_ptr(),
             );
             let mut b = Buffer {
-                fd,
-                map: map as *const u8,
-                len,
+                mem: Arc::new(Mapping {
+                    fd,
+                    map: map as *const u8,
+                    len,
+                }),
                 image,
                 texture: 0,
                 fbo: 0,
@@ -372,7 +504,6 @@ impl IonFrames {
             if !b.image.is_null() {
                 (f.destroy_image)(self.display, b.image);
             }
-            libc::munmap(b.map as *mut c_void, b.len);
         }
     }
 
@@ -387,5 +518,44 @@ impl IonFrames {
 impl Drop for IonFrames {
     fn drop(&mut self) {
         self.release();
+    }
+}
+
+/// A frame lent out of its buffer, which goes back to the GPU once this is dropped.
+pub(crate) struct LentFrame {
+    mem: Arc<Mapping>,
+    ion: Arc<OwnedFd>,
+    display: Ptr,
+    sync: EglSync,
+    fence: Ptr,
+    waited: bool,
+}
+
+// SAFETY: EGL's fences are the display's, waited on and let go from any thread.
+unsafe impl Send for LentFrame {}
+
+impl crate::cast_tap::Lent for LentFrame {
+    fn pixels(&mut self) -> &[u8] {
+        if !std::mem::replace(&mut self.waited, true) {
+            // SAFETY: the fence and the display are live; the flush was done when it was made.
+            unsafe {
+                (self.sync.client_wait)(self.display, self.fence, 0, WAIT_NS);
+                // The GPU wrote behind the cache's back: have it drop what it holds of the buffer.
+                let mut sync = IonFd {
+                    handle: 0,
+                    fd: self.mem.fd.as_raw_fd(),
+                };
+                libc::ioctl(self.ion.as_raw_fd(), ION_IOC_SYNC as _, &mut sync);
+            }
+        }
+        // SAFETY: the mapping is that long, kept while this has it, and the GPU is done with it.
+        unsafe { std::slice::from_raw_parts(self.mem.map, self.mem.len) }
+    }
+}
+
+impl Drop for LentFrame {
+    fn drop(&mut self) {
+        // SAFETY: made for this frame, let go once.
+        unsafe { (self.sync.destroy)(self.display, self.fence) };
     }
 }

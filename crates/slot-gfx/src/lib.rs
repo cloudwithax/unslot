@@ -1,4 +1,5 @@
 mod bezel;
+pub mod cast_tap;
 mod draw;
 mod fbdev;
 mod fbo;

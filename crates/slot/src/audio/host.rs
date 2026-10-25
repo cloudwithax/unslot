@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use slot_ftrace::{self as ft, ev};
 
 use super::ring::Ring;
 use super::sink::{AudioError, AudioSink};
@@ -170,6 +171,7 @@ fn start(
                     scratch.resize(out.len(), 0);
                 }
                 let taken = &mut scratch[..out.len()];
+                let _s = ft::span(ev::AUDIO_CALLBACK, (out.len() / 2) as i64);
                 ring.fill(taken);
                 for (o, s) in out.iter_mut().zip(taken.iter()) {
                     *o = f32::from(*s) / 32768.0;

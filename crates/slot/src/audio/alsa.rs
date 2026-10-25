@@ -5,6 +5,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use libloading::Library;
+use slot_ftrace::{self as ft, ev};
 
 use super::pacer::Pacer;
 use super::ring::Ring;
@@ -76,6 +77,7 @@ type PcmRecover = unsafe extern "C" fn(*mut c_void, c_int, c_int) -> c_int;
 type PcmDrop = unsafe extern "C" fn(*mut c_void) -> c_int;
 type PcmClose = unsafe extern "C" fn(*mut c_void) -> c_int;
 type StrError = unsafe extern "C" fn(c_int) -> *const c_char;
+type PcmDelay = unsafe extern "C" fn(*mut c_void, *mut std::ffi::c_long) -> c_int;
 
 struct Alsa {
     open: PcmOpen,
@@ -85,6 +87,8 @@ struct Alsa {
     drop: PcmDrop,
     close: PcmClose,
     strerror: StrError,
+    /// For the trace only, so a library without it still plays.
+    delay: Option<PcmDelay>,
     _lib: Library,
 }
 
@@ -108,6 +112,7 @@ impl Alsa {
                 drop: get!("snd_pcm_drop"),
                 close: get!("snd_pcm_close"),
                 strerror: get!("snd_strerror"),
+                delay: lib.get::<PcmDelay>(b"snd_pcm_delay\0").ok().map(|f| *f),
                 _lib: lib,
             })
         }
@@ -270,7 +275,9 @@ impl Playback {
         let mut silence = Silence::new(RELEASE_AFTER);
         let mut pace = Pacer::new(span);
         while !stop.load(Ordering::Relaxed) {
+            let filled = ft::span(ev::AUDIO_FILL, 0);
             ring.fill(&mut buf);
+            drop(filled);
             let route = ROUTE_CHANGES.load(Ordering::Relaxed);
             if route != self.route {
                 self.route = route;
@@ -300,11 +307,24 @@ impl Playback {
             match self.pcm {
                 Some(pcm) => {
                     pace.reset();
-                    if !self.write(pcm, &buf) {
+                    ft::begin(ev::AUDIO_WRITE, PERIOD_FRAMES as i64);
+                    let wrote = self.write(pcm, &buf);
+                    ft::end(ev::AUDIO_WRITE, i64::from(wrote));
+                    if !wrote {
                         return;
                     }
+                    if let (true, Some(delay)) = (ft::enabled(), self.alsa.delay) {
+                        let mut frames: std::ffi::c_long = 0;
+                        // SAFETY: pcm is open and frames is a valid out-pointer.
+                        if unsafe { delay(pcm, &mut frames) } == 0 {
+                            ft::counter(ev::AUDIO_DEVICE_DELAY, frames as i64);
+                        }
+                    }
                 }
-                None => std::thread::sleep(pace.wait(Instant::now())),
+                None => {
+                    let _s = ft::span(ev::AUDIO_NO_PCM_SLEEP, 0);
+                    std::thread::sleep(pace.wait(Instant::now()))
+                }
             }
         }
     }
@@ -321,6 +341,7 @@ impl Playback {
                 )
             };
             if frames < 0 {
+                ft::instant(ev::AUDIO_XRUN, frames);
                 let err = unsafe { (self.alsa.recover)(pcm, frames as c_int, 1) };
                 if err < 0 {
                     eprintln!("slot: audio: {}", self.alsa.message(err));

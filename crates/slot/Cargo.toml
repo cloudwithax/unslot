@@ -11,6 +11,7 @@ host = ["dep:winit", "dep:cpal", "dep:gilrs", "slot-gfx/host"]
 device = ["slot-gfx/device"]
 
 [dependencies]
+slot-ftrace = { path = "../slot-ftrace" }
 slot-gfx = { path = "../slot-gfx", default-features = false }
 slot-input = { path = "../slot-input" }
 slot-power = { path = "../slot-power" }
@@ -25,7 +26,9 @@ libloading = { workspace = true }
 libc = { workspace = true }
 lz4_flex = { workspace = true }
 png = { workspace = true }
+aes = "0.8"
 crc32fast = "1"
+ctr = "0.9"
 ed25519-dalek = "2"
 sha2 = "0.10"
 

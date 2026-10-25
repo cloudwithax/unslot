@@ -2,6 +2,7 @@ use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use slot_ftrace::{self as ft, ev};
 use slot_retro::{GBA_H, GBA_W};
 
 /// The size of a published picture, and how wide it should look against its height. The
@@ -33,7 +34,9 @@ pub struct Frames {
 }
 
 struct Inner {
-    ready: Option<(Vec<u8>, Shape)>,
+    ready: Option<(Vec<u8>, Shape, u64)>,
+    /// Pictures published so far, which numbers each one for the trace.
+    seq: u64,
     spare: Vec<Vec<u8>>,
     allocated: usize,
 }
@@ -43,6 +46,7 @@ impl Frames {
         Arc::new(Frames {
             inner: Mutex::new(Inner {
                 ready: None,
+                seq: 0,
                 spare: Vec::new(),
                 allocated: 0,
             }),
@@ -62,20 +66,26 @@ impl Frames {
         }
     }
 
-    pub fn publish(&self, buf: Vec<u8>, shape: Shape) {
+    /// Makes `buf` the picture to show next, and says which picture it is, counting from 1.
+    pub fn publish(&self, buf: Vec<u8>, shape: Shape) -> u64 {
         let mut i = self.lock();
-        if let Some((dropped, _)) = i.ready.replace((buf, shape)) {
+        i.seq += 1;
+        let seq = i.seq;
+        if let Some((dropped, _, lost)) = i.ready.replace((buf, shape, seq)) {
+            ft::instant(ev::FRAMES_OVERWRITTEN, lost as i64);
             i.spare.push(dropped);
         }
+        seq
     }
 
     pub fn latest(self: &Arc<Self>) -> Option<FrameRef> {
-        let (buf, shape) = self.lock().ready.take()?;
+        let (buf, shape, seq) = self.lock().ready.take()?;
         self.taken.fetch_add(1, Ordering::Relaxed);
         Some(FrameRef {
             frames: self.clone(),
             buf,
             shape,
+            seq,
         })
     }
 
@@ -104,6 +114,8 @@ pub struct FrameRef {
     frames: Arc<Frames>,
     buf: Vec<u8>,
     pub shape: Shape,
+    /// Which published picture this is.
+    pub seq: u64,
 }
 
 impl Deref for FrameRef {

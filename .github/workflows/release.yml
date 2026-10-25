@@ -53,6 +53,8 @@ jobs:
             ! readelf -d "$out/System/${c}_libretro.so" | grep -q 'libGL\.so\|libOpenGL\|libGLX'
           done
           test -f "$out/System/PPSSPP/ppge_atlas.zim"
+          file "$out/System/libslotcast.so" | grep -q aarch64
+          test -s "$out/System/licenses/libslotcast.meta"
           test -s "$out/System/licenses/cores.manifest"
           for b in tailscaled wireguard-go syncthing samba/bin/smbd samba/bin/smbpasswd; do
             file "$out/System/services/$b" | grep -q aarch64

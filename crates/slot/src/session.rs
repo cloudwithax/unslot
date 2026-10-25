@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use slot_ftrace::{self as ft, ev};
 use slot_input::{Action, Gestures, Millis, RawEvent};
 use slot_retro::Rumble;
 use slot_ui::FfState;
@@ -90,6 +91,7 @@ impl Session {
             return;
         }
         self.motor = strength;
+        ft::instant(ev::RUMBLE_SET, i64::from(strength));
         self.app.set_rumble(strength);
     }
 
@@ -123,7 +125,10 @@ impl Session {
     pub fn step_emulator(&self, present: Duration, timeout: Duration) -> bool {
         self.emu.as_ref().is_some_and(|emu| {
             emu.tick(present);
-            emu.wait_frame(timeout)
+            ft::begin(ev::PRESENT_WAIT_FRAME, 0);
+            let done = emu.wait_frame(timeout);
+            ft::end(ev::PRESENT_WAIT_FRAME, i64::from(done));
+            done
         })
     }
 
@@ -246,7 +251,9 @@ impl Session {
     }
 
     pub fn update(&mut self, dt: f32) {
+        let app_update = ft::span(ev::SESSION_APP_UPDATE, 0);
         self.bridge_link(|app| app.update(dt));
+        drop(app_update);
         if let Some(emu) = &self.emu {
             emu.set_volume(self.app.output_volume());
         }

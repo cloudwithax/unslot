@@ -1,6 +1,9 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::SyncSender;
 use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
+
+use slot_ftrace::{self as ft, ev};
 
 use crate::drc::drc_target;
 
@@ -9,6 +12,27 @@ pub fn ring_capacity(sample_rate: u32) -> usize {
 }
 
 const MAX_WAIT: Duration = Duration::from_millis(50);
+
+/// Where the sound goes to a TV as well, while casting: a copy of each stretch the output plays.
+static CAST: Mutex<Option<SyncSender<Vec<i16>>>> = Mutex::new(None);
+static CASTING: AtomicBool = AtomicBool::new(false);
+
+/// Starts sending what the output plays to `tap`, or stops with None.
+pub fn set_cast_tap(tap: Option<SyncSender<Vec<i16>>>) {
+    let mut t = CAST.lock().unwrap_or_else(|e| e.into_inner());
+    CASTING.store(tap.is_some(), Ordering::Relaxed);
+    *t = tap;
+}
+
+/// A copy of `played` for the cast, dropped when its encoder is behind.
+fn cast_tap(played: &[i16]) {
+    if !CASTING.load(Ordering::Relaxed) {
+        return;
+    }
+    if let Some(tap) = &*CAST.lock().unwrap_or_else(|e| e.into_inner()) {
+        let _ = tap.try_send(played.to_vec());
+    }
+}
 
 struct Inner {
     buf: Vec<i16>,
@@ -84,7 +108,9 @@ impl Ring {
         self.queued.store(i.len, Ordering::Relaxed);
         drop(i);
         if lost > 0 && !self.muted() && self.capacity_frames() > 0 {
-            self.overruns.fetch_add(lost as u64, Ordering::Relaxed);
+            let total = self.overruns.fetch_add(lost as u64, Ordering::Relaxed) + lost as u64;
+            ft::instant(ev::RING_OVERRUN, lost as i64);
+            ft::counter(ev::RING_OVERRUNS, total as i64);
         }
     }
 
@@ -104,15 +130,20 @@ impl Ring {
             }
             let Some(left) = deadline.checked_duration_since(Instant::now()) else {
                 self.consuming.store(false, Ordering::Relaxed);
-                self.overruns
-                    .fetch_add(rest.len() as u64, Ordering::Relaxed);
+                let lost = rest.len() as u64;
+                let total = self.overruns.fetch_add(lost, Ordering::Relaxed) + lost;
+                ft::instant(ev::RING_PUSH_TIMEOUT, lost as i64);
+                ft::instant(ev::RING_OVERRUN, lost as i64);
+                ft::counter(ev::RING_OVERRUNS, total as i64);
                 return;
             };
+            ft::begin(ev::RING_PUSH_WAIT, (rest.len() / 2) as i64);
             i = self
                 .room
                 .wait_timeout(i, left)
                 .map(|(guard, _)| guard)
                 .unwrap_or_else(|e| e.into_inner().0);
+            ft::end(ev::RING_PUSH_WAIT, (i.len / 2) as i64);
         }
     }
 
@@ -147,15 +178,24 @@ impl Ring {
         }
         out[n..].fill(0);
         self.queued.store(i.len, Ordering::Relaxed);
+        ft::counter(ev::RING_QUEUED, (i.len / 2) as i64);
+        ft::counter(ev::RING_HOLDING, i64::from(holding));
         drop(i);
         self.consuming.store(true, Ordering::Relaxed);
         self.room.notify_all();
         let short = out.len() - n;
         if short > 0 && !self.muted() && !self.idle.load(Ordering::Relaxed) && cap > 0 {
-            self.underruns.fetch_add(short as u64, Ordering::Relaxed);
+            let total = self.underruns.fetch_add(short as u64, Ordering::Relaxed) + short as u64;
+            ft::instant(ev::RING_UNDERRUN, short as i64);
+            ft::counter(ev::RING_UNDERRUNS, total as i64);
             self.priming.store(true, Ordering::Relaxed);
         }
         if self.muted() {
+            out.fill(0);
+        }
+        cast_tap(out);
+        // The TV plays it instead.
+        if CASTING.load(Ordering::Relaxed) {
             out.fill(0);
         }
     }

@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.7.0
+
+- Cast the screen to a Chromecast or a Google TV over Wi-Fi, under Network → Cast. Pick a TV from the list and it shows what the handheld does, games and menus alike, with the sound; the handheld's speaker and headphones go quiet until the cast stops. A on that TV in the list again stops it, and Y looks for TVs again. The picture keeps its shape, with black bars at the sides. It runs at up to 60 fps, and heavier games, such as Dreamcast ones, at about 35.
+
 ## v2.6.1
 
 - Bluetooth LE controllers pair, the Xbox Wireless Controller among them. The radio was powered on before bluetoothd was running, and BaseOS's kernel only turns on LE security when bluetoothd powers it, so an LE pad linked up but never paired. Turning Bluetooth on now hands the power to bluetoothd.

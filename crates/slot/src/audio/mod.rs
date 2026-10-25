@@ -13,7 +13,7 @@ pub use alsa::{set_hdmi, set_route, AlsaSink};
 #[cfg(feature = "host")]
 pub use host::HostAudio;
 pub use pacer::Pacer;
-pub use ring::{ring_capacity, Ring};
+pub use ring::{ring_capacity, set_cast_tap, Ring};
 pub use sfx::Sfx;
 pub use silence::Silence;
 pub use sink::{AudioError, AudioSink};

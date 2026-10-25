@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use slot_ftrace::{self as ft, ev};
 use slot_gfx::{Compositor, Draw, Layout, ScreenEffect, TexId, OUT_H, OUT_W};
 
 const PAPER: &[u8] = include_bytes!("../assets/paper.png");
@@ -235,6 +236,9 @@ impl FpsCounter {
         let elapsed = now.duration_since(self.since);
         if elapsed >= Duration::from_millis(500) {
             let rate = frames.saturating_sub(self.frames) as f64 / elapsed.as_secs_f64();
+            ft::counter(ev::UI_FPS_MILLI, (rate * 1000.0).round() as i64);
+            ft::counter(ev::UI_FPS_FRAMES, frames.saturating_sub(self.frames) as i64);
+            ft::counter(ev::UI_FPS_WINDOW_NS, elapsed.as_nanos() as i64);
             let label = format!("{rate:.0} FPS");
             if label != self.label {
                 let face = word_ink(&label, [255, 255, 255]);
@@ -597,7 +601,10 @@ impl Frontend {
     pub fn render(&mut self, compositor: &mut Compositor, window: (u32, u32)) {
         self.session.app_mut().set_panel(window);
         compositor.fit(window);
+        let composed = ft::span(ev::RENDER_COMPOSE, 0);
         self.compose(compositor);
+        drop(composed);
+        let _s = ft::span(ev::GFX_END_FRAME, 0);
         compositor.end_frame(window);
     }
 
@@ -653,15 +660,21 @@ impl Frontend {
         compositor.set_overlay_slide(self.session.app().overlay_slide());
         compositor.set_game_source_rect(self.session.app().source_rect());
         self.grab_link_shot(compositor);
+        let begun = ft::span(ev::GFX_BEGIN_FRAME, 0);
         compositor.begin_frame(self.session.app().layout());
+        drop(begun);
         if self.draw_rebuild(compositor) {
             return;
         }
         if let Some(frame) = self.session.frame() {
+            ft::instant(ev::RENDER_FRAME, frame.seq as i64);
+            let _s = ft::span(ev::GFX_UPLOAD_GAME, frame.seq as i64);
             compositor.upload_game(&frame, (frame.shape.width, frame.shape.height));
             self.game_aspect = frame.shape.aspect;
             self.game_rotation = frame.shape.rotation;
             crate::latency::taken();
+        } else if self.session.game_visible() {
+            ft::instant(ev::RENDER_REPEAT, 0);
         }
         if self.game_aspect.is_some() {
             // A frame at its own size is all picture, so none of the Game Boy canvas rules apply.
@@ -674,6 +687,7 @@ impl Frontend {
         let aspect = self.game_aspect.map(|a| if turned { 1.0 / a } else { a });
         compositor.set_game_rotation(self.game_rotation);
         compositor.set_game_aspect(aspect.filter(|_| !stretched));
+        let synced = ft::span(ev::RENDER_SYNC, 0);
         self.cart_faces.sync(self.session.app_mut(), compositor);
         sync_clock(self.session.app_mut(), compositor, &mut self.clocks);
         sync_about(self.session.app_mut(), compositor, &mut self.about);
@@ -739,8 +753,11 @@ impl Frontend {
             },
             &mut self.switcher,
         );
+        drop(synced);
         self.draws.clear();
+        let app_draw = ft::span(ev::RENDER_APP_DRAW, 0);
         self.session.app().draw(&mut self.draws);
+        drop(app_draw);
         if self.session.game_visible()
             && self.session.app().playing_platform() == Console::Dreamcast
         {
@@ -753,6 +770,7 @@ impl Frontend {
         } else {
             self.fps.active = false;
         }
+        let _s = ft::span(ev::GFX_DRAW_LIST, self.draws.len() as i64);
         compositor.draw_list(&self.draws);
     }
 
@@ -840,16 +858,21 @@ impl Frontend {
 
     pub fn advance(&mut self, input: &mut dyn InputSource) {
         let now = self.now();
+        let polled = ft::span(ev::INPUT_POLL, 0);
         let events = input.poll(now);
+        drop(polled);
         if self.rebuild.is_some() {
             return;
         }
+        let fed = ft::span(ev::INPUT_FEED, events.len() as i64);
         self.session
             .set_menu_dpad_display(input.menu_dpad_display());
         self.session.set_sticks(input.sticks());
         self.session.feed(events, now);
+        drop(fed);
         let dt = self.last.elapsed().as_secs_f32();
         self.last = Instant::now();
+        let _update = ft::span(ev::SESSION_UPDATE, 0);
         self.session.update(dt);
     }
 

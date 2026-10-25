@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
 
 use libloading::Library;
+use slot_ftrace::{self as ft, ev};
 
 use crate::core::{
     AvInfo, ButtonMask, CoreError, CoreOption, RetroCore, SharedFrame, Sticks, GBA_H, GBA_W,
@@ -606,8 +607,13 @@ unsafe extern "C" fn video_refresh(
     pitch: usize,
 ) {
     if data.is_null() || width == 0 || height == 0 {
+        ft::instant(ev::RETRO_VIDEO_EMPTY, 0);
         return;
     }
+    let _s = ft::span(
+        ev::RETRO_VIDEO_REFRESH,
+        i64::from(width) << 32 | i64::from(height),
+    );
     if data as usize == FRAME_IN_FRAMEBUFFER {
         with_host(|h| {
             let Some(hw) = &mut h.hw else {
@@ -704,15 +710,19 @@ static NO_AUDIO_WAIT: AtomicBool = AtomicBool::new(false);
 const THREAD_AUDIO_AHEAD: usize = 8192;
 
 unsafe extern "C" fn audio_batch(data: *const i16, frames: usize) -> usize {
+    ft::instant(ev::RETRO_AUDIO_BATCH, frames as i64);
     if !data.is_null() {
         let samples = std::slice::from_raw_parts(data, frames * 2);
         if with_host(|h| h.audio.extend_from_slice(samples)).is_none() {
             let mut audio = THREAD_AUDIO.lock().unwrap_or_else(|e| e.into_inner());
+            ft::counter(ev::RETRO_AUDIO_BACKLOG, (audio.len() / 2) as i64);
             while audio.len() > THREAD_AUDIO_AHEAD && !NO_AUDIO_WAIT.load(Ordering::Acquire) {
+                ft::begin(ev::RETRO_AUDIO_WAIT, (audio.len() / 2) as i64);
                 let (a, wait) = THREAD_AUDIO_TAKEN
                     .wait_timeout(audio, std::time::Duration::from_millis(100))
                     .unwrap_or_else(|e| e.into_inner());
                 audio = a;
+                ft::end(ev::RETRO_AUDIO_WAIT, i64::from(wait.timed_out()));
                 if wait.timed_out() {
                     break;
                 }
@@ -724,11 +734,14 @@ unsafe extern "C" fn audio_batch(data: *const i16, frames: usize) -> usize {
 }
 
 fn take_thread_audio(into: &mut Vec<i16>) {
+    ft::instant(ev::RETRO_AUDIO_TAKE, (into.len() / 2) as i64);
     into.append(&mut THREAD_AUDIO.lock().unwrap_or_else(|e| e.into_inner()));
     THREAD_AUDIO_TAKEN.notify_all();
 }
 
-unsafe extern "C" fn input_poll() {}
+unsafe extern "C" fn input_poll() {
+    ft::instant(ev::RETRO_INPUT_POLL, 0);
+}
 
 /// The pads as last handed to the core, for a core that reads them from a thread of its own, where
 /// no host is bound: Flycast Xtreme does, and found every button up.
@@ -1092,6 +1105,7 @@ impl RetroCore for LibretroCore {
         self.host.inputs = [p1.0, p2.0];
         *PADS.lock().unwrap_or_else(|e| e.into_inner()) = (self.host.inputs, self.host.sticks);
         let _a = Active::bind(&mut self.host);
+        let _s = ft::span(ev::RETRO_RUN, 0);
         unsafe { (self.api.run)() };
     }
 

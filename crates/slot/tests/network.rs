@@ -814,3 +814,35 @@ fn the_cores_page_downloads_a_core_and_removes_it() {
     press(&mut a, Btn::B);
     assert_eq!(a.quick_menu(), Some(QuickRow::Cores));
 }
+
+#[test]
+fn cast_is_offered_with_the_wifi_on_and_casts_to_the_tv_picked() {
+    let (_d, mut a) = on_network_list();
+    press(&mut a, Btn::B);
+    assert_eq!(a.quick_menu(), Some(QuickRow::WifiNetworks));
+    for _ in 0..QuickRow::NETWORK.len() {
+        if a.quick_menu() == Some(QuickRow::Cast) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    assert_eq!(a.quick_menu(), Some(QuickRow::Cast), "no Cast row");
+    press(&mut a, Btn::A);
+    assert!(matches!(a.phase(), Phase::Casting { .. }), "{:?}", a.phase());
+    until(&mut a, |a| !list(a).rows.is_empty());
+    assert_eq!(list(&a).rows[0].label, "Living Room TV");
+    assert_eq!(action(&a).as_deref(), Some("Cast"));
+    press(&mut a, Btn::A);
+    until(&mut a, |a| list(a).status == "Casting to Living Room TV");
+    assert_eq!(list(&a).rows[0].detail, "Casting");
+    assert_eq!(action(&a).as_deref(), Some("Stop"));
+    press(&mut a, Btn::A);
+    until(&mut a, |a| list(a).status == "Pick a TV to cast the screen to");
+}
+
+#[test]
+fn cast_is_hidden_with_the_wifi_off() {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    let (a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    assert!(a.hidden_rows().contains(&QuickRow::Cast));
+}

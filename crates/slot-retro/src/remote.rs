@@ -21,6 +21,8 @@ use std::path::Path;
 use std::process::Child;
 use std::time::{Duration, Instant};
 
+use slot_ftrace::{self as ft, ev};
+
 use crate::core::{AvInfo, ButtonMask, CoreError, CoreOption, RetroCore, Sticks};
 use crate::ffi::RUMBLE_STRONG;
 use crate::rumble::Rumble;
@@ -353,15 +355,33 @@ pub fn serve(mut core: Box<dyn RetroCore>, mut stream: UnixStream) {
     let mut buf = Vec::new();
     // Kept across calls, so a frame's picture isn't copied into a newly grown buffer each time.
     let mut out = Out::default();
-    while receive(&mut stream, &mut buf).is_ok() {
+    loop {
+        ft::begin(ev::HOST_WAIT_REQUEST, 0);
+        let got = receive(&mut stream, &mut buf);
+        ft::end(
+            ev::HOST_WAIT_REQUEST,
+            buf.first().map_or(-1, |&t| i64::from(t)),
+        );
+        if got.is_err() {
+            break;
+        }
         out.0.clear();
         let mut video = false;
-        if let Err(e) = answer(core.as_mut(), &buf, &mut out, &mut video, state.as_mut()) {
+        let call = buf.first().map_or(-1, |&t| i64::from(t));
+        ft::begin(ev::HOST_ANSWER, call);
+        let answered = answer(core.as_mut(), &buf, &mut out, &mut video, state.as_mut());
+        ft::end(ev::HOST_ANSWER, call);
+        if let Err(e) = answered {
             eprintln!("slot: core host: {e}");
             return;
         }
+        ft::begin(ev::HOST_PUT_STATE, call);
         let fds = put_state(core.as_mut(), &mut out, video, shm.as_mut());
-        if out.send_with(&mut stream, &fds).is_err() {
+        ft::end(ev::HOST_PUT_STATE, out.0.len() as i64);
+        ft::begin(ev::HOST_SEND, out.0.len() as i64);
+        let sent = out.send_with(&mut stream, &fds);
+        ft::end(ev::HOST_SEND, i64::from(sent.is_ok()));
+        if sent.is_err() {
             return;
         }
     }
@@ -611,6 +631,7 @@ impl RemoteCore {
     fn collect(&self, stream: &mut UnixStream) -> io::Result<()> {
         if self.running.replace(false) {
             let mut reply = Vec::new();
+            let _s = ft::span(ev::REMOTE_COLLECT, 0);
             receive_with(stream, &mut reply, &mut self.arrived.borrow_mut())?;
             *self.held.borrow_mut() = Some(reply);
         }
@@ -621,6 +642,7 @@ impl RemoteCore {
     fn settle(&mut self) {
         self.talk(|stream| self.collect(stream));
         if let Some(reply) = self.held.get_mut().take() {
+            let _s = ft::span(ev::REMOTE_TAKE_STATE, reply.len() as i64);
             let mut i = In(&reply);
             let _ = get_result(&mut i).and_then(|_| self.take_state(&mut i));
         }
@@ -629,6 +651,7 @@ impl RemoteCore {
     /// Sends `msg` and reads the reply into `buf`, or says why not, the first time.
     fn call(&self, msg: &Out) -> Option<std::cell::RefMut<'_, Vec<u8>>> {
         let mut buf = self.buf.borrow_mut();
+        let _s = ft::span(ev::REMOTE_CALL, msg.0.first().map_or(-1, |&t| i64::from(t)));
         self.talk(|stream| {
             self.collect(stream)?;
             msg.send(stream)?;
@@ -644,6 +667,7 @@ impl RemoteCore {
         // Taken rather than cloned, and put back after, so its room is used again.
         let reply = std::mem::take(&mut *self.call(msg).ok_or_else(gone)?);
         let mut i = In(&reply);
+        let _s = ft::span(ev::REMOTE_TAKE_STATE, reply.len() as i64);
         let r = get_result(&mut i).and_then(|r| self.take_state(&mut i).map(|()| r));
         *self.buf.borrow_mut() = reply;
         r.unwrap_or_else(|e| Err(CoreError::Io(e)))
@@ -727,7 +751,9 @@ impl RemoteCore {
             return;
         }
         // The frame before's answer is taken up, and this one is left to come while slot shows it.
+        let _s = ft::span(ev::REMOTE_RUN_OVERLAPPED, 0);
         self.settle();
+        let _send = ft::span(ev::REMOTE_SEND, msg.0.len() as i64);
         if self.talk(|stream| msg.send(stream)) {
             self.running.set(true);
         }

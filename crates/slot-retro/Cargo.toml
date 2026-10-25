@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+slot-ftrace = { path = "../slot-ftrace" }
 libc.workspace = true
 libloading.workspace = true
 

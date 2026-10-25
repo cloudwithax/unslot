@@ -50,6 +50,8 @@ pub enum QuickRow {
     WifiNetworks,
     Bluetooth,
     BtDevices,
+    /// The screen mirrored to a Chromecast.
+    Cast,
     /// SSH, file sharing, Tailscale and the VPN.
     Services,
     /// unslot's and BaseOS's updates.
@@ -74,7 +76,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 46] = [
+const GENERIC: [QuickRow; 47] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -121,6 +123,7 @@ const GENERIC: [QuickRow; 46] = [
     QuickRow::ShutDown,
     QuickRow::Reload,
     QuickRow::Achievements,
+    QuickRow::Cast,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -220,11 +223,12 @@ impl QuickRow {
 
     pub const POWER: [QuickRow; 3] = [QuickRow::Restart, QuickRow::ShutDown, QuickRow::Reload];
 
-    pub const NETWORK: [QuickRow; 9] = [
+    pub const NETWORK: [QuickRow; 10] = [
         QuickRow::Wifi,
         QuickRow::WifiNetworks,
         QuickRow::Bluetooth,
         QuickRow::BtDevices,
+        QuickRow::Cast,
         QuickRow::Services,
         QuickRow::Updates,
         QuickRow::Cores,
@@ -350,6 +354,7 @@ impl QuickRow {
             | QuickRow::WifiNetworks
             | QuickRow::Bluetooth
             | QuickRow::BtDevices
+            | QuickRow::Cast
             | QuickRow::Services
             | QuickRow::Updates
             | QuickRow::Cores
@@ -462,6 +467,7 @@ impl QuickRow {
             QuickRow::WifiNetworks => "Networks",
             QuickRow::Bluetooth => "Bluetooth",
             QuickRow::BtDevices => "Devices",
+            QuickRow::Cast => "Cast",
             QuickRow::Services => "Services",
             QuickRow::Updates => "Updates",
             QuickRow::Cores => "Cores",
@@ -492,6 +498,7 @@ impl QuickRow {
                 | QuickRow::Network
                 | QuickRow::WifiNetworks
                 | QuickRow::BtDevices
+                | QuickRow::Cast
                 | QuickRow::Services
                 | QuickRow::Updates
                 | QuickRow::Cores

@@ -39,6 +39,12 @@ pub struct Compositor {
     game_bezel: Option<TexId>,
     sp_frame: bool,
     turn: Option<Turn>,
+    /// Cached buffers the canvas is read back through for casting, made the first time a frame
+    /// is cast; `cast_ion_tried` once that has been tried.
+    #[cfg(target_os = "linux")]
+    cast_ion: Option<crate::ion::IonFrames>,
+    #[cfg(target_os = "linux")]
+    cast_ion_tried: bool,
 }
 
 impl Compositor {
@@ -107,6 +113,10 @@ impl Compositor {
                 game_bezel: None,
                 sp_frame: true,
                 turn: None,
+                #[cfg(target_os = "linux")]
+                cast_ion: None,
+                #[cfg(target_os = "linux")]
+                cast_ion_tried: false,
             })
         }
     }
@@ -397,6 +407,7 @@ impl Compositor {
     }
 
     pub fn end_frame(&mut self, window: (u32, u32)) {
+        self.cast();
         let Some(mut turn) = self.turn.take() else {
             self.output(window, 0);
             return;
@@ -492,6 +503,102 @@ impl Compositor {
 }
 
 impl Compositor {
+    /// Leaves the finished canvas for the cast encoder, when it wants a frame now.
+    fn cast(&mut self) {
+        let Some(tap) = crate::cast_tap::frame_tap() else {
+            // Done casting: the buffers go back, made again by the next cast.
+            #[cfg(target_os = "linux")]
+            if self.cast_ion.take().is_some() {
+                self.cast_ion_tried = false;
+            }
+            return;
+        };
+        let now = std::time::Instant::now();
+        if !tap.due(now) {
+            return;
+        }
+        let (w, h) = self.size;
+        #[cfg(target_os = "linux")]
+        if self.lend_canvas(&tap, now) {
+            return;
+        }
+        tap.put(w, h, now, |out| self.read_canvas_xrgb(out));
+    }
+
+    /// The cached buffers the canvas is read back through, made the first time they are asked
+    /// for, where the device has them.
+    #[cfg(target_os = "linux")]
+    fn cast_ion(&mut self) -> Option<&mut crate::ion::IonFrames> {
+        if !self.cast_ion_tried {
+            self.cast_ion_tried = true;
+            let version = unsafe { gl::GetString(gl::VERSION) };
+            if !version.is_null() {
+                let v = unsafe { std::ffi::CStr::from_ptr(version as *const std::ffi::c_char) };
+                eprintln!("slot: cast: reading back {}", v.to_string_lossy());
+            }
+            match crate::ion::IonFrames::for_current() {
+                Ok(ion) => self.cast_ion = Some(ion),
+                Err(e) => eprintln!("slot: cast: no cached frames: {e}"),
+            }
+        }
+        self.cast_ion.as_mut()
+    }
+
+    /// Has the GPU copy the canvas out for the encoder to wait on and read itself, so this
+    /// thread waits on neither. True when the frame is dealt with so, even when no buffer is free
+    /// for it and it is passed over; false when frames must be read back here.
+    #[cfg(target_os = "linux")]
+    fn lend_canvas(&mut self, tap: &crate::cast_tap::FrameTap, now: std::time::Instant) -> bool {
+        let ((w, h), fbo) = (self.size, self.fbo);
+        let Some(ion) = self.cast_ion().filter(|ion| ion.can_lend()) else {
+            return false;
+        };
+        match ion.lend(fbo, w, h, true) {
+            Ok(Some(lent)) => tap.lend(w, h, now, Box::new(lent), now.elapsed()),
+            Ok(None) => {}
+            Err(()) => self.cast_ion = None,
+        }
+        true
+    }
+
+    /// The canvas into `out` as XRGB8888, top row first: through cached buffers where the
+    /// device has them, which keeps the CPU from reading uncached memory, else straight from the
+    /// framebuffer.
+    fn read_canvas_xrgb(&mut self, out: &mut [u8]) -> bool {
+        let ((w, h), fbo) = (self.size, self.fbo);
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(ion) = self.cast_ion() {
+                if ion.read(fbo, w, h, true, out) {
+                    return true;
+                }
+                self.cast_ion = None;
+            }
+        }
+        let stride = w as usize * 4;
+        let mut rgba = vec![0u8; stride * h as usize];
+        unsafe {
+            gl::BindFramebuffer(gl::FRAMEBUFFER, self.fbo);
+            gl::PixelStorei(gl::PACK_ALIGNMENT, 1);
+            gl::ReadPixels(
+                0,
+                0,
+                w as i32,
+                h as i32,
+                gl::RGBA,
+                gl::UNSIGNED_BYTE,
+                rgba.as_mut_ptr() as *mut std::ffi::c_void,
+            );
+        }
+        let rows = rgba.chunks_exact(stride).rev();
+        for (to, from) in out.chunks_exact_mut(stride).zip(rows) {
+            for (o, i) in to.chunks_exact_mut(4).zip(from.chunks_exact(4)) {
+                o.copy_from_slice(&[i[2], i[1], i[0], 0xff]);
+            }
+        }
+        true
+    }
+
     fn in_game_rect(&mut self, draw: impl FnOnce(&mut Self)) {
         if !self.native() {
             return draw(self);
