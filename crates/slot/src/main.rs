@@ -47,6 +47,8 @@ fn main() {
         _ => {}
     }
     slot::crash::install();
+    // Opens the trace, if SLOT_FTRACE asks for one, before a core host is spawned to join it.
+    slot_ftrace::enabled();
 
     #[cfg(feature = "host")]
     host_app::run();

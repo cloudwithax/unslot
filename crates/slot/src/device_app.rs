@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use slot::frontend::Frontend;
 use slot::input::DeviceInput;
 use slot::panel_turn::{panel_turn, PanelTurn};
+use slot_ftrace::{self as ft, ev};
 use slot_gfx::hdmi::{self, CableWatch};
 use slot_gfx::{Compositor, FbdevSurface, Surface};
 use slot_power::{trace_first_frame, DevicePlatform};
@@ -53,6 +54,10 @@ impl Pacer {
         if let Some(last) = self.last_return {
             let seen = now - last;
             missed = seen > self.period.mul_f64(1.5);
+            ft::counter(ev::PRESENT_SEEN_NS, seen.as_nanos() as i64);
+            if missed {
+                ft::instant(ev::PRESENT_MISSED, seen.as_nanos() as i64);
+            }
             if blocked && seen > Duration::from_millis(12) && seen < Duration::from_millis(22) {
                 self.period = self.period.mul_f64(0.95) + seen.mul_f64(0.05);
             }
@@ -60,6 +65,8 @@ impl Pacer {
         self.works[self.next] = work;
         self.next = (self.next + 1) % WORK_WINDOW;
         self.work = self.works.iter().copied().max().unwrap_or(work);
+        ft::counter(ev::PRESENT_PERIOD_NS, self.period.as_nanos() as i64);
+        ft::counter(ev::PRESENT_WORK_MAX_NS, self.work.as_nanos() as i64);
         self.last_return = Some(now);
         missed
     }
@@ -169,10 +176,18 @@ pub fn run() {
     frontend.drive_emulator();
     let mut pacer = Pacer::new();
     let (mut frames, mut missed, mut early) = (0u32, 0u32, 0u32);
+    let mut present_no = 0i64;
     loop {
-        pacer.wait();
+        present_no += 1;
+        let _iter = ft::span(ev::PRESENT_ITER, present_no);
+        {
+            let _s = ft::span(ev::PRESENT_PACER_WAIT, pacer.period.as_nanos() as i64);
+            pacer.wait();
+        }
         let began = Instant::now();
+        let advance = ft::span(ev::PRESENT_ADVANCE, 0);
         frontend.advance(&mut input);
+        drop(advance);
         if frontend.restarting() {
             frontend.restart();
         }
@@ -191,15 +206,25 @@ pub fn run() {
             frontend.switch_display();
             return;
         }
-        frontend.step_emulator(pacer.period, STEP_TIMEOUT);
-        frontend.render(&mut compositor, window);
+        {
+            let _s = ft::span(ev::PRESENT_STEP, 0);
+            frontend.step_emulator(pacer.period, STEP_TIMEOUT);
+        }
+        {
+            let _s = ft::span(ev::PRESENT_RENDER, 0);
+            frontend.render(&mut compositor, window);
+        }
         let swap = Instant::now();
         let work = swap - began;
-        if let Err(e) = surface.swap() {
+        ft::begin(ev::PRESENT_SWAP, 0);
+        let swapped = surface.swap();
+        let swap_took = swap.elapsed();
+        ft::end(ev::PRESENT_SWAP, swap_took.as_nanos() as i64);
+        ft::counter(ev::PRESENT_WORK_NS, work.as_nanos() as i64);
+        if let Err(e) = swapped {
             eprintln!("slot: {e}");
             return;
         }
-        let swap_took = swap.elapsed();
         slot::latency::swapped(swap_took.as_secs_f64() * 1000.0);
         let dropped = pacer.swapped(work, swap_took > Duration::from_millis(1));
         if slot::latency::tracing() {
@@ -222,6 +247,7 @@ pub fn run() {
             trace_first_frame();
         }
         if let Some(left) = MIN_FRAME.checked_sub(began.elapsed()) {
+            let _s = ft::span(ev::PRESENT_MIN_SLEEP, left.as_nanos() as i64);
             std::thread::sleep(left);
         }
     }

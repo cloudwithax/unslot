@@ -5,6 +5,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use slot_ftrace::{self as ft, ev};
+
 use crate::cable::{self, Cable};
 use crate::cheevos::{Start, Tracker};
 use slot_retro::{
@@ -91,6 +93,26 @@ enum Cmd {
     SetDisk(u32),
     Refresh,
     Cheevos(Start),
+}
+
+impl Cmd {
+    /// Which command this is, for the trace.
+    fn kind(&self) -> i64 {
+        match self {
+            Cmd::Load(_) => 0,
+            Cmd::Save(_) => 1,
+            Cmd::Sav(_) => 2,
+            Cmd::Thumb(_) => 3,
+            Cmd::BeginLink(..) => 4,
+            Cmd::EndLink => 5,
+            Cmd::BeginCable(..) => 6,
+            Cmd::SetOption(..) => 7,
+            Cmd::Options(_) => 8,
+            Cmd::SetDisk(_) => 9,
+            Cmd::Refresh => 10,
+            Cmd::Cheevos(_) => 11,
+        }
+    }
 }
 
 struct Shared {
@@ -303,6 +325,8 @@ impl EmuHandle {
             .store(present.as_nanos() as u64, Ordering::Relaxed);
         let mut clock = self.shared.clock.lock().unwrap_or_else(|e| e.into_inner());
         clock.tick += 1;
+        ft::instant(ev::TICK, clock.tick as i64);
+        ft::counter(ev::TICK_PRESENT_NS, present.as_nanos() as i64);
         self.shared.clocked.notify_all();
     }
 
@@ -636,7 +660,10 @@ impl Worker {
         let mut ff = (0u32, 0u32, Duration::ZERO, Instant::now());
         let mut runahead = RunAhead::default();
         let mut tracker: Option<Tracker> = None;
+        let mut iteration = 0i64;
         while !self.shared.stop.load(Ordering::Relaxed) {
+            iteration += 1;
+            let _iter = ft::span(ev::EMU_ITER, iteration);
             if core.gone() {
                 eprintln!("slot: emu: the core is gone");
                 self.shared
@@ -646,7 +673,10 @@ impl Worker {
             }
             for cmd in self.cmds.try_iter() {
                 match cmd {
-                    Cmd::Cheevos(start) => tracker = Tracker::start(start, &rom),
+                    Cmd::Cheevos(start) => {
+                        let _s = ft::span(ev::EMU_CHEEVOS_START, 0);
+                        tracker = Tracker::start(start, &rom)
+                    }
                     Cmd::Load(_) => {
                         self.apply(cmd, core.as_mut(), &mut transport, &mut cable, &link);
                         if let Some(t) = &tracker {
@@ -657,6 +687,7 @@ impl Worker {
                 }
             }
             if let Some(t) = &tracker {
+                let _s = ft::span(ev::EMU_TRACKER_TAKE, 0);
                 let notices = t.take();
                 if !notices.is_empty() {
                     self.shared
@@ -671,6 +702,7 @@ impl Worker {
                 Ordering::Relaxed,
             );
 
+            let link_span = ft::span(ev::EMU_LINK, 0);
             if let Some(t) = transport.as_mut() {
                 match cable.as_mut() {
                     Some(c) => {
@@ -708,6 +740,7 @@ impl Worker {
             }
             core.pump_link();
             flush_outbound(&mut transport, &link);
+            drop(link_span);
 
             let speed = self.speed();
             self.shared.observed.store(speed as u8, Ordering::Release);
@@ -727,6 +760,8 @@ impl Worker {
                 && speed == Speed::Normal
                 && !rewinding
                 && transport.is_none();
+            ft::counter(ev::EMU_SPEED, speed as i64);
+            ft::counter(ev::EMU_LOCK, i64::from(lock));
             if lock != self.shared.locked.load(Ordering::Relaxed) {
                 self.shared.locked.store(lock, Ordering::Release);
                 deadline = Instant::now();
@@ -741,6 +776,7 @@ impl Worker {
                     0
                 };
             let input = ButtonMask(self.shared.input.load(Ordering::Relaxed));
+            ft::instant(ev::EMU_INPUT, i64::from(input.0));
             crate::latency::emu_frame(input.0);
             core.set_sticks(0, unpack_sticks(self.shared.sticks.load(Ordering::Relaxed)));
             let mut span = 1u32;
@@ -751,6 +787,7 @@ impl Worker {
                 Speed::Fast => self.shared.fast_steps.load(Ordering::Relaxed),
             };
             if rewinding {
+                let _s = ft::span(ev::EMU_REWIND, 0);
                 if let Some(state) = rewind.pop() {
                     if let Err(e) = core.unserialize(&state) {
                         eprintln!("slot: rewind: {e}");
@@ -786,13 +823,16 @@ impl Worker {
                     };
                     turbo_frame = turbo_frame.wrapping_add(1);
                     core.set_frame_skip(!last);
+                    ft::instant(ev::EMU_SKIP, i64::from(!last));
                     let frame_began = Instant::now();
+                    ft::instant(ev::EMU_FRAME_BEGAN, i64::from(ran));
                     match cable.as_mut() {
                         Some(c) => {
                             if let Some(t) = transport.as_deref_mut() {
                                 t.send(NETPACKET_RELIABLE, &c.sample(input));
                             }
                             let waited = Instant::now();
+                            let cable_wait_span = ft::span(ev::EMU_CABLE_WAIT, 0);
                             let ready = loop {
                                 if let Some(pair) = c.ready() {
                                     break Some(pair);
@@ -807,9 +847,11 @@ impl Worker {
                                 }
                                 std::thread::sleep(Duration::from_micros(250));
                             };
+                            drop(cable_wait_span);
                             cable_wait += waited.elapsed();
                             match ready {
                                 Some((p0, p1)) => {
+                                    let _s = ft::span(ev::EMU_RUN_LINKED, 0);
                                     core.run_frame_linked(p0, p1);
                                     c.advance();
                                     self.shared.linked.fetch_add(1, Ordering::Relaxed);
@@ -830,24 +872,36 @@ impl Worker {
                                 0 if speed == Speed::Normal => {
                                     // One frame a present: the core can go on with it while
                                     // this one shows.
+                                    let _s = ft::span(ev::EMU_RUN_OVERLAPPED, 0);
                                     core.run_frame_overlapped(input)
                                 }
-                                0 => core.run_frame(input),
-                                _ => match runahead.run(core.as_mut(), input, ahead) {
-                                    Ok(()) => shown = true,
-                                    Err(e) => {
-                                        eprintln!("slot: run-ahead: {e}, off for this game");
-                                        runahead.refused = true;
+                                0 => {
+                                    let _s = ft::span(ev::EMU_RUN_FRAME, 0);
+                                    core.run_frame(input)
+                                }
+                                _ => {
+                                    let ran_ahead = {
+                                        let _s = ft::span(ev::EMU_RUN_AHEAD, i64::from(ahead));
+                                        runahead.run(core.as_mut(), input, ahead)
+                                    };
+                                    match ran_ahead {
+                                        Ok(()) => shown = true,
+                                        Err(e) => {
+                                            eprintln!("slot: run-ahead: {e}, off for this game");
+                                            runahead.refused = true;
+                                        }
                                     }
-                                },
+                                }
                             }
                             // Run-ahead ends back on the frame the game is really at.
                             if let Some(t) = tracker.as_mut() {
+                                let _s = ft::span(ev::EMU_TRACKER_FRAME, 0);
                                 t.frame(core.as_mut());
                             }
                         }
                     }
                     let took = frame_began.elapsed();
+                    ft::counter(ev::EMU_FRAME_NS, took.as_nanos() as i64);
                     if last {
                         drawn = took;
                     } else {
@@ -858,8 +912,17 @@ impl Worker {
                     }
                 }
                 let core_time = began.elapsed();
+                ft::counter(ev::EMU_CORE_NS, core_time.as_nanos() as i64);
+                ft::counter(ev::EMU_RAN, i64::from(ran));
+                ft::counter(ev::EMU_SPAN, i64::from(span));
                 if ahead == 0 {
+                    ft::counter(
+                        ev::EMU_COST_SKIPPED_NS,
+                        skipped.map_or(-1, |d| d.as_nanos() as i64),
+                    );
+                    ft::counter(ev::EMU_COST_DRAWN_NS, drawn.as_nanos() as i64);
                     cost.measured(skipped, drawn);
+                    ft::counter(ev::EMU_COST_DRAW_NS, cost.draw.as_nanos() as i64);
                 }
                 if cable.is_some() {
                     cable_presents += 1;
@@ -925,11 +988,17 @@ impl Worker {
                 }
                 if since_snapshot >= SNAPSHOT_EVERY {
                     since_snapshot = 0;
+                    ft::begin(ev::EMU_SNAPSHOT, 0);
                     let state = match shown {
                         true => Ok(std::mem::take(&mut runahead.state)),
                         false => core.serialize(),
                     };
+                    ft::end(
+                        ev::EMU_SNAPSHOT,
+                        state.as_ref().map_or(-1, |s| s.len() as i64),
+                    );
                     if let Ok(state) = state {
+                        let _s = ft::span(ev::EMU_REWIND_PUSH, 0);
                         rewind.push(state);
                         self.shared
                             .rewind_fill
@@ -937,11 +1006,13 @@ impl Worker {
                     }
                 }
 
+                ft::begin(ev::EMU_TAKE_AUDIO, 0);
                 let audio = if shown {
                     std::mem::take(&mut runahead.audio)
                 } else {
                     core.take_audio()
                 };
+                ft::end(ev::EMU_TAKE_AUDIO, (audio.len() / 2) as i64);
                 if speed == Speed::Normal || ff_sound {
                     let target = drc_target(ring.capacity_frames());
                     let queued = ring.queued_frames();
@@ -949,6 +1020,8 @@ impl Worker {
                         scale = self.shared.present_ns.load(Ordering::Relaxed) as f64
                             / PRESENT.as_nanos() as f64;
                     }
+                    ft::counter(ev::EMU_RING_QUEUED, queued as i64);
+                    ft::counter(ev::EMU_RING_TARGET, target as i64);
                     let base = if lock { scale } else { 1.0 };
                     let base = base * f64::from(span) / f64::from(ran);
                     let now = Instant::now();
@@ -962,13 +1035,20 @@ impl Worker {
                         }
                     };
                     let total = base * trim;
+                    ft::counter(ev::EMU_DT_NS, (dt * 1e9) as i64);
+                    ft::counter(ev::EMU_TRIM_PPM, ((trim - 1.0) * 1e6) as i64);
+                    ft::counter(ev::EMU_RATIO_PPM, ((total - 1.0) * 1e6) as i64);
+                    ft::begin(ev::EMU_RESAMPLE, (audio.len() / 2) as i64);
                     resampler.set_ratio(total);
                     resampler.process(&audio, &mut out);
                     crate::audio::volume::apply(
                         &mut out,
                         self.shared.volume.load(Ordering::Relaxed),
                     );
+                    ft::end(ev::EMU_RESAMPLE, (out.len() / 2) as i64);
+                    ft::begin(ev::EMU_RING_PUSH, (out.len() / 2) as i64);
                     ring.push_blocking(&out);
+                    ft::end(ev::EMU_RING_PUSH, ring.queued_frames() as i64);
                     paced += 1;
                     if crate::session::trace() && paced.is_multiple_of(TRACE_EVERY) {
                         let (dropped, starved) = (ring.overruns(), ring.underruns());
@@ -981,32 +1061,48 @@ impl Worker {
 
             if ceiling == 0 || rewinding || cable.is_some() {
                 if let Some(t) = &tracker {
+                    let _s = ft::span(ev::EMU_TRACKER_IDLE, 0);
                     t.idle();
                 }
             }
             if let Some((began, core_time)) = fast_span.take() {
                 post_cost = blend(post_cost, began.elapsed().saturating_sub(core_time));
+                ft::counter(ev::EMU_POST_COST_NS, post_cost.as_nanos() as i64);
             }
             self.frame_done(served);
             if lock {
                 let patience = if stalled { PRESENT } else { STALL };
                 let until = Instant::now() + patience;
                 loop {
-                    match self.next_tick(served, until) {
+                    ft::begin(ev::EMU_TICK_WAIT, served as i64);
+                    let waited = self.next_tick(served, until);
+                    ft::end(
+                        ev::EMU_TICK_WAIT,
+                        match waited {
+                            Wait::Tick(tick) => tick as i64,
+                            Wait::Request => -1,
+                            Wait::Late => -2,
+                        },
+                    );
+                    match waited {
                         Wait::Tick(tick) => {
+                            ft::counter(ev::EMU_TICK_GAP, (tick - served) as i64);
                             served = tick;
                             stalled = false;
                             if let Some(measured) = rate.served(Instant::now(), tick) {
                                 scale = measured;
+                                ft::counter(ev::EMU_SCALE_PPM, ((measured - 1.0) * 1e6) as i64);
                             }
                         }
                         Wait::Request => {
+                            ft::instant(ev::EMU_WAIT_REQUEST, served as i64);
                             for cmd in self.cmds.try_iter() {
                                 self.apply(cmd, core.as_mut(), &mut transport, &mut cable, &link);
                             }
                             continue;
                         }
                         Wait::Late => {
+                            ft::instant(ev::EMU_WAIT_LATE, served as i64);
                             rate.stalled();
                             stalled = true;
                         }
@@ -1020,8 +1116,17 @@ impl Worker {
             deadline += period * span;
             let now = Instant::now();
             match deadline.checked_duration_since(now) {
-                Some(wait) => std::thread::sleep(wait),
-                None => deadline = now,
+                Some(wait) => {
+                    let _s = ft::span(ev::EMU_SLEEP, wait.as_nanos() as i64);
+                    std::thread::sleep(wait)
+                }
+                None => {
+                    ft::instant(
+                        ev::EMU_DEADLINE_MISS,
+                        now.duration_since(deadline).as_nanos() as i64,
+                    );
+                    deadline = now
+                }
             }
         }
         for cmd in self.cmds.try_iter() {
@@ -1043,6 +1148,7 @@ impl Worker {
         cable: &mut Option<Cable>,
         link: &Link,
     ) {
+        let _s = ft::span(ev::EMU_APPLY, cmd.kind());
         match cmd {
             Cmd::Save(reply) => match core.serialize() {
                 Ok(state) => {
@@ -1134,6 +1240,7 @@ impl Worker {
     }
 
     fn frame_done(&self, served: u64) {
+        ft::instant(ev::EMU_FRAME_DONE, served as i64);
         let mut clock = self.shared.clock.lock().unwrap_or_else(|e| e.into_inner());
         if clock.done < served {
             clock.done = served;
@@ -1174,10 +1281,12 @@ impl Worker {
     }
 
     fn publish(&self, video: &[u8], shape: Shape) {
+        ft::begin(ev::EMU_PUBLISH, video.len() as i64);
         let mut buf = self.frames.take_write();
         buf.clear();
         buf.extend_from_slice(video);
-        self.frames.publish(buf, shape);
+        let seq = self.frames.publish(buf, shape);
+        ft::end(ev::EMU_PUBLISH, seq as i64);
         self.shared.published.fetch_add(1, Ordering::Relaxed);
         crate::latency::published();
     }

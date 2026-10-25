@@ -2133,6 +2133,7 @@ dependencies = [
  "png 0.17.16",
  "sha2",
  "slot-cheevos",
+ "slot-ftrace",
  "slot-gfx",
  "slot-input",
  "slot-power",
@@ -2149,6 +2150,14 @@ version = "0.1.0"
 dependencies = [
  "cc",
  "chd",
+ "tempfile",
+]
+
+[[package]]
+name = "slot-ftrace"
+version = "0.1.0"
+dependencies = [
+ "libc",
  "tempfile",
 ]
 
@@ -2184,6 +2193,7 @@ dependencies = [
  "cc",
  "libc",
  "libloading",
+ "slot-ftrace",
  "tempfile",
 ]
 
