@@ -103,9 +103,10 @@ for f in bin/smbd bin/smbpasswd \
 done
 chmod 755 "$OUT/samba/bin/smbd" "$OUT/samba/bin/smbpasswd"
 # Launchpad keeps every published version, where the ports pool drops superseded ones.
+# It answers 503 now and then, so the fetch tries again.
 url="https://launchpad.net/ubuntu/+archive/primary/+files/$LIBC6_DEB"
 deb="$CACHE/$LIBC6_DEB"
-[ -f "$deb" ] || curl -fsSL -o "$deb" "$url"
+[ -f "$deb" ] || curl -fsSL --retry 5 --retry-delay 10 -o "$deb" "$url"
 echo "$LIBC6_SHA  $deb" | sha256sum -c - >/dev/null
 tmp="$(mktemp -d)"
 (cd "$tmp" && ar x "$deb" data.tar.zst && zstd -dcq data.tar.zst |
