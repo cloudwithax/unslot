@@ -34,7 +34,7 @@ pub use grade::{blue_light_gain, BLUE_LIGHT_MAX};
 pub use headless::HeadlessSurface;
 #[cfg(feature = "host")]
 pub use host::HostSurface;
-pub use layout::{Canvas, Layout};
+pub use layout::{square, Canvas, Layout};
 pub use lcd3x::{lcd3x_factors, lcd3x_mask, ScreenEffect};
 #[cfg(target_os = "linux")]
 pub use offscreen::OffscreenGl;

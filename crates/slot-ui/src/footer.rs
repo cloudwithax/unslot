@@ -2,6 +2,7 @@ use slot_gfx::{Canvas, Draw, TexId, OUT_H};
 use slot_power::Battery;
 
 use crate::battery::{draw_gauge, GAUGE_H};
+use crate::draw::shift_down;
 use crate::hud::{HUD_INK, PLATE_H};
 use crate::plate::HINT_H;
 use crate::slot_chrome::MOUTH_H;
@@ -42,6 +43,7 @@ pub fn draw_footer(
     ink: [u8; 3],
     out: &mut Vec<Draw>,
 ) {
+    let start = out.len();
     let y = FOOTER_Y + (HINT_H as f32 - GAUGE_H) / 2.0;
     draw_gauge(FOOTER_MARGIN, y, battery, percent, bolt, ink, out);
     let clock_x = canvas.w - FOOTER_MARGIN - clock.w as f32;
@@ -59,6 +61,7 @@ pub fn draw_footer(
         });
         x -= NET_GAP / 2.0;
     }
+    shift_down(&mut out[start..], canvas.extra());
 }
 
 pub fn draw_corners(

@@ -245,7 +245,8 @@ impl Compositor {
     }
 
     fn native(&self) -> bool {
-        self.layout == Layout::Native && crate::bezel::framed(self.window)
+        let panel = self.window;
+        self.layout == Layout::Native && (crate::bezel::framed(panel) || crate::square(panel))
     }
 
     fn resize(&mut self, size: (u32, u32)) {

@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.8.2
+
+- The menus fill a square screen, such as the RG CubeXX's. They were drawn in a 720 by 480 strip across the middle with black above and below. The shelf, menus and settings are now laid out at 720 by 720, with the cart slot and footer at the bottom and the shelf and lists in the middle. Games keep their shape as before. Other handhelds are unchanged.
+
 ## v2.8.1
 
 - The Xbox Wireless Controller stays connected over Bluetooth. Pairing was asked for before bluetoothctl's agent was in, and bluez turns bonding off while no agent is registered, so the pad linked up, was never bonded and dropped straight after. Pairing now waits for the agent first.

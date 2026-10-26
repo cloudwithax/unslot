@@ -1,6 +1,7 @@
 use slot_gfx::{Canvas, Draw, TexId, OUT_H};
 use slot_store::Cart;
 
+use crate::draw::shift_down;
 use crate::cart::{cart_box, label_colour, label_text, seated_box, SEATED_W};
 use crate::footer::Printed;
 use crate::icon::icon_box;
@@ -108,7 +109,7 @@ impl SlotChrome<'_> {
                 x: 0.0,
                 y: 0.0,
                 w: canvas.w,
-                h: OUT_H as f32,
+                h: canvas.h,
                 colour: [0.0, 0.0, 0.0, dim],
             });
         }
@@ -131,14 +132,17 @@ impl SlotChrome<'_> {
         let (w0, h0) = (cw * scale, ch * scale);
         let (sw, sh) = seated_box(self.cart.platform);
         let (sw, sh) = (sw as f32, sh as f32);
-        let (foot0, seated_foot) = (foot_y(ch), SEATED_Y + sh);
+        // The cart comes down from the shelf, which a square canvas centres, to the slot,
+        // which it keeps at the bottom.
+        let lift = canvas.extra() / 2.0;
+        let (foot0, seated_foot) = (foot_y(ch) - lift, SEATED_Y + sh);
         let catch = catch_at(foot0, seated_foot);
         let travel = travel(seat, catch);
         let k = (travel / catch).min(1.0);
         let (cw, ch) = (w0 + (sw - w0) * k, h0 + (sh - h0) * k);
         let centre = self.rest + w0 / 2.0;
         let x = centre + (canvas.w / 2.0 - centre) * k - cw / 2.0;
-        let y = foot0 + (seated_foot - foot0) * travel - ch;
+        let y = foot0 + (seated_foot - foot0) * travel - ch + canvas.extra();
         let cart_alpha = if seat >= 1.0 && !held { chrome } else { 1.0 };
         let turn = self.turn;
         for tex in self.behind.into_iter().flatten() {
@@ -214,7 +218,7 @@ impl SlotChrome<'_> {
             front_bands(canvas, |x, y, w, h, _| {
                 out.push(Draw::Rect {
                     x,
-                    y,
+                    y: y + canvas.extra(),
                     w,
                     h,
                     colour: [0.0, 0.0, 0.0, 1.0],
@@ -247,7 +251,7 @@ fn band(x: f32, y: f32, w: f32, h: f32, c: [f32; 4], alpha: f32) -> Draw {
 fn strip(canvas: Canvas, tex: TexId, alpha: f32) -> Draw {
     Draw::Part {
         x: 0.0,
-        y: BAND_Y,
+        y: BAND_Y + canvas.extra(),
         w: canvas.w,
         h: MOUTH_H,
         tex,
@@ -262,6 +266,7 @@ fn draw_slot_back(canvas: Canvas, slot: Option<(TexId, TexId)>, alpha: f32, out:
         return;
     }
     let (bay_x, mouth_x) = (bay_x(canvas), mouth_x(canvas));
+    let start = out.len();
     out.push(band(bay_x, BAND_Y, BAY_W, LIP_H, housing(), alpha));
     out.push(band(mouth_x, BAND_Y, MOUTH_W, LIP_H, edge(), alpha));
     out.push(band(bay_x, BAY_Y, BAY_W, RECESS_H, recess(), alpha));
@@ -269,6 +274,7 @@ fn draw_slot_back(canvas: Canvas, slot: Option<(TexId, TexId)>, alpha: f32, out:
     for_each_scoop_span(canvas, |x, w, depth| {
         out.push(band(x, SCOOP_Y, w, depth, opening(), alpha));
     });
+    shift_down(&mut out[start..], canvas.extra());
 }
 
 fn draw_slot_front(canvas: Canvas, slot: Option<(TexId, TexId)>, alpha: f32, out: &mut Vec<Draw>) {
@@ -276,7 +282,8 @@ fn draw_slot_front(canvas: Canvas, slot: Option<(TexId, TexId)>, alpha: f32, out
         out.push(strip(canvas, front, alpha));
         return;
     }
-    front_bands(canvas, |x, y, w, h, c| out.push(band(x, y, w, h, c, alpha)));
+    let dy = canvas.extra();
+    front_bands(canvas, |x, y, w, h, c| out.push(band(x, y + dy, w, h, c, alpha)));
 }
 
 fn front_bands(canvas: Canvas, mut band: impl FnMut(f32, f32, f32, f32, [f32; 4])) {
@@ -330,7 +337,7 @@ pub fn draw_slot_name(canvas: Canvas, name: Printed, alpha: f32, out: &mut Vec<D
     let (w, h) = (name.w as f32, HINT_H as f32);
     out.push(Draw::Tex {
         x: canvas.centred(w),
-        y: slot_name_y(),
+        y: slot_name_y() + canvas.extra(),
         w,
         h,
         tex,
@@ -345,7 +352,7 @@ pub fn draw_slot_title(canvas: Canvas, title: Printed, alpha: f32, out: &mut Vec
     let (w, h) = (title.w as f32, crate::plate::TITLE_LINE_H as f32);
     out.push(Draw::Tex {
         x: canvas.centred(w),
-        y: slot_name_y() + HINT_H as f32 - h,
+        y: slot_name_y() + canvas.extra() + HINT_H as f32 - h,
         w,
         h,
         tex,

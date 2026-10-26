@@ -62,7 +62,7 @@ pub use clock::{
     clock_label, date_time, date_time_text, hhmm, set_clock_hint_face, time_text,
     ClockPicker, Field,
 };
-pub use draw::{Canvas, Draw, Layout, TexId, OUT_H, OUT_W};
+pub use draw::{shift_down, Canvas, Draw, Layout, TexId, OUT_H, OUT_W};
 pub use footer::{draw_corners, draw_footer, Printed, FOOTER_Y};
 pub use hud::{
     badge_at, ff_badge, footer_ink, FfState, Hud, HudKind, LinkBadge, Millis, ALARM_BAND_H,

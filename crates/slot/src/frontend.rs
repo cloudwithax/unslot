@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use slot_ftrace::{self as ft, ev};
-use slot_gfx::{Compositor, Draw, Layout, ScreenEffect, TexId, OUT_H, OUT_W};
+use slot_gfx::{Canvas, Compositor, Draw, Layout, ScreenEffect, TexId, OUT_H, OUT_W};
 
 const PAPER: &[u8] = include_bytes!("../assets/paper.png");
 use slot_input::{InputSource, Millis};
@@ -48,17 +48,18 @@ pub fn draw_boot_splash(
     compositor.begin_frame(Layout::Native);
     compositor.set_screen_power(1.0);
     let tex = compositor.create_texture(OUT_W, OUT_H, &logo);
+    let canvas = Canvas::of(Layout::Native, window);
     compositor.draw_list(&[
         Draw::Rect {
             x: 0.0,
             y: 0.0,
             w: OUT_W as f32,
-            h: OUT_H as f32,
+            h: canvas.h,
             colour: [0.0, 0.0, 0.0, 1.0],
         },
         Draw::Tex {
             x: 0.0,
-            y: 0.0,
+            y: canvas.extra() / 2.0,
             w: OUT_W as f32,
             h: OUT_H as f32,
             tex,

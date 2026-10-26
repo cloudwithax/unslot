@@ -451,7 +451,7 @@ impl Shelf {
                 continue;
             }
             let x = x + shake;
-            let y = foot_y(ch as f32) - h;
+            let y = foot_y(ch as f32) + canvas.extra() / 2.0 - h;
             if alpha < 1.0 && !self.real(i) {
                 if let Some(tex) = self.shadows[self.shell(i).index()] {
                     out.push(Draw::Tex {

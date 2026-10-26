@@ -14,12 +14,12 @@ use slot_store::{
 use slot_ui::{
     board_from, board_zoom, centred_hints, draw_empty_slot, draw_footer, draw_ground,
     draw_slot_name, draw_sticker, ease, footer_ink, grown, lid_at, lid_from, lift_of, on_board,
-    repeat_gap, shelf_cart_at, ButtonLegend, ClockPicker, Draw, FfState, Hud, HudKind, Icon,
-    KeyInput, KeyOutcome, Keyboard, Legend, LinkBadge, ListIcon, ListPage, ListRow, Media, Millis,
-    Mould, Placed, Polaroids, PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow, QuickValue,
-    Refusal, Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H, CHIP_U, CHIP_V, CHIP_W, HINT_EDGE,
-    HOP_LIFT, MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W,
-    TURN_PAD,
+    repeat_gap, shelf_cart_at, shift_down, ButtonLegend, ClockPicker, Draw, FfState, Hud, HudKind,
+    Icon, KeyInput, KeyOutcome, Keyboard, Legend, LinkBadge, ListIcon, ListPage, ListRow, Media,
+    Millis, Mould, Placed, Polaroids, PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow,
+    QuickValue, Refusal, Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H, CHIP_U, CHIP_V, CHIP_W,
+    HINT_EDGE, HOP_LIFT, MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U,
+    SOCKET_V, SOCKET_W, TURN_PAD,
 };
 
 use crate::audio::Sfx;
@@ -671,21 +671,6 @@ pub fn sync_line(p: SyncProgress) -> String {
         None => {}
     }
     line
-}
-
-fn shift_down(draws: &mut [Draw], dy: f32) {
-    if dy == 0.0 {
-        return;
-    }
-    for draw in draws {
-        match draw {
-            Draw::Rect { y, .. }
-            | Draw::Tex { y, .. }
-            | Draw::Part { y, .. }
-            | Draw::Turned { y, .. } => *y += dy,
-            Draw::Game | Draw::Shot { .. } => {}
-        }
-    }
 }
 
 impl App {
@@ -1433,7 +1418,7 @@ impl App {
                 x: 0.0,
                 y: 0.0,
                 w: self.canvas().w,
-                h: OUT_H as f32,
+                h: self.canvas().h,
                 colour: [0.0, 0.0, 0.0, alpha],
             });
         }
@@ -5147,7 +5132,7 @@ impl App {
             x: 0.0,
             y: 0.0,
             w: self.canvas().w,
-            h: OUT_H as f32,
+            h: self.canvas().h,
             colour: [0.0, 0.0, 0.0, alpha],
         });
     }
@@ -5173,7 +5158,7 @@ impl App {
                 x: 0.0,
                 y: 0.0,
                 w: self.canvas().w,
-                h: OUT_H as f32,
+                h: self.canvas().h,
                 colour: [0.0, 0.0, 0.0, 1.0],
             });
             let which = if self.restarting {
@@ -5186,7 +5171,7 @@ impl App {
             if let Some((tex, w, h)) = self.shutdown_faces.get(which.index()).copied() {
                 out.push(Draw::Tex {
                     x: self.canvas().centred(w as f32).floor(),
-                    y: ((OUT_H - h) / 2) as f32,
+                    y: ((self.canvas().h - h as f32) / 2.0).floor(),
                     w: w as f32,
                     h: h as f32,
                     tex,
@@ -5220,7 +5205,7 @@ impl App {
                 bezel: None,
                 over_game: false,
                 footer_legends: true,
-                footer_top: OUT_H as f32,
+                footer_top: self.canvas().h,
                 canvas: self.canvas(),
             }
             .draw(out),
@@ -5302,7 +5287,7 @@ impl App {
                     let canvas = self.canvas();
                     out.push(Draw::Tex {
                         x: canvas.centred(w as f32).round(),
-                        y: ((OUT_H - h) / 2) as f32,
+                        y: ((canvas.h - h as f32) / 2.0).floor(),
                         w: w as f32,
                         h: h as f32,
                         tex,
@@ -5364,7 +5349,7 @@ impl App {
                     x: 0.0,
                     y: 0.0,
                     w: self.canvas().w,
-                    h: OUT_H as f32,
+                    h: self.canvas().h,
                     colour: [0.0, 0.0, 0.0, 1.0],
                 });
                 return;
@@ -5386,7 +5371,7 @@ impl App {
                 bezel: self.quick_bezel_faces[self.playing_platform().index()],
                 over_game: true,
                 footer_legends: false,
-                footer_top: OUT_H as f32 - MOUTH_H + self.menu_footer_offset(),
+                footer_top: self.canvas().h - MOUTH_H + self.menu_footer_offset(),
                 canvas: self.canvas(),
             }
             .draw(out);
@@ -5407,7 +5392,7 @@ impl App {
             slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
             out.push(Draw::Tex {
                 x: self.canvas().centred(w as f32).round(),
-                y: ((OUT_H - h) / 2) as f32,
+                y: ((self.canvas().h - h as f32) / 2.0).floor(),
                 w: w as f32,
                 h: h as f32,
                 tex,
@@ -5492,7 +5477,8 @@ impl App {
         };
         shift_down(&mut out[start..], dy);
         if let Some(row) = row {
-            self.draw_menu_legends(row, LINK_LEGEND_Y + dy, out);
+            let y = LINK_LEGEND_Y + self.canvas().extra() + dy;
+            self.draw_menu_legends(row, y, out);
         }
     }
 
@@ -5554,8 +5540,9 @@ impl App {
             true => faces.legend_light,
             false => faces.legend,
         };
-        self.draw_side_legend(back, false, LINK_LEGEND_Y, out);
-        self.draw_side_legend(restart, true, LINK_LEGEND_Y, out);
+        let y = LINK_LEGEND_Y + self.canvas().extra();
+        self.draw_side_legend(back, false, y, out);
+        self.draw_side_legend(restart, true, y, out);
     }
 
     fn draw_menu_legends(&self, row: QuickRow, y: f32, out: &mut Vec<Draw>) {
@@ -5719,6 +5706,7 @@ impl App {
         let now = self.now();
         let progress = picker.openness(now);
         let lift = lift_of(progress);
+        let start = out.len();
         let (rest, scale) = self.shelf().selected_at(self.canvas());
         let shelf = shelf_cart_at(rest, scale);
         let board = board_from(self.canvas(), shelf, progress);
@@ -5843,10 +5831,12 @@ impl App {
             });
         }
 
+        // The board comes out of the cart, which a square canvas centres.
+        shift_down(&mut out[start..], self.canvas().extra() / 2.0);
         for (tex, w, x) in centred_hints(self.canvas(), &self.core_legend_faces, CORE_LEGEND_GAP) {
             out.push(Draw::Tex {
                 x,
-                y: CORE_LEGEND_Y,
+                y: CORE_LEGEND_Y + self.canvas().extra(),
                 w: w as f32,
                 h: MOUTH_H,
                 tex,

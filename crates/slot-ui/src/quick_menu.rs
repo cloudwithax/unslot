@@ -903,7 +903,10 @@ impl QuickMenu<'_> {
             (false, _) => draw_menu_ground(self.canvas, self.ground, out),
             (true, panel) => {
                 let y = match panel {
-                    true => quick_row_top(self.row.page()[0], self.hidden) - PANEL_GAP,
+                    true => {
+                        let top = quick_row_top(self.row.page()[0], self.hidden);
+                        top + self.canvas.extra() / 2.0 - PANEL_GAP
+                    }
                     false => 0.0,
                 };
                 let bottom = self.footer_top.max(y);
@@ -932,7 +935,8 @@ impl QuickMenu<'_> {
             if !in_view(row, self.row, self.hidden) {
                 continue;
             }
-            let y = quick_row_top_at(row, self.row, self.hidden) + TYPE_DROP;
+            let top = quick_row_top_at(row, self.row, self.hidden) + self.canvas.extra() / 2.0;
+            let y = top + TYPE_DROP;
             let lit = row == self.row;
             if let Some(&(tex, w, h)) = faces.labels.get(row.index()).map(|l| &l[lit as usize]) {
                 let x = match row.centred() {
@@ -980,13 +984,13 @@ impl QuickMenu<'_> {
         };
         let other = if self.row.opens() { open } else { change };
         for (tex, w, x) in centred_hints(self.canvas, &[back, other], LEGEND_GAP) {
-            push(out, tex, x, LEGEND_Y, w, HINT_H);
+            push(out, tex, x, LEGEND_Y + self.canvas.extra(), w, HINT_H);
         }
     }
 }
 
 pub fn draw_menu_ground(canvas: Canvas, ground: Option<TexId>, out: &mut Vec<Draw>) {
-    let (w, h) = (canvas.w, OUT_H as f32);
+    let (w, h) = (canvas.w, canvas.h);
     match ground {
         Some(tex) => {
             out.push(Draw::Part {
@@ -996,7 +1000,7 @@ pub fn draw_menu_ground(canvas: Canvas, ground: Option<TexId>, out: &mut Vec<Dra
                 h,
                 tex,
                 alpha: 1.0,
-                uv: canvas.window(OUT_W as f32),
+                uv: canvas.cover(OUT_W as f32),
             });
             out.push(Draw::Rect {
                 x: 0.0,

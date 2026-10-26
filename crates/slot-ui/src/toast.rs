@@ -136,7 +136,8 @@ fn setting(toast: Toast) -> Setting {
 pub fn toast_rect(canvas: Canvas, toast: Toast) -> (f32, f32, f32, f32) {
     let (w, h) = toast_box(toast);
     let (w, h) = (w as f32, h as f32);
-    let middle = setting(toast).middle;
+    // An alarm sits in the middle of the screen, however tall the canvas.
+    let middle = setting(toast).middle + toast.alarm() as u8 as f32 * canvas.extra() / 2.0;
     (canvas.centred(w), middle - h / 2.0, w, h)
 }
 
