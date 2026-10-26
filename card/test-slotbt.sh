@@ -27,6 +27,12 @@ one() {
 printf '%s\n' "\$*" >> "$TMP/ctl.log"
 case "\$*" in
 "power on") echo "Changing power on succeeded" ;;
+"pair "*)
+	case "\${FAKE_PAIRED:-no}" in
+	yes) echo "Pairing successful" ;;
+	*) echo "Failed to pair: org.bluez.Error.AuthenticationFailed" ;;
+	esac
+	;;
 devices)
 	printf '\033[0;94mDevice\033[0m AA:BB:CC:DD:EE:01 8BitDo Pro 2\n'
 	echo "Device AA:BB:CC:DD:EE:02 WH-1000XM4"
@@ -43,9 +49,14 @@ devices)
 	;;
 esac
 }
+if [ "\$1" = --agent ]; then
+	printf '%s\n' "\$1 \$2" >> "$TMP/ctl.log"
+	shift 2
+fi
 if [ \$# -gt 0 ]; then
 	one "\$@"
 else
+	echo "Agent registered"
 	while read -r line; do
 		printf '[bluetooth]# %s\n' "\$line"
 		one \$line
@@ -112,7 +123,9 @@ grep -q '^remove AA:BB:CC:DD:EE:03' "$TMP/ctl.log" || fail "an LE pad that canno
 reset
 run pair AA:BB:CC:DD:EE:02 && rc=0 || rc=$?
 [ "$rc" = 1 ] || fail "a pairing that never connected exited $rc, want 1"
-grep -q -- '--agent NoInputNoOutput pair AA:BB:CC:DD:EE:02' "$TMP/ctl.log" || fail "pairing asked for a PIN"
+grep -q -- '^--agent NoInputNoOutput$' "$TMP/ctl.log" || fail "pairing asked for a PIN"
+grep -q '^pair AA:BB:CC:DD:EE:02' "$TMP/ctl.log" ||
+	fail "pairing was not asked from inside the session holding the agent, so it never bonds"
 grep -q 'trust AA:BB:CC:DD:EE:02' "$TMP/ctl.log" || fail "a paired device was not trusted, so it will not come back"
 grep -q '^connect AA:BB:CC:DD:EE:02' "$TMP/ctl.log" || fail "pairing did not connect"
 

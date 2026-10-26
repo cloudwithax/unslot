@@ -9,7 +9,7 @@ mod sink;
 mod stub;
 pub mod volume;
 
-pub use alsa::{set_hdmi, set_route, AlsaSink};
+pub use alsa::{set_hdmi, set_route, set_tv_sound, AlsaSink};
 #[cfg(feature = "host")]
 pub use host::HostAudio;
 pub use pacer::Pacer;

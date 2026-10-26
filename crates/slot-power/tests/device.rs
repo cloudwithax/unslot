@@ -1,7 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use slot_power::{motor_change, rumble_node, Battery, Charge, DevicePlatform, LedState, Platform};
+use slot_power::{
+    motor_change, rumble_node, xbox_hidraw, xbox_rumble, Battery, Charge, DevicePlatform, LedState,
+    Platform,
+};
 use tempfile::TempDir;
 
 fn sysfs_with(max_brightness: &str, capacity: &str, status: Option<&str>) -> TempDir {
@@ -258,6 +261,26 @@ fn a_tree_with_no_force_feedback_has_no_motor() {
     fs::create_dir_all(&caps).unwrap();
     fs::write(caps.join("ff"), "20000 0\n").unwrap();
     assert!(rumble_node(d.path()).is_none());
+}
+
+#[test]
+fn a_paired_xbox_pad_is_found_by_its_hidraw_node() {
+    let d = tempfile::tempdir().unwrap();
+    let ids = [("hidraw0", "0003:0000046D:0000C52B"), ("hidraw1", "0005:0000045E:00000B13")];
+    for (node, id) in ids {
+        let dir = d.path().join("class/hidraw").join(node).join("device");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("uevent"), format!("DRIVER=hid-generic\nHID_ID={id}\n")).unwrap();
+    }
+    assert_eq!(xbox_hidraw(d.path()).as_deref(), Some("hidraw1"));
+    fs::remove_dir_all(d.path().join("class/hidraw/hidraw1")).unwrap();
+    assert!(xbox_hidraw(d.path()).is_none());
+}
+
+#[test]
+fn the_xbox_pads_rumble_report_holds_both_motors_until_the_next() {
+    assert_eq!(xbox_rumble(u16::MAX), [0x03, 0x03, 0, 0, 100, 100, 0xff, 0, 0xff]);
+    assert_eq!(xbox_rumble(0)[4..6], [0, 0]);
 }
 
 #[test]

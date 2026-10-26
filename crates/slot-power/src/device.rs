@@ -18,6 +18,11 @@ const BACKLIGHT_CURVE: f64 = 1.75;
 
 const DEV_INPUT: &str = "/dev/input";
 
+const DEV: &str = "/dev";
+
+/// Bluetooth, then Microsoft, as a hidraw node's uevent gives them.
+const XBOX_BT: &str = "HID_ID=0005:0000045E:";
+
 const RUN_DIR: &str = "/run";
 
 const CARD_LOG: &str = "/data/slot-card.log";
@@ -90,6 +95,7 @@ pub struct DevicePlatform {
     battery: Option<PathBuf>,
     rtc: Option<PathBuf>,
     motor: Option<Motor>,
+    pad_motor: PadMotor,
     led: Option<Led>,
 }
 
@@ -139,6 +145,11 @@ impl DevicePlatform {
             battery,
             rtc,
             motor,
+            pad_motor: PadMotor {
+                sysfs: sysfs.to_path_buf(),
+                node: None,
+                level: 0,
+            },
             led,
         }
     }
@@ -226,6 +237,56 @@ pub fn motor_change(strength: u16, running: bool) -> Option<bool> {
         (true, false) => Some(true),
         (false, true) => Some(false),
         _ => None,
+    }
+}
+
+/// The hidraw node of an Xbox Wireless Controller paired over Bluetooth.
+pub fn xbox_hidraw(sysfs: &Path) -> Option<String> {
+    let dir = first_dir(&sysfs.join("class/hidraw"), |node| {
+        fs::read_to_string(node.join("device/uevent"))
+            .is_ok_and(|u| u.lines().any(|l| l.starts_with(XBOX_BT)))
+    })?;
+    Some(dir.file_name()?.to_string_lossy().into_owned())
+}
+
+/// The Xbox Wireless Controller's own rumble report, both motors at `strength`, held until the
+/// next one, as Linux's hid-microsoft sends it.
+pub fn xbox_rumble(strength: u16) -> [u8; 9] {
+    let level = (u32::from(strength) * 100 / u32::from(u16::MAX)) as u8;
+    [0x03, 0x03, 0, 0, level, level, u8::MAX, 0, u8::MAX]
+}
+
+/// A paired Xbox Wireless Controller's motors. Linux 4.9 gives it no force feedback, so they
+/// are driven by writing its rumble report to its hidraw node, looked up again each time a
+/// rumble starts, as the pad comes and goes.
+struct PadMotor {
+    sysfs: PathBuf,
+    node: Option<fs::File>,
+    level: u8,
+}
+
+impl PadMotor {
+    fn set(&mut self, strength: u16) {
+        let report = xbox_rumble(strength);
+        if report[4] == self.level {
+            return;
+        }
+        if self.level == 0 {
+            self.node = xbox_hidraw(&self.sysfs).and_then(|name| {
+                fs::OpenOptions::new().write(true).open(Path::new(DEV).join(name)).ok()
+            });
+        }
+        let Some(node) = &mut self.node else {
+            return;
+        };
+        match node.write_all(&report) {
+            Ok(()) => self.level = report[4],
+            Err(e) => {
+                eprintln!("slot: pad rumble: {e}");
+                self.node = None;
+                self.level = 0;
+            }
+        }
     }
 }
 
@@ -569,6 +630,7 @@ impl Platform for DevicePlatform {
     }
 
     fn set_rumble(&mut self, strength: u16) {
+        self.pad_motor.set(strength);
         let Some(motor) = &mut self.motor else {
             return;
         };

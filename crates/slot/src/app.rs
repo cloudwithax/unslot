@@ -1210,6 +1210,7 @@ impl App {
             QuickRow::RunAhead => QuickValue::frames(self.state.runahead),
             QuickRow::MenuSounds => Some(QuickValue::flag(self.state.menu_sounds)),
             QuickRow::Haptics => Some(QuickValue::flag(self.state.haptics)),
+            QuickRow::TvSound => Some(QuickValue::flag(self.state.tv_sound)),
             QuickRow::Clock => Some(match self.state.clock_12h {
                 true => QuickValue::Hours12,
                 false => QuickValue::Hours24,
@@ -1463,6 +1464,9 @@ impl App {
         }
         if !own {
             hidden.push(QuickRow::WallpaperTint);
+        }
+        if !self.external_display {
+            hidden.push(QuickRow::TvSound);
         }
         // The Game Boy family's pages are always there; another system's only once the card
         // holds a game for it.
@@ -3952,6 +3956,7 @@ impl App {
             | QuickRow::Clock
             | QuickRow::MenuSounds
             | QuickRow::Haptics
+            | QuickRow::TvSound
             | QuickRow::Recents
             | QuickRow::ShowTitles
             | QuickRow::Wallpaper
@@ -4069,6 +4074,7 @@ impl App {
             QuickRow::Clock => s.clock_12h = !s.clock_12h,
             QuickRow::MenuSounds => s.menu_sounds = !s.menu_sounds,
             QuickRow::Haptics => s.haptics = !s.haptics,
+            QuickRow::TvSound => s.tv_sound = !s.tv_sound,
             QuickRow::WallpaperTint => s.wallpaper_tint = s.wallpaper_tint.step(right),
             QuickRow::Wallpaper
             | QuickRow::Recents
@@ -4577,6 +4583,7 @@ impl App {
     }
 
     fn timers(&mut self) {
+        crate::audio::set_tv_sound(self.state.tv_sound);
         if let Some(wifi) = &self.wifi {
             self.wifi_view = wifi.view();
         }

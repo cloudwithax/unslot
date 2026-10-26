@@ -9,7 +9,8 @@ use slot_input::{Btn, InputSource, Millis, RawEvent};
 use slot_retro::Sticks;
 
 use super::evdev::{
-    decode, device_name, pick_devices, to_raw, Ev, Hat, EVENT_BYTES, EV_ABS, EV_KEY, EV_SYN,
+    decode, device_name, is_pad, pad_to_raw, pick_devices, to_raw, Ev, Hat, Triggers, ABS_BRAKE,
+    ABS_GAS, EVENT_BYTES, EV_ABS, EV_KEY, EV_SYN,
 };
 use super::stick::{layout, Range, StickNode};
 use super::trace;
@@ -108,6 +109,7 @@ impl Readers {
                 device_name(&self.sys, &node)
             );
             quicken_poll(&self.sys, &node);
+            let pad = is_pad(&self.sys, &node);
             let axes = stick_axes(&self.sys, &node);
             if let Some(axes) = axes {
                 eprintln!("slot: input {}: sticks on {axes:?}", node.display());
@@ -117,8 +119,10 @@ impl Readers {
             let spawned = std::thread::Builder::new()
                 .name(format!("slot-input-{name}"))
                 .spawn(move || {
-                    let sticks = axes.map(|axes| (axes, shared.right_stick, shared.sticks.clone()));
-                    read_node(&node, &shared.pending, sticks, shared.trace.as_deref());
+                    // A pad has both its sticks, whichever model it is paired with.
+                    let right = shared.right_stick || pad;
+                    let sticks = axes.map(|axes| (axes, right, shared.sticks.clone()));
+                    read_node(&node, pad, &shared.pending, sticks, shared.trace.as_deref());
                     // The node went away, a pad switched off say; it is opened afresh if it
                     // comes back.
                     shared
@@ -169,6 +173,7 @@ type StickOut = ([u16; 4], bool, Arc<Mutex<Sticks>>);
 
 fn read_node(
     node: &Path,
+    pad: bool,
     queue: &Mutex<Vec<RawEvent>>,
     sticks: Option<StickOut>,
     trace: Option<&Trace>,
@@ -193,6 +198,8 @@ fn read_node(
         });
         (StickNode::new(axes, ranges, right), out)
     });
+    let mut triggers =
+        pad.then(|| Triggers::new([ABS_BRAKE, ABS_GAS].map(|code| abs_range(&file, code).max)));
     let mut buf = [0u8; EVENT_BYTES * 16];
     loop {
         let read = match file.read(&mut buf) {
@@ -219,7 +226,11 @@ fn read_node(
                 }
             }
             match ev.kind {
-                EV_ABS => events.extend(hat.feed(ev)),
+                EV_ABS => {
+                    events.extend(hat.feed(ev));
+                    events.extend(triggers.as_mut().and_then(|t| t.feed(ev)));
+                }
+                _ if pad => events.extend(pad_to_raw(ev)),
                 _ => events.extend(to_raw(ev)),
             }
         }
@@ -415,6 +426,35 @@ mod tests {
             readers.pending.lock().unwrap().as_slice(),
             [RawEvent::Down(Btn::A)],
             "the pad that turned up later was never read"
+        );
+    }
+
+    #[test]
+    fn a_bluetooth_pad_is_read_by_its_own_letters() {
+        let d = tempfile::tempdir().unwrap();
+        let (dev, sys) = (d.path().join("dev"), d.path().join("sys"));
+        std::fs::create_dir_all(&dev).unwrap();
+        node(&sys, &dev, "event5", &press_a());
+        std::fs::create_dir_all(sys.join("event5/device/id")).unwrap();
+        std::fs::write(sys.join("event5/device/id/bustype"), "0005\n").unwrap();
+        let readers = Readers {
+            dev,
+            sys,
+            pending: Arc::new(Mutex::new(Vec::new())),
+            sticks: Arc::new(Mutex::new([0; 4])),
+            open: Arc::new(Mutex::new(HashSet::new())),
+            right_stick: true,
+            trace: None,
+        };
+        readers.open_new();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while readers.pending.lock().unwrap().is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            readers.pending.lock().unwrap().as_slice(),
+            [RawEvent::Down(Btn::A)],
+            "the pad's A was not read as A"
         );
     }
 

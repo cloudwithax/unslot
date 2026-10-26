@@ -20,6 +20,8 @@ pub enum QuickRow {
     MenuSounds,
     /// Whether the menus nudge the rumble motor.
     Haptics,
+    /// Whether the sound follows the picture onto a TV.
+    TvSound,
     About,
     Game,
     EjectSave,
@@ -78,7 +80,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 48] = [
+const GENERIC: [QuickRow; 49] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -127,6 +129,7 @@ const GENERIC: [QuickRow; 48] = [
     QuickRow::Achievements,
     QuickRow::Cast,
     QuickRow::PlayCast,
+    QuickRow::TvSound,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -239,7 +242,7 @@ impl QuickRow {
         QuickRow::Achievements,
     ];
 
-    pub const GENERAL: [QuickRow; 9] = [
+    pub const GENERAL: [QuickRow; 10] = [
         QuickRow::Wallpaper,
         QuickRow::WallpaperTint,
         QuickRow::Theme,
@@ -249,6 +252,7 @@ impl QuickRow {
         QuickRow::Clock,
         QuickRow::MenuSounds,
         QuickRow::Haptics,
+        QuickRow::TvSound,
     ];
 
     pub const GAME: [QuickRow; 8] = [
@@ -347,6 +351,7 @@ impl QuickRow {
             | QuickRow::Clock
             | QuickRow::MenuSounds
             | QuickRow::Haptics
+            | QuickRow::TvSound
             | QuickRow::Theme
             | QuickRow::Recents
             | QuickRow::ShowTitles => QuickRow::GENERAL.to_vec(),
@@ -443,6 +448,7 @@ impl QuickRow {
             QuickRow::Clock => "Clock",
             QuickRow::MenuSounds => "Menu Sounds",
             QuickRow::Haptics => "Haptics",
+            QuickRow::TvSound => "Sound on TV",
             QuickRow::About => "About",
             QuickRow::Game => "Gameplay",
             QuickRow::EjectSave => "Auto Save on Eject",

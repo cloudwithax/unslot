@@ -154,6 +154,27 @@ came_up() {
 	done
 }
 
+# Pairs $1 from inside one bluetoothctl, once its agent is in. bluez turns bonding off while no
+# agent is registered, and a one-shot `bluetoothctl pair` asked before its agent was in, so an LE
+# pad such as the Xbox Wireless Controller was encrypted for that link but never bonded.
+bt_pair() {
+	out="$(mktemp)"
+	{
+		n=0
+		until grep -q 'Agent registered' "$out" || [ "$n" -ge 10 ]; do
+			sleep 0.5
+			n=$((n + 1))
+		done
+		echo "pair $1"
+		n=0
+		until grep -qE 'Pairing successful|Failed to pair' "$out" || [ "$n" -ge 56 ]; do
+			sleep 0.5
+			n=$((n + 1))
+		done
+	} | ctl 35 --agent NoInputNoOutput >"$out" 2>&1 || true
+	rm -f "$out"
+}
+
 case "${1:-}" in
 up) bt_up ;;
 down) bt_down ;;
@@ -164,7 +185,7 @@ scan)
 devices) bt_devices ;;
 pair)
 	[ -n "${2:-}" ] || exit 2
-	ctl 30 --agent NoInputNoOutput pair "$2" >/dev/null 2>&1 || true
+	bt_pair "$2"
 	ctl 10 trust "$2" >/dev/null 2>&1 || true
 	# Pairing leaves only the bare link up; connecting brings up the profile.
 	ctl 15 connect "$2" >/dev/null 2>&1 || true

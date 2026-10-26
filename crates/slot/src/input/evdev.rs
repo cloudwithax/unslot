@@ -12,6 +12,11 @@ pub const SW_LID: u16 = 0x00;
 pub const EV_ABS: u16 = 0x03;
 pub const ABS_HAT0X: u16 = 0x10;
 pub const ABS_HAT0Y: u16 = 0x11;
+pub const ABS_GAS: u16 = 0x09;
+pub const ABS_BRAKE: u16 = 0x0a;
+
+const BUS_USB: u16 = 0x03;
+const BUS_BLUETOOTH: u16 = 0x05;
 
 #[derive(Default)]
 pub struct Hat {
@@ -40,6 +45,37 @@ impl Hat {
             out.push(RawEvent::Down(btn(now)));
         }
         out
+    }
+}
+
+/// A pad's analog triggers, LT on brake and RT on gas as the Xbox Wireless Controller has them,
+/// as L2 and R2, held past half their pull.
+pub struct Triggers {
+    half: [i32; 2],
+    held: [bool; 2],
+}
+
+impl Triggers {
+    /// From how far each pulls: brake's then gas's.
+    pub fn new(max: [i32; 2]) -> Triggers {
+        Triggers {
+            half: max.map(|m| m / 2),
+            held: [false; 2],
+        }
+    }
+
+    pub fn feed(&mut self, ev: Ev) -> Option<RawEvent> {
+        let (i, btn) = match ev.code {
+            ABS_BRAKE => (0, Btn::L2),
+            ABS_GAS => (1, Btn::R2),
+            _ => return None,
+        };
+        let now = ev.value > self.half[i];
+        if now == self.held[i] {
+            return None;
+        }
+        self.held[i] = now;
+        Some(if now { RawEvent::Down(btn) } else { RawEvent::Up(btn) })
     }
 }
 
@@ -93,6 +129,49 @@ pub fn code_to_btn(code: u16) -> Option<Btn> {
         116 => Btn::Power,
         _ => return None,
     })
+}
+
+/// `ev` as a button of a Bluetooth or USB pad.
+pub fn pad_to_raw(ev: Ev) -> Option<RawEvent> {
+    if ev.kind != EV_KEY {
+        return None;
+    }
+    let btn = pad_code_to_btn(ev.code)?;
+    match ev.value {
+        0 => Some(RawEvent::Up(btn)),
+        1 => Some(RawEvent::Down(btn)),
+        _ => None,
+    }
+}
+
+/// A Bluetooth or USB pad's button, by the codes Linux gives a gamepad. The face buttons go by
+/// the letters an Xbox pad prints on them, so its bottom button is A.
+pub fn pad_code_to_btn(code: u16) -> Option<Btn> {
+    Some(match code {
+        0x130 => Btn::A,
+        0x131 => Btn::B,
+        0x133 => Btn::X,
+        0x134 => Btn::Y,
+        0x136 => Btn::L1,
+        0x137 => Btn::R1,
+        0x138 => Btn::L2,
+        0x139 => Btn::R2,
+        0x13a => Btn::Select,
+        0x13b => Btn::Start,
+        0x13c => Btn::Menu,
+        0x13d => Btn::L3,
+        0x13e => Btn::R3,
+        _ => return None,
+    })
+}
+
+/// Whether `node` is a pad paired or plugged in, not the handheld's own buttons, which are on
+/// the host bus.
+pub fn is_pad(sys: &Path, node: &Path) -> bool {
+    node.file_name()
+        .and_then(|n| std::fs::read_to_string(sys.join(n).join("device/id/bustype")).ok())
+        .and_then(|bus| u16::from_str_radix(bus.trim(), 16).ok())
+        .is_some_and(|bus| bus == BUS_USB || bus == BUS_BLUETOOTH)
 }
 
 const WANTED: [u16; 15] = [

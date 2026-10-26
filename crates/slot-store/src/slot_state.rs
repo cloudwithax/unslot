@@ -223,6 +223,8 @@ pub struct SlotState {
     pub menu_sounds: bool,
     /// Whether the menus nudge the rumble motor, apart from a game's own rumble.
     pub haptics: bool,
+    /// Whether the sound goes to the TV with the picture, or stays on the speaker or headphones.
+    pub tv_sound: bool,
     /// Whether the Wi-Fi is meant to be on, so it comes back on at boot.
     pub wifi: bool,
     /// Whether Bluetooth is meant to be on, likewise.
@@ -375,6 +377,7 @@ impl Default for SlotState {
             clock_12h: false,
             menu_sounds: true,
             haptics: true,
+            tv_sound: true,
             show_titles: false,
             wifi: false,
             bluetooth: false,
@@ -478,6 +481,7 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     text.push_str(&format!("clock_12h={}\n", s.clock_12h as u8));
     text.push_str(&format!("menu_sounds={}\n", s.menu_sounds as u8));
     text.push_str(&format!("haptics={}\n", s.haptics as u8));
+    text.push_str(&format!("tv_sound={}\n", s.tv_sound as u8));
     text.push_str(&format!("wifi={}\n", s.wifi as u8));
     text.push_str(&format!("bluetooth={}\n", s.bluetooth as u8));
     text.push_str(&format!("ssh={}\n", s.ssh as u8));
@@ -534,6 +538,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut clock_12h = None;
     let mut menu_sounds = None;
     let mut haptics = None;
+    let mut tv_sound = None;
     let mut show_titles = None;
     let mut wifi = None;
     let mut bluetooth = None;
@@ -589,6 +594,7 @@ fn parse(text: &str) -> Option<SlotState> {
             "clock_12h" => clock_12h = flag(value),
             "menu_sounds" => menu_sounds = flag(value),
             "haptics" => haptics = flag(value),
+            "tv_sound" => tv_sound = flag(value),
             "show_titles" => show_titles = flag(value),
             "wifi" => wifi = flag(value),
             "bluetooth" => bluetooth = flag(value),
@@ -649,6 +655,7 @@ fn parse(text: &str) -> Option<SlotState> {
         clock_12h: clock_12h.unwrap_or(fallback.clock_12h),
         menu_sounds: menu_sounds.unwrap_or(fallback.menu_sounds),
         haptics: haptics.unwrap_or(fallback.haptics),
+        tv_sound: tv_sound.unwrap_or(fallback.tv_sound),
         show_titles: show_titles.unwrap_or(fallback.show_titles),
         wifi: wifi.unwrap_or(fallback.wifi),
         bluetooth: bluetooth.unwrap_or(fallback.bluetooth),

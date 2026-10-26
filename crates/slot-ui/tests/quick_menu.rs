@@ -107,7 +107,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Date & Time",
             "Clock",
             "Menu Sounds",
-            "Haptics"
+            "Haptics",
+            "Sound on TV"
         ]
     );
     let screens: Vec<&str> = QuickRow::screen_page()

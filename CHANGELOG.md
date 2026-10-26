@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.8.1
+
+- The Xbox Wireless Controller stays connected over Bluetooth. Pairing was asked for before bluetoothctl's agent was in, and bluez turns bonding off while no agent is registered, so the pad linked up, was never bonded and dropped straight after. Pairing now waits for the agent first.
+- Bluetooth and USB controllers have their own button map, with A, B, X and Y as printed on an Xbox pad, the bumpers as L1 and R1, the analog triggers as L2 and R2, View, Menu and the Xbox button as Select, Start and Menu, and the stick clicks as L3 and R3. They used the handheld's own button codes, so most buttons were wrong. The Xbox pad's right stick is read too.
+- Games that rumble, Dreamcast, N64, PlayStation and the GBA rumble carts among them, rumble a paired Xbox Wireless Controller as well as the handheld.
+- Sound on TV, under General, while the picture is on a TV. Off, the sound stays on the speaker or headphones, for a screen with no speakers.
+
 ## v2.8.0
 
 - Game Art fetches the game's real cartridge or disc. When ScreenScraper has a render of the actual cart, under physical media, the shelf draws that cart as it is in place of unslot's model. Failing that, the scan of the real label goes on the model, and only after that the box art and logo as before. Renders are kept in `Labels/<system>/Renders` next to the labels. Games that already have a label keep it; delete the label and fetch again to get the real one.

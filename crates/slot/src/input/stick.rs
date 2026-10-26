@@ -22,11 +22,16 @@ const DEADZONE: f32 = 0.07;
 /// bitmap, or None for a node with no sticks.
 ///
 /// A gamepad, a Bluetooth one say, puts its sticks on X, Y, RX and RY, with the triggers on Z
-/// and RZ. Anbernic's stock kernel has no X or Y and puts them on Z, RX, RY and RZ instead. A
-/// stickless board advertises RX, RY and RZ too, which never move, but never Z. muOS's device
-/// tree moves the left stick to Y and Z and has no X or RX, so that layout is told apart by them.
+/// and RZ, unless it has no RX or RY: the Xbox Wireless Controller over Bluetooth puts its right
+/// stick on Z and RZ and its triggers on brake and gas. Anbernic's stock kernel has no X or Y and
+/// puts them on Z, RX, RY and RZ instead. A stickless board advertises RX, RY and RZ too, which
+/// never move, but never Z. muOS's device tree moves the left stick to Y and Z and has no X or
+/// RX, so that layout is told apart by them.
 pub fn layout(abs: &str) -> Option<[u16; 4]> {
     let has = |code| has_bit(abs, code);
+    if has(ABS_X) && has(ABS_Y) && !has(ABS_RX) && !has(ABS_RY) && has(ABS_Z) && has(ABS_RZ) {
+        return Some([ABS_X, ABS_Y, ABS_Z, ABS_RZ]);
+    }
     if has(ABS_X) && has(ABS_Y) {
         return Some([ABS_X, ABS_Y, ABS_RX, ABS_RY]);
     }
@@ -163,6 +168,11 @@ mod tests {
     #[test]
     fn muoss_device_tree_layout_is_told_apart_by_its_missing_rx() {
         assert_eq!(layout("30036"), Some([ABS_Y, ABS_Z, ABS_RY, ABS_RZ]));
+    }
+
+    #[test]
+    fn an_xbox_pad_has_its_right_stick_on_z_and_rz() {
+        assert_eq!(layout("30627"), Some([ABS_X, ABS_Y, ABS_Z, ABS_RZ]));
     }
 
     #[test]

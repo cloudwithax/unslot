@@ -13,6 +13,7 @@ use slot::session::Session;
 use slot_gfx::Draw;
 use slot_input::{Action, Btn, Millis, RawEvent, POWER_HOLD_MS};
 use slot_store::{read_slot_state, write_slot_state, Core, Platform, SlotState, StateRing};
+use slot_ui::QuickRow;
 
 use slot::link_radio::{RadioJob, RadioJobs};
 
@@ -43,6 +44,15 @@ fn closing_the_lid_while_on_a_tv_keeps_the_game_playing() {
     a.set_external_display(true);
     a.apply(Action::LidClose);
     assert!(matches!(a.phase(), Phase::Playing { .. }));
+}
+
+#[test]
+fn sound_on_tv_is_only_offered_while_the_picture_is_on_one() {
+    let d = tmp_root_with_carts(&["Emerald"]);
+    let mut a = app_playing_in(d.path(), "Emerald");
+    assert!(a.hidden_rows().contains(&QuickRow::TvSound));
+    a.set_external_display(true);
+    assert!(!a.hidden_rows().contains(&QuickRow::TvSound));
 }
 
 #[test]

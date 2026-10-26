@@ -55,9 +55,19 @@ pub fn set_hdmi(on: bool) {
     HDMI.store(on, Ordering::Relaxed);
 }
 
+static TV_SOUND: AtomicBool = AtomicBool::new(true);
+
+/// Whether the sound goes to the TV at all while the picture is on one. Off, it stays on the
+/// speaker or headphones, for a screen with no speakers.
+pub fn set_tv_sound(on: bool) {
+    if TV_SOUND.swap(on, Ordering::Relaxed) != on && HDMI.load(Ordering::Relaxed) {
+        ROUTE_CHANGES.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 fn devices() -> Vec<String> {
     let route = ROUTE.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    let hdmi = if HDMI.load(Ordering::Relaxed) {
+    let hdmi = if HDMI.load(Ordering::Relaxed) && TV_SOUND.load(Ordering::Relaxed) {
         &HDMI_DEVICES[..]
     } else {
         &[]
