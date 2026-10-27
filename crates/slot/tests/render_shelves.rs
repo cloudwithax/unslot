@@ -708,6 +708,7 @@ fn both_cartridges_go_into_the_slot_at_their_own_size() {
                 SlotChrome {
                     cart: &cart,
                     face,
+                    size: cart_box(cart.platform),
                     rest,
                     scale: 1.0,
                     seat,
@@ -782,6 +783,7 @@ fn no_frame_of_the_travel_jumps_further_than_the_cartridge_is_tall() {
                 SlotChrome {
                     cart: &cart,
                     face: None,
+                    size: cart_box(cart.platform),
                     rest: (OUT_W - w) as f32 / 2.0,
                     scale: 1.0,
                     seat: (f as f32 / 27.0).min(1.0),

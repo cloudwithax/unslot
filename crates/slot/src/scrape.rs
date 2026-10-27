@@ -605,7 +605,8 @@ fn label_for(
             .unwrap_or(&cart.stem);
         // ScreenScraper refusing a game—a 403, a quota used up, an outage—is that game's
         // trouble and not the run's: it is passed over, and libretro still gets its turn.
-        match ss_art(fetch, login, system, crc, size, file) {
+        let with_render = slot_ui::has_real_media(cart.platform);
+        match ss_art(fetch, login, system, crc, size, file, with_render) {
             Ok(art) => {
                 logo = png(art.logo);
                 boxart = png(art.boxart);
@@ -682,6 +683,7 @@ fn ss_art(
     crc: Option<u32>,
     size: u64,
     file: &str,
+    with_render: bool,
 ) -> Result<SsArt, String> {
     let mut art = SsArt::default();
     let Some(answer) = fetch.get(&ss_url(login, system, crc, size, file))? else {
@@ -694,11 +696,11 @@ fn ss_art(
     if let Some(url) = ss_media(&answer, "box-2D") {
         art.boxart = fetch.get(&url)?;
     }
-    // The physical media: the label as scanned, and the cart or disc drawn whole.
+    // The physical media: the label as scanned, and the cart or disc drawn whole where it is one.
     if let Some(url) = ss_media(&answer, "support-texture") {
         art.texture = fetch.get(&url)?;
     }
-    if let Some(url) = ss_media(&answer, "support-2D") {
+    if let Some(url) = ss_media(&answer, "support-2D").filter(|_| with_render) {
         art.render = fetch.get(&url)?;
     }
     Ok(art)
@@ -1139,5 +1141,34 @@ game (
         assert_eq!(label[..4], [10, 20, 240, 255], "the label is not the scan of the real one");
         let render = slot_ui::render_of(cart).expect("the render was not kept");
         assert!(slot_ui::is_cutout(&std::fs::read(render).unwrap()));
+    }
+
+    #[test]
+    fn an_arcade_game_is_not_asked_for_a_picture_of_its_board() {
+        /// ScreenScraper with every kind of media, noting what was asked of it.
+        struct Asked(Vec<String>);
+        impl Fetch for Asked {
+            fn get(&mut self, url: &str) -> Result<Option<Vec<u8>>, String> {
+                self.0.push(url.to_string());
+                let kinds = ["support-texture", "support-2D"]
+                    .map(|k| format!(r#"{{"type":"{k}","region":"us","url":"https://ss/{k}"}}"#))
+                    .join(",");
+                Ok(Some(format!(r#"{{"medias":[{kinds}]}}"#).into_bytes()))
+            }
+        }
+        let login = SsLogin {
+            devid: "d".into(),
+            devpassword: "p".into(),
+            softname: "unslot".into(),
+            ssid: None,
+            sspassword: None,
+        };
+        for (platform, asked) in [(Platform::Snes, true), (Platform::Arcade, false)] {
+            let mut fetch = Asked(Vec::new());
+            let with_render = slot_ui::has_real_media(platform);
+            ss_art(&mut fetch, &login, 1, None, 0, "game.zip", with_render).unwrap();
+            let got = fetch.0.iter().any(|u| u == "https://ss/support-2D");
+            assert_eq!(got, asked, "{platform:?}");
+        }
     }
 }

@@ -833,12 +833,67 @@ fn a_picture_of_the_real_cart_is_drawn_whole_in_place_of_the_model() {
     let cart = &scan(d.path()).unwrap()[0];
     assert!(slot_ui::render_of(cart).is_some());
     let face = cart_face(cart);
-    assert_eq!((face.w, face.h), (CART_W, CART_H));
+    assert_eq!((face.w, face.h), (CART_W, 180), "a 100x50 picture, as wide as a GBA cart");
     // Its clear edge is trimmed away and it fills the width, standing on the bottom.
     for x in [0, CART_W / 2, CART_W - 1] {
-        assert_eq!(pixel(&face, x, CART_H - 1), [0x20, 0xc0, 0x40], "at {x}");
-        assert_eq!(pixel_alpha(&face, x, CART_H - 1), 0xff, "at {x}");
+        assert_eq!(pixel(&face, x, face.h - 1), [0x20, 0xc0, 0x40], "at {x}");
+        assert_eq!(pixel_alpha(&face, x, face.h - 1), 0xff, "at {x}");
     }
     assert_eq!(pixel_alpha(&face, CART_W / 2, 0), 0, "the model shows above it");
     assert!(!slot_ui::shows_interior(cart), "a board shows behind the real cart");
+}
+
+/// A cart of `platform` labelled `Labels/<its dir>/Real.png`, with a picture of the real one
+/// `w` by `h` beside it.
+fn real_cart(d: &TempDir, platform: Platform, w: u32, h: u32) -> slot_store::Cart {
+    let labels = d.path().join("Labels").join(platform.dir_name());
+    std::fs::create_dir_all(labels.join(slot_ui::RENDERS)).unwrap();
+    std::fs::write(labels.join("Real.png"), cutout(16, 16, 0)).unwrap();
+    std::fs::write(labels.join(slot_ui::RENDERS).join("Real.png"), cutout(w, h, 2)).unwrap();
+    slot_store::Cart {
+        platform,
+        stem: "Real".into(),
+        rom: d.path().join("Games/Real"),
+        label: Some(labels.join("Real.png")),
+        title: String::new(),
+        code: String::new(),
+        shell: None,
+    }
+}
+
+#[test]
+fn every_systems_real_cart_stands_as_big_as_a_gba_cart_or_a_game_boy_pak() {
+    let d = tmp_root();
+    // A wide cart is as wide as a GBA cart, a tall one as tall as a Game Boy pak, whatever box
+    // its system's modelled cart has.
+    for (platform, (w, h), size) in [
+        (Platform::Snes, (400, 280), (CART_W, 252)),
+        (Platform::Genesis, (420, 250), (CART_W, 214)),
+        (Platform::Genesis, (300, 400), (253, GB_CART_H)),
+        (Platform::Nes, (300, 330), (306, GB_CART_H)),
+        (Platform::Gba, (360, 212), (CART_W, CART_H)),
+    ] {
+        let cart = real_cart(&d, platform, w, h);
+        assert_eq!(slot_ui::face_size(&cart), size, "{platform:?} {w}x{h}");
+        let face = cart_face(&cart);
+        assert_eq!((face.w, face.h), size, "{platform:?} {w}x{h}");
+    }
+}
+
+#[test]
+fn the_arcades_and_the_computers_pictures_are_not_drawn_as_their_cart() {
+    let d = tmp_root();
+    for platform in [Platform::Arcade, Platform::Cps2, Platform::GameAndWatch, Platform::Dos] {
+        assert!(!slot_ui::has_real_media(platform), "{platform:?}");
+        let cart = real_cart(&d, platform, 400, 300);
+        assert!(slot_ui::render_of(&cart).is_none(), "{platform:?} drew its picture");
+    }
+    assert!(slot_ui::has_real_media(Platform::Snes));
+}
+
+#[test]
+fn a_face_seats_as_its_systems_cart_does() {
+    for p in [Platform::Gba, Platform::Gb, Platform::Snes, Platform::Genesis, Platform::PlayStation] {
+        assert_eq!(slot_ui::seated_size(slot_ui::cart_box(p)), seated_box(p), "{p:?}");
+    }
 }

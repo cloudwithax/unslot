@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.8.3
+
+- Real carts fetched from ScreenScraper are all drawn the same size. Each was fitted inside its own system's model, so a SNES cart came out big and a Genesis cart small. Every real cart now stands as wide as a GBA cart or as tall as a Game Boy cart, whichever it reaches first, and goes into the slot the same way.
+- Game Art no longer fetches a picture of the physical media for arcade games, the computers, Game & Watch, PICO-8 and TIC-80. ScreenScraper has a cabinet, a machine or a whole set there, not a cart, so these keep unslot's own model with the real label. Pictures already fetched for them are no longer drawn.
+
 ## v2.8.2
 
 - The menus fill a square screen, such as the RG CubeXX's. They were drawn in a 720 by 480 strip across the middle with black above and below. The shelf, menus and settings are now laid out at 720 by 720, with the cart slot and footer at the bottom and the shelf and lists in the middle. Games keep their shape as before. Other handhelds are unchanged.

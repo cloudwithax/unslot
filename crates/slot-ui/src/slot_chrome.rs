@@ -2,7 +2,7 @@ use slot_gfx::{Canvas, Draw, TexId, OUT_H};
 use slot_store::Cart;
 
 use crate::draw::shift_down;
-use crate::cart::{cart_box, label_colour, label_text, seated_box, SEATED_W};
+use crate::cart::{label_colour, label_text, seated_size, SEATED_W};
 use crate::footer::Printed;
 use crate::icon::icon_box;
 use crate::plate::HINT_H;
@@ -82,6 +82,8 @@ const CREEP: f32 = 0.03;
 pub struct SlotChrome<'a> {
     pub cart: &'a Cart,
     pub face: Option<TexId>,
+    /// The face's size on the shelf, at full scale.
+    pub size: (u32, u32),
     pub rest: f32,
     pub scale: f32,
     pub seat: f32,
@@ -125,12 +127,11 @@ impl SlotChrome<'_> {
 
         draw_slot_back(canvas, self.slot, slot_alpha, out);
 
-        let (cw, ch) = cart_box(self.cart.platform);
-        let (cw, ch) = (cw as f32, ch as f32);
+        let (cw, ch) = (self.size.0 as f32, self.size.1 as f32);
 
         let scale = self.scale.clamp(0.0, 1.0);
         let (w0, h0) = (cw * scale, ch * scale);
-        let (sw, sh) = seated_box(self.cart.platform);
+        let (sw, sh) = seated_size(self.size);
         let (sw, sh) = (sw as f32, sh as f32);
         // The cart comes down from the shelf, which a square canvas centres, to the slot,
         // which it keeps at the bottom.

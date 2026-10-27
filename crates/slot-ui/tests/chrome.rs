@@ -141,6 +141,7 @@ fn chrome_into(c: &Cart, seat: f32, out: &mut Vec<Draw>) {
     SlotChrome {
         cart: c,
         face: None,
+        size: cart_box(c.platform),
         rest: centred(c),
         scale: 1.0,
         seat,
@@ -175,6 +176,7 @@ fn a_cart_the_row_had_not_finished_moving_slides_across_as_it_goes_in() {
         SlotChrome {
             cart: &c,
             face: Some(face),
+            size: cart_box(c.platform),
             rest,
             scale,
             seat,
@@ -236,6 +238,7 @@ fn draw_powering_on(t: f32, out: &mut Vec<Draw>) {
     SlotChrome {
         cart: &c,
         face: None,
+        size: cart_box(c.platform),
         rest: CENTRED,
         scale: 1.0,
         seat: 1.0,
@@ -651,6 +654,7 @@ fn the_empty_slot_is_the_same_slot_the_chrome_draws() {
     SlotChrome {
         cart: &c,
         face: None,
+        size: cart_box(c.platform),
         rest: CENTRED,
         scale: 1.0,
         seat: 1.0,
@@ -890,6 +894,7 @@ fn a_clear_carts_board_goes_into_the_slot_and_comes_out_with_it() {
             SlotChrome {
                 cart: &c,
                 face: Some(face),
+                size: cart_box(c.platform),
                 rest: centred(&c),
                 scale: 1.0,
                 seat,

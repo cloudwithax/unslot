@@ -5087,7 +5087,7 @@ impl App {
             return 0.0;
         };
         match self.shelf().find(cart) {
-            Some((c, _)) if Media::of(c.platform) == Some(Media::Disc) => {
+            Some((c, _, _)) if Media::of(c.platform) == Some(Media::Disc) => {
                 INSERT_S + SPIN_S + DARK_S
             }
             _ => 0.0,
@@ -5509,13 +5509,14 @@ impl App {
     }
 
     fn draw_seated_mouth(&self, stem: &str, out: &mut Vec<Draw>) {
-        let Some((cart, face)) = self.shelf().find(stem) else {
+        let Some((cart, face, size)) = self.shelf().find(stem) else {
             return;
         };
         let (rest, scale) = self.shelf().selected_at(self.canvas());
         SlotChrome {
             cart,
             face,
+            size,
             rest,
             scale,
             seat: 1.0,
@@ -5580,7 +5581,7 @@ impl App {
     }
 
     fn chrome(&self, stem: &str, dim: f32, out: &mut Vec<Draw>) {
-        let Some((cart, face)) = self.shelf().find(stem) else {
+        let Some((cart, face, size)) = self.shelf().find(stem) else {
             return;
         };
         let alpha = self.alert_alpha();
@@ -5588,6 +5589,7 @@ impl App {
         SlotChrome {
             cart,
             face,
+            size,
             rest,
             scale,
             seat: self.seat(),
@@ -5815,7 +5817,7 @@ impl App {
                     turn,
                 });
             }
-        } else if let Some((_, Some(tex))) = self
+        } else if let Some((_, Some(tex), _)) = self
             .selected_stem()
             .and_then(|stem| self.shelf().find(stem))
         {

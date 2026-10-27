@@ -5,7 +5,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use slot_gfx::{Canvas, Compositor, HeadlessSurface};
 use slot_store::{Cart, Platform};
 use slot_ui::{
-    cart_face, mould_shadow, Draw, Mould, Shelf, SlotChrome, TexId, CART_W, OUT_H, OUT_W,
+    cart_box, cart_face, mould_shadow, Draw, Mould, Shelf, SlotChrome, TexId, CART_W, OUT_H, OUT_W,
 };
 
 static GL: Mutex<()> = Mutex::new(());
@@ -177,6 +177,7 @@ fn the_slot_takes_over_the_cart_where_the_row_had_it() {
     SlotChrome {
         cart: &cart,
         face: Some(faces[s.index]),
+        size: cart_box(cart.platform),
         rest,
         scale,
         seat: 0.0,

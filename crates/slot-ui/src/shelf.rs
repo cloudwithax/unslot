@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use crate::bitmaps::Mould;
 use crate::board::{board_in, Placed};
 use crate::cart::{
-    cart_box, label_colour, label_rect, label_text, mould_of, render_of, shows_interior, CART_H,
+    face_size, label_colour, label_rect, label_text, mould_of, render_of, shows_interior, CART_H,
     CART_W,
 };
 use crate::hud::Millis;
@@ -58,6 +58,8 @@ pub struct Shelf {
     clears: Vec<OnceLock<bool>>,
     /// Whether each cart is drawn from a picture of the real one, which casts no mould's shadow.
     reals: Vec<OnceLock<bool>>,
+    /// Each cart's face size, which for a picture of the real one is the picture's.
+    sizes: Vec<OnceLock<(u32, u32)>>,
     starred: Vec<bool>,
     star: Option<(TexId, f32, f32)>,
     ride: f32,
@@ -71,6 +73,7 @@ impl Shelf {
             shells: carts.iter().map(|_| OnceLock::new()).collect(),
             clears: carts.iter().map(|_| OnceLock::new()).collect(),
             reals: carts.iter().map(|_| OnceLock::new()).collect(),
+            sizes: carts.iter().map(|_| OnceLock::new()).collect(),
             faces: vec![None; carts.len()],
             interiors: vec![None; carts.len()],
             starred: vec![false; carts.len()],
@@ -107,12 +110,21 @@ impl Shelf {
         *cell.get_or_init(|| render_of(cart).is_some())
     }
 
+    /// The size cart `i` is drawn at on the shelf, at full scale.
+    pub fn size(&self, i: usize) -> (u32, u32) {
+        let (Some(cell), Some(cart)) = (self.sizes.get(i), self.carts.get(i)) else {
+            return (CART_W, CART_H);
+        };
+        *cell.get_or_init(|| face_size(cart))
+    }
+
     /// Gives cart `i` the label at `path`, which may come with a picture of the real cart.
     pub fn relabel(&mut self, i: usize, path: PathBuf) {
         if let Some(cart) = self.carts.get_mut(i) {
             cart.label = Some(path);
             self.clears[i] = OnceLock::new();
             self.reals[i] = OnceLock::new();
+            self.sizes[i] = OnceLock::new();
         }
     }
 
@@ -126,6 +138,7 @@ impl Shelf {
         self.shells = carts.iter().map(|_| OnceLock::new()).collect();
         self.clears = carts.iter().map(|_| OnceLock::new()).collect();
         self.reals = carts.iter().map(|_| OnceLock::new()).collect();
+        self.sizes = carts.iter().map(|_| OnceLock::new()).collect();
         self.faces = vec![None; carts.len()];
         self.interiors = vec![None; carts.len()];
         self.starred = vec![false; carts.len()];
@@ -217,9 +230,9 @@ impl Shelf {
         [self.interiors.get(i).copied().flatten(), board]
     }
 
-    pub fn find(&self, stem: &str) -> Option<(&Cart, Option<TexId>)> {
+    pub fn find(&self, stem: &str) -> Option<(&Cart, Option<TexId>, (u32, u32))> {
         let i = self.carts.iter().position(|c| c.stem == stem)?;
-        Some((&self.carts[i], self.face(i)))
+        Some((&self.carts[i], self.face(i), self.size(i)))
     }
 
     pub fn left(&mut self) {
@@ -373,9 +386,11 @@ impl Shelf {
     }
 
     fn slot_width(&self, slot: i32) -> (f32, bool) {
-        match self.cart_at_offset(slot).map(|i| self.carts[i].platform) {
-            Some(Platform::Gba) | None => (CART_W as f32, true),
-            Some(p) => (cart_box(p).0 as f32, false),
+        match self.cart_at_offset(slot) {
+            Some(i) if self.carts[i].platform != Platform::Gba || self.real(i) => {
+                (self.size(i).0 as f32, false)
+            }
+            _ => (CART_W as f32, true),
         }
     }
 
@@ -443,7 +458,7 @@ impl Shelf {
             let t = offset.abs().min(1.0);
             let scale = shrink(offset);
             let alpha = (1.0 + (SIDE_ALPHA - 1.0) * t) * (1.0 - recede);
-            let (cw, ch) = cart_box(cart.platform);
+            let (cw, ch) = self.size(i);
             let (w, h) = (cw as f32 * scale, ch as f32 * scale);
             let away = offset.signum() * (1.0 + offset.abs());
             let x = self.centre(canvas, slot) - w / 2.0 + away * PART * recede;

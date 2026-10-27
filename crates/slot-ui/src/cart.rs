@@ -271,18 +271,66 @@ pub fn cart_backing(shell: Option<GbShell>) -> CartFace {
 /// Where the scraper keeps a picture of a game's real cart, beside its label.
 pub const RENDERS: &str = "Renders";
 
+/// Whether ScreenScraper's picture of a system's media is one game's own cart, card or disc. The
+/// arcade's is a board or a cabinet, Game & Watch's the whole machine, and the computers' and
+/// fantasy consoles' a box set, a pile of disks or nothing real at all.
+pub fn has_real_media(platform: Platform) -> bool {
+    !matches!(
+        platform,
+        Platform::Arcade
+            | Platform::Cps1
+            | Platform::Cps2
+            | Platform::Cps3
+            | Platform::GameAndWatch
+            | Platform::Atari800
+            | Platform::AtariSt
+            | Platform::Commodore64
+            | Platform::Amiga
+            | Platform::ZxSpectrum
+            | Platform::AmstradCpc
+            | Platform::Dos
+            | Platform::Pc98
+            | Platform::X68000
+            | Platform::ScummVm
+            | Platform::Pico8
+            | Platform::Tic80
+    )
+}
+
 /// The picture of the game's real cart, drawn whole in place of the modelled one, when the
 /// scraper found one: `Renders/<the label's name>` beside its label.
 pub fn render_of(cart: &Cart) -> Option<PathBuf> {
+    if !has_real_media(cart.platform) {
+        return None;
+    }
     let label = cart.label.as_deref()?;
     let path = label.parent()?.join(RENDERS).join(label.file_name()?);
     path.is_file().then_some(path)
 }
 
-/// The size of a cart's face: its mould's.
+/// The size of a cart's face: its mould's, or for a picture of the real cart, the picture fitted
+/// as wide as a GBA cart at most and as tall as a Game Boy pak at most, so every system's real
+/// cart stands as big as the Game Boy family's do.
 pub fn face_size(cart: &Cart) -> (u32, u32) {
+    if let Some((w, h)) = render_of(cart).and_then(|p| art::png_size(&p)) {
+        let scale = (CART_W as f32 / w as f32).min(GB_CART_H as f32 / h as f32);
+        return (
+            ((w as f32 * scale).round() as u32).clamp(1, CART_W),
+            ((h as f32 * scale).round() as u32).clamp(1, GB_CART_H),
+        );
+    }
     let s = spec(mould_of(cart));
     (s.w, s.h)
+}
+
+/// The size a face of `w` by `h` is drawn at once it sits in the slot: as wide as a seated cart,
+/// unless that would stand taller than a seated Game Boy pak.
+pub fn seated_size((w, h): (u32, u32)) -> (u32, u32) {
+    let tall = (SEATED_W * h + w / 2) / w;
+    if tall <= GB_SEATED_H {
+        return (SEATED_W, tall);
+    }
+    ((GB_SEATED_H * w + h / 2) / h, GB_SEATED_H)
 }
 
 pub fn label_size(cart: &Cart) -> (u32, u32) {
