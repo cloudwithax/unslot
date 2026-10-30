@@ -34,6 +34,7 @@ for bin in syncthing tailscaled wireguard-go samba/bin/smbd samba/bin/smbpasswd;
 done
 # wpa_cli runs this itself as the link comes and goes, to start DHCP.
 [ -x "$TREE/System/slotwifi.sh" ] || { echo "$TREE/System/slotwifi.sh is not executable" >&2; exit 1; }
+[ -x "$TREE/System/slotmiracast.sh" ] || { echo "$TREE/System/slotmiracast.sh is not executable" >&2; exit 1; }
 mkdir -p "$CACHE"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT HUP INT TERM

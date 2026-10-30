@@ -11,13 +11,22 @@ const PTR: u16 = 12;
 const TXT: u16 = 16;
 const SRV: u16 = 33;
 
-/// A Chromecast or TV with one built in.
+/// A TV to cast to: a Chromecast, a TV with one built in, or a Miracast TV.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Receiver {
     /// What its owner called it.
     pub name: String,
     pub model: String,
-    pub addr: SocketAddr,
+    pub addr: Addr,
+}
+
+/// How a receiver is reached.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Addr {
+    /// A Chromecast's control channel.
+    Cast(SocketAddr),
+    /// A Miracast TV's Wi-Fi Direct device address.
+    Miracast(String),
 }
 
 /// The receivers that answer within `wait`, those that can show a picture, by name.
@@ -134,7 +143,7 @@ pub fn parse(msg: &[u8], from: SocketAddr) -> Vec<Receiver> {
         out.push(Receiver {
             name: get("fn").unwrap_or_else(|| instance.clone()),
             model: get("md").unwrap_or_default(),
-            addr: SocketAddr::new(from.ip(), port),
+            addr: Addr::Cast(SocketAddr::new(from.ip(), port)),
         });
     }
     out
@@ -237,7 +246,7 @@ mod tests {
             [Receiver {
                 name: "Bedroom TV".into(),
                 model: "Chromecast".into(),
-                addr: "192.168.1.82:8010".parse().unwrap(),
+                addr: Addr::Cast("192.168.1.82:8010".parse().unwrap()),
             }]
         );
     }

@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.9.0
+
+- Cast to a Miracast TV as well as a Chromecast. Under Network → Cast, TVs and projectors that take Miracast over Wi-Fi Direct, such as LG, Samsung and Roku TVs and the HY300, are listed with the Chromecasts and marked Miracast. Pick one, accept the handheld on the TV if it asks, and it shows the handheld's screen at 640 by 480 and up to 60 fps, less in the heaviest games, with the sound. The sound goes as AAC to a TV that takes it, as Android-based ones need, and as LPCM to the rest. Wi-Fi Direct uses the handheld's second radio, so the home Wi-Fi stays connected while casting. The TV has to lead the Wi-Fi Direct group; a TV that wants the handheld to lead it says so and is not cast to.
+
 ## v2.8.3
 
 - Real carts fetched from ScreenScraper are all drawn the same size. Each was fitted inside its own system's model, so a SNES cart came out big and a Genesis cart small. Every real cart now stands as wide as a GBA cart or as tall as a Game Boy cart, whichever it reaches first, and goes into the slot the same way.

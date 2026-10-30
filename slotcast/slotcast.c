@@ -1,5 +1,5 @@
 /*
- * libslotcast: the encoders unslot casts with, x264 for the picture and Opus for the sound, and
+ * libslotcast: the encoders unslot casts with, x264 for the picture and Opus or AAC for the sound, and
  * mbedTLS for talking to the TV, which the handheld has no library for, behind a few calls of its
  * own, so slot loads them at run time with nothing of their structs to keep in step with.
  */
@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <faac.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
 #include <mbedtls/net_sockets.h>
@@ -135,6 +136,42 @@ EXPORT void slotcast_opus_close(void *enc)
 {
 	if (enc)
 		opus_encoder_destroy(enc);
+}
+
+/* An AAC-LC encoder for 16-bit interleaved stereo at rate, bps bits a second, each frame in ADTS.
+ * NULL when FAAC will not have it. */
+EXPORT void *slotcast_aac_open(int rate, int bps)
+{
+	faac_params p;
+	faac_encoder *e = NULL;
+	if (faac_params_init(&p, sizeof(p)) != FAAC_OK)
+		return NULL;
+	p.sample_rate = rate;
+	p.num_channels = 2;
+	p.object_type = FAAC_OBJ_LOW;
+	p.bit_rate = bps / 2;
+	p.use_tns = true;
+	p.output_format = FAAC_STREAM_ADTS;
+	p.input_format = FAAC_INPUT_16BIT;
+	if (faac_encoder_open(&p, &e) != FAAC_OK)
+		return NULL;
+	return e;
+}
+
+/* Takes frames stereo frames of sound, 1024 at most, and writes a frame of AAC into out, none
+ * the first few calls while it fills. Returns the frame's length, 0 for none, or < 0 on an
+ * error. */
+EXPORT int slotcast_aac_encode(void *enc, const int16_t *pcm, int frames, uint8_t *out, int cap)
+{
+	uint32_t n = 0;
+	if (faac_encoder_encode(enc, pcm, frames * 2, out, cap, &n) != FAAC_OK)
+		return -1;
+	return n;
+}
+
+EXPORT void slotcast_aac_close(void *enc)
+{
+	faac_encoder_close((faac_encoder **)&enc);
 }
 
 struct tls {

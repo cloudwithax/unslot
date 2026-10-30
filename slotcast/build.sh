@@ -1,17 +1,17 @@
 #!/bin/sh
-# Builds libslotcast.so, what unslot casts to a TV with: x264 and Opus to encode, mbedTLS to talk
-# to the TV, each from its pinned commit, static, under slotcast.c's few calls.
+# Builds libslotcast.so, what unslot casts to a TV with: x264, Opus and FAAC to encode, mbedTLS to
+# talk to the TV, each from its pinned commit, static, under slotcast.c's few calls.
 #
-#   build.sh X264_COMMIT OPUS_COMMIT MBEDTLS_COMMIT WORK OUT
+#   build.sh X264_COMMIT OPUS_COMMIT MBEDTLS_COMMIT FAAC_COMMIT WORK OUT
 #
 # Runs on an aarch64 Debian bullseye box, as the release does, or cross-compiles from an amd64
 # one in cores/gles/Dockerfile, as the GPU cores do. On an amd64 box with HOST=1 it builds for
 # that box instead, for casting from slot on a desktop.
 set -eu
 
-x264_commit="$1" opus_commit="$2" mbedtls_commit="$3" out="$5"
-mkdir -p "$4"
-work="$(cd "$4" && pwd)"
+x264_commit="$1" opus_commit="$2" mbedtls_commit="$3" faac_commit="$4" out="$6"
+mkdir -p "$5"
+work="$(cd "$5" && pwd)"
 here="$(cd "$(dirname "$0")" && pwd)"
 jobs="$(nproc)"
 case "$(uname -m)-${HOST:-0}" in
@@ -64,10 +64,22 @@ cmake -S "$work/mbedtls" -B "$work/mbedtls/build" $toolchain -DCMAKE_BUILD_TYPE=
 cmake --build "$work/mbedtls/build" -j"$jobs"
 cmake --install "$work/mbedtls/build" >/dev/null
 
+fetch faac https://github.com/knik0/faac.git "$faac_commit"
+# Its few files built as they are, for Meson's config.h holds no more than these.
+for c in bitstream blockswitch channels cpu_compute faac filtbank fft frame huff2 huffdata \
+	quantize ratecontrol sbr sbr_bitstream sbr_tables sbr_analysis resample stereo tns util; do
+	"${cross}gcc" -c -O2 -fPIC -std=gnu11 $cpu -DPACKAGE='"faac"' -DPACKAGE_VERSION='"2"' \
+		-DFAAC_SBR_DECIMATION=1 -DMAX_CHANNELS=2 -I"$work/faac" -I"$work/faac/include" \
+		-o "$work/faac/$c.o" "$work/faac/libfaac/$c.c"
+done
+"${cross}ar" rcs "$work/prefix/lib/libfaac.a" "$work"/faac/*.o
+cp "$work/faac/include/faac.h" "$work/prefix/include/"
+
 # Only slotcast.c's calls are seen from outside.
 "${cross}gcc" -shared -fPIC -O2 $cpu -fvisibility=hidden -o "$work/libslotcast.so" \
 	"$here/slotcast.c" -I"$work/prefix/include" -I"$work/prefix/include/opus" \
-	"$work/prefix/lib/libx264.a" "$work/prefix/lib/libopus.a" "$work/prefix/lib/libmbedtls.a" \
+	"$work/prefix/lib/libx264.a" "$work/prefix/lib/libopus.a" "$work/prefix/lib/libfaac.a" \
+	"$work/prefix/lib/libmbedtls.a" \
 	"$work/prefix/lib/libmbedx509.a" "$work/prefix/lib/libmbedcrypto.a" \
 	-Wl,--exclude-libs,ALL -Wl,-z,defs -lm -lpthread -ldl
 "${cross}strip" --strip-unneeded "$work/libslotcast.so"
@@ -80,4 +92,6 @@ cp "$work/libslotcast.so" "$out"
 	echo "opus_source=https://github.com/xiph/opus/tree/$opus_commit"
 	echo "mbedtls=$mbedtls_commit"
 	echo "mbedtls_source=https://github.com/Mbed-TLS/mbedtls/tree/$mbedtls_commit"
+	echo "faac=$faac_commit"
+	echo "faac_source=https://github.com/knik0/faac/tree/$faac_commit"
 } >"$out.meta"

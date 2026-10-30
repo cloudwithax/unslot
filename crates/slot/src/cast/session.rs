@@ -18,7 +18,7 @@ use slot_gfx::cast_tap::{set_frame_tap, FrameTap};
 
 use super::channel::{self, Message, NS_CONNECTION, NS_HEARTBEAT, NS_RECEIVER, NS_WEBRTC};
 use super::codec::{self, Codecs, Opus, H264, OPUS_FRAMES};
-use super::mdns::Receiver;
+use super::mdns::{Addr, Receiver};
 use super::rtp::{parse_rtcp, Feedback, Stream};
 use super::tls::Tls;
 
@@ -100,7 +100,7 @@ fn kind(json: &str) -> String {
     crate::json::string(json, "type").unwrap_or_default().to_uppercase()
 }
 
-fn random<const N: usize>() -> [u8; N] {
+pub(super) fn random<const N: usize>() -> [u8; N] {
     let mut out = [0u8; N];
     if let Err(e) = std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut out)) {
         eprintln!("slot: cast: /dev/urandom: {e}");
@@ -159,8 +159,11 @@ impl Session {
     }
 
     fn begin(lib: &Path, to: &Receiver, tap: Arc<FrameTap>) -> Result<Session, String> {
+        let Addr::Cast(addr) = to.addr else {
+            return Err("not a Chromecast".into());
+        };
         let codecs = Codecs::load(lib)?;
-        let tls = Tls::connect(&codecs, to.addr, Duration::from_secs(5))?;
+        let tls = Tls::connect(&codecs, addr, Duration::from_secs(5))?;
         let me = format!("sender-{}", 10_000 + u32::from_le_bytes(random()) % 90_000);
         let mut control = Control {
             tls,
@@ -170,7 +173,7 @@ impl Session {
         let (session, transport) = launch(&mut control)?;
         let streaming = agree(&mut control, &tap, to, &transport).and_then(|agreed| {
             let udp = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).map_err(|e| e.to_string())?;
-            udp.connect((to.addr.ip(), agreed.0)).map_err(|e| e.to_string())?;
+            udp.connect((addr.ip(), agreed.0)).map_err(|e| e.to_string())?;
             udp.set_read_timeout(Some(Duration::from_millis(100)))
                 .map_err(|e| e.to_string())?;
             Ok((agreed, udp))
@@ -193,7 +196,7 @@ impl Session {
         eprintln!(
             "slot: cast: to {} at {}, {}x{}, port {port}{}",
             to.name,
-            to.addr,
+            addr,
             size.0,
             size.1,
             if audio_on { "" } else { ", no sound" }

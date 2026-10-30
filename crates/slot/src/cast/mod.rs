@@ -1,22 +1,29 @@
 //! Casting: the screen and its sound mirrored to a Chromecast, or a TV with one built in, over
-//! the Wi-Fi with Cast Streaming, as Chrome does for a tab.
+//! the Wi-Fi with Cast Streaming, as Chrome does for a tab; or to a Miracast TV, over Wi-Fi
+//! Direct.
 
 pub mod channel;
 pub mod codec;
 pub mod mdns;
+pub mod miracast;
+pub mod p2p;
 pub mod rtp;
 pub mod session;
 mod tls;
+pub mod ts;
+pub mod wfd;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver as Jobs, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub use mdns::Receiver;
+pub use mdns::{Addr, Receiver};
 
-/// How long a search listens for answers.
+/// How long a search listens for answers, and looks for Miracast TVs: a fresh Wi-Fi Direct
+/// supplicant takes some 6 s to hear its first.
 const SEARCH: Duration = Duration::from_secs(3);
+const SEARCH_P2P: Duration = Duration::from_secs(10);
 
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub enum CastBusy {
@@ -74,7 +81,9 @@ impl Cast {
         let real = cfg!(feature = "device") || std::env::var_os("SLOT_CAST_LIB").is_some();
         match real {
             true => Cast::spawn(Box::new(NetCast {
+                root: root.to_path_buf(),
                 lib: codec::library(root),
+                p2p: cfg!(feature = "device"),
                 session: None,
             })),
             false => Cast::spawn(Box::new(SimCast::default())),
@@ -158,17 +167,63 @@ fn work(mut backend: Box<dyn CastBackend>, jobs: Jobs<Job>, view: Arc<Mutex<Cast
 
 /// Casting over the network.
 struct NetCast {
+    root: PathBuf,
     lib: PathBuf,
-    session: Option<session::Session>,
+    /// Whether to look for Miracast TVs too, which takes the handheld's second radio.
+    p2p: bool,
+    session: Option<Live>,
+}
+
+enum Live {
+    Cast(session::Session),
+    Miracast(miracast::Session),
+}
+
+impl Live {
+    fn ended(&self) -> Option<String> {
+        match self {
+            Live::Cast(s) => s.ended(),
+            Live::Miracast(s) => s.ended(),
+        }
+    }
 }
 
 impl CastBackend for NetCast {
     fn search(&mut self) -> Result<Vec<Receiver>, String> {
-        mdns::search(SEARCH).map_err(|e| e.to_string())
+        let root = self.root.clone();
+        // The radio a Miracast in progress is on is left to it.
+        let free = !matches!(self.session, Some(Live::Miracast(_)));
+        let p2p = (self.p2p && free)
+            .then(|| std::thread::spawn(move || p2p::Radio::up(&root)?.sinks(SEARCH_P2P)));
+        let cast = mdns::search(SEARCH).map_err(|e| e.to_string());
+        let tvs = p2p.map(|t| t.join().unwrap_or_else(|_| Err("Wi-Fi Direct failed".into())));
+        let tvs = match tvs {
+            Some(Ok(tvs)) => Some(tvs),
+            Some(Err(e)) => {
+                eprintln!("slot: cast: miracast: {e}");
+                None
+            }
+            None => None,
+        };
+        // Only an error when nothing could be looked for.
+        let mut found = match (cast, &tvs) {
+            (Ok(found), _) => found,
+            (Err(e), None) => return Err(e),
+            (Err(_), Some(_)) => Vec::new(),
+        };
+        found.extend(tvs.into_iter().flatten());
+        found.sort_by_key(|r| r.name.to_lowercase());
+        Ok(found)
     }
 
     fn start(&mut self, to: &Receiver) -> Result<(), String> {
-        let s = session::Session::start(&self.lib, to).map_err(|e| {
+        let started = match to.addr {
+            Addr::Cast(_) => session::Session::start(&self.lib, to).map(Live::Cast),
+            Addr::Miracast(_) => {
+                miracast::Session::start(&self.root, &self.lib, to).map(Live::Miracast)
+            }
+        };
+        let s = started.map_err(|e| {
             eprintln!("slot: cast: to {}: {e}", to.name);
             e
         })?;
@@ -199,7 +254,7 @@ impl CastBackend for SimCast {
         Ok(vec![Receiver {
             name: "Living Room TV".into(),
             model: "Chromecast".into(),
-            addr: ([192, 168, 1, 50], 8009).into(),
+            addr: Addr::Cast(([192, 168, 1, 50], 8009).into()),
         }])
     }
 

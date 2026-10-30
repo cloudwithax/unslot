@@ -20,10 +20,11 @@ vars:
     nodosumi:ff1d603f8037dd6c5baec850999f9650677622d1
     flycast:6bb0fc3e18dac4b01694f488c7a71f5930e8a648
     ppsspp:5f2d4afbdced51ac056af25a05fd182a1175b558
-  # What libslotcast.so, which casting to a TV runs on, is built from: x264, Opus and mbedTLS.
+  # What libslotcast.so, which casting to a TV runs on, is built from: x264, Opus, mbedTLS and
+  # FAAC.
   SLOTCAST: >-
     b35605ace3ddf7c1a5d67a2eb553f034aef41d55 ddbe48383984d56acd9e1ab6a090c54ca6b735a6
-    068ff080b369adfac81509f9b57b2afabaf82dc5
+    068ff080b369adfac81509f9b57b2afabaf82dc5 6acbe23ac9318d8f731ef38e0a56365f70af4797
   SLOT_IN_PROCESS: >-
     --test bios --test core --test core_options --test e2e --test emu --test gb_palette_recolour --test gpsp
     --test link_ui --test mgba_gb_link --test mgba_link --test render_colour_correction
@@ -118,6 +119,7 @@ tasks:
       - sh card/test-coresave.sh
       - sh card/test-launch.sh
       - sh card/test-slotwifi.sh
+      - sh card/test-slotmiracast.sh
       - sh card/test-slotbt.sh
       - sh card/test-slotservices.sh
       - sh card/test-update.sh
@@ -355,13 +357,14 @@ tasks:
 
   cast:lib:
     desc: >-
-      Build libslotcast.so, x264, Opus and mbedTLS from their pinned commits, natively on an
+      Build libslotcast.so, x264, Opus, mbedTLS and FAAC from their pinned commits, natively on an
       aarch64 Linux box or cross-compiled in cores/gles/Dockerfile
     status:
       - |
         set -- {{.SLOTCAST}}
         m=vendor/libslotcast.so.meta
-        grep -qx "x264=$1" $m && grep -qx "opus=$2" $m && grep -qx "mbedtls=$3" $m
+        grep -qx "x264=$1" $m && grep -qx "opus=$2" $m && grep -qx "mbedtls=$3" $m \
+          && grep -qx "faac=$4" $m
     cmds:
       - |
         set -eu

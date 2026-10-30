@@ -1,6 +1,6 @@
-//! The encoders: x264 for the picture and Opus for the sound, both in `libslotcast.so`, which
-//! carries them, and the TLS the TV is talked to with, behind a few functions of its own and is
-//! loaded only when a cast starts.
+//! The encoders: x264 for the picture and Opus or AAC for the sound, all in `libslotcast.so`,
+//! which carries them, and the TLS the TV is talked to with, behind a few functions of its own
+//! and is loaded only when a cast starts.
 
 use std::ffi::{c_int, c_void};
 use std::path::{Path, PathBuf};
@@ -19,6 +19,9 @@ pub struct Codecs {
     opus_open: unsafe extern "C" fn(c_int, c_int, c_int) -> Ptr,
     opus_encode: unsafe extern "C" fn(Ptr, *const i16, c_int, *mut u8, c_int) -> c_int,
     opus_close: unsafe extern "C" fn(Ptr),
+    aac_open: unsafe extern "C" fn(c_int, c_int) -> Ptr,
+    aac_encode: unsafe extern "C" fn(Ptr, *const i16, c_int, *mut u8, c_int) -> c_int,
+    aac_close: unsafe extern "C" fn(Ptr),
     pub(super) tls_connect: unsafe extern "C" fn(c_int) -> Ptr,
     pub(super) tls_read: unsafe extern "C" fn(Ptr, *mut u8, c_int) -> c_int,
     pub(super) tls_write: unsafe extern "C" fn(Ptr, *const u8, c_int) -> c_int,
@@ -50,6 +53,9 @@ impl Codecs {
                 opus_open: sym!("slotcast_opus_open"),
                 opus_encode: sym!("slotcast_opus_encode"),
                 opus_close: sym!("slotcast_opus_close"),
+                aac_open: sym!("slotcast_aac_open"),
+                aac_encode: sym!("slotcast_aac_encode"),
+                aac_close: sym!("slotcast_aac_close"),
                 tls_connect: sym!("slotcast_tls_connect"),
                 tls_read: sym!("slotcast_tls_read"),
                 tls_write: sym!("slotcast_tls_write"),
@@ -80,6 +86,8 @@ pub struct H264 {
     pub h: u32,
     i420: Vec<u8>,
     out: (u32, u32),
+    /// The size the frame is scaled to first, and the room it is scaled into, when it is.
+    scaled: Option<((u32, u32), Vec<u8>)>,
 }
 
 // SAFETY: the encoder is only used by the thread that has it.
@@ -95,7 +103,20 @@ impl H264 {
         kbps: u32,
         threads: u32,
     ) -> Result<H264, String> {
-        let (ow, oh) = widescreen(w, h);
+        H264::open_at(codecs, w, h, widescreen(w, h), fps, kbps, threads)
+    }
+
+    /// As `open`, but `out` in size, the frame scaled to fit it, as large as it goes keeping
+    /// its shape.
+    pub fn open_at(
+        codecs: &Arc<Codecs>,
+        w: u32,
+        h: u32,
+        (ow, oh): (u32, u32),
+        fps: u32,
+        kbps: u32,
+        threads: u32,
+    ) -> Result<H264, String> {
         let (wi, hi, t) = (ow as c_int, oh as c_int, threads as c_int);
         // SAFETY: plain numbers.
         let enc = unsafe { (codecs.h264_open)(wi, hi, fps as c_int, kbps as c_int, t) };
@@ -113,12 +134,21 @@ impl H264 {
             h,
             i420,
             out: (ow, oh),
+            scaled: Some(fit((w, h), (ow, oh)))
+                .filter(|&s| s != (w, h))
+                .map(|(sw, sh)| ((sw, sh), vec![0; (sw * sh * 4) as usize])),
         })
     }
 
     /// Takes `bgrx`, a frame at least `w` by `h` and `stride` pixels wide, as the next to encode.
     pub fn fill(&mut self, bgrx: &[u8], stride: u32) {
-        bgrx_to_i420(bgrx, stride, (self.w, self.h), self.out, &mut self.i420);
+        match &mut self.scaled {
+            Some((size, room)) => {
+                scale_bgrx(bgrx, stride, (self.w, self.h), *size, room);
+                bgrx_to_i420(room, size.0, *size, self.out, &mut self.i420);
+            }
+            None => bgrx_to_i420(bgrx, stride, (self.w, self.h), self.out, &mut self.i420),
+        }
     }
 
     /// The frame last filled, encoded: its NAL units and whether it is a key frame. None when
@@ -198,6 +228,104 @@ impl Drop for Opus {
     fn drop(&mut self) {
         // SAFETY: opened by this encoder, closed once.
         unsafe { (self.codecs.opus_close)(self.enc) };
+    }
+}
+
+/// An AAC-LC encoder for 48 kHz stereo, its frames in ADTS.
+pub struct Aac {
+    codecs: Arc<Codecs>,
+    enc: Ptr,
+    out: Vec<u8>,
+}
+
+// SAFETY: as for H264.
+unsafe impl Send for Aac {}
+
+pub const AAC_FRAMES: usize = 1024;
+
+impl Aac {
+    pub fn open(codecs: &Arc<Codecs>, bps: u32) -> Result<Aac, String> {
+        // SAFETY: plain numbers.
+        let enc = unsafe { (codecs.aac_open)(48_000, bps as c_int) };
+        if enc.is_null() {
+            return Err("AAC would not open".into());
+        }
+        Ok(Aac {
+            codecs: codecs.clone(),
+            enc,
+            // As much as FAAC asks room for, whatever the frame.
+            out: vec![0; 8192],
+        })
+    }
+
+    /// Takes `AAC_FRAMES` stereo frames; gives back a frame of AAC, which the first two calls,
+    /// while it fills, do not.
+    pub fn encode(&mut self, pcm: &[i16]) -> Option<&[u8]> {
+        assert_eq!(pcm.len(), AAC_FRAMES * 2);
+        // SAFETY: the samples and the room are as long as said.
+        let n = unsafe {
+            (self.codecs.aac_encode)(
+                self.enc,
+                pcm.as_ptr(),
+                AAC_FRAMES as c_int,
+                self.out.as_mut_ptr(),
+                self.out.len() as c_int,
+            )
+        };
+        (n > 0).then(|| &self.out[..n as usize])
+    }
+}
+
+impl Drop for Aac {
+    fn drop(&mut self) {
+        // SAFETY: opened by this encoder, closed once.
+        unsafe { (self.codecs.aac_close)(self.enc) };
+    }
+}
+
+/// `w` by `h` grown or shrunk to fit `ow` by `oh` keeping its shape, even both ways; as it is
+/// when it fits already, as a narrower frame does a 16:9 picture as tall as it.
+pub fn fit((w, h): (u32, u32), (ow, oh): (u32, u32)) -> (u32, u32) {
+    if w <= ow && h == oh || w == ow && h <= oh {
+        return (w, h);
+    }
+    let even = |n: u64| (n / 2 * 2) as u32;
+    let (w, h, ow, oh) = (u64::from(w), u64::from(h), u64::from(ow), u64::from(oh));
+    if w * oh > ow * h {
+        (even(ow), even(h * ow / w))
+    } else {
+        (even(w * oh / h), even(oh))
+    }
+}
+
+/// The top-left `w` by `h` of `bgrx`, `stride` pixels to a row, scaled to `sw` by `sh` into
+/// `out`, each pixel the one of the frame nearest it.
+pub fn scale_bgrx(
+    bgrx: &[u8],
+    stride: u32,
+    (w, h): (u32, u32),
+    (sw, sh): (u32, u32),
+    out: &mut [u8],
+) {
+    let (row_bytes, stride) = (sw as usize * 4, stride as usize * 4);
+    let cols: Vec<usize> = (0..u64::from(sw))
+        .map(|x| (x * u64::from(w) / u64::from(sw)) as usize * 4)
+        .collect();
+    let mut last = None;
+    for y in 0..sh as usize {
+        let from = y * h as usize / sh as usize;
+        let (done, row) = out.split_at_mut(y * row_bytes);
+        let row = &mut row[..row_bytes];
+        if last == Some(from) {
+            // The same row of the frame as the one above it.
+            row.copy_from_slice(&done[(y - 1) * row_bytes..]);
+            continue;
+        }
+        last = Some(from);
+        let src = &bgrx[from * stride..];
+        for (d, &c) in row.chunks_exact_mut(4).zip(&cols) {
+            d.copy_from_slice(&src[c..c + 4]);
+        }
     }
 }
 
@@ -314,6 +442,25 @@ mod tests {
         assert_eq!(&out[..12], &[82, 82, 82, 82, 235, 235, 235, 235, 82, 82, 82, 82]);
         assert_eq!(&out[12..15], &[90, 128, 90], "U");
         assert_eq!(&out[15..18], &[240, 128, 240], "V");
+    }
+
+    #[test]
+    fn a_frame_is_fitted_to_a_picture_keeping_its_shape() {
+        assert_eq!(fit((720, 480), (1280, 720)), (1080, 720));
+        assert_eq!(fit((720, 720), (1280, 720)), (720, 720));
+        assert_eq!(fit((720, 480), (640, 480)), (640, 426));
+        assert_eq!(fit((720, 480), (854, 480)), (720, 480));
+    }
+
+    #[test]
+    fn each_scaled_pixel_is_the_nearest_of_the_frame() {
+        // Two by two, a row wider, to three by three.
+        let px = |v: u8| [v, v, v, 0];
+        let bgrx = [px(1), px(2), px(9), px(3), px(4), px(9)].concat();
+        let mut out = vec![0u8; 3 * 3 * 4];
+        scale_bgrx(&bgrx, 3, (2, 2), (3, 3), &mut out);
+        let got: Vec<u8> = out.chunks_exact(4).map(|p| p[0]).collect();
+        assert_eq!(got, [1, 1, 2, 1, 1, 2, 3, 3, 4]);
     }
 
     #[test]
