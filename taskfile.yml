@@ -13,11 +13,11 @@ vars:
     freechaf potator sameduck fmsx bluemsx vice_x64 puae2021 fuse cap32 hatarib atari800 dosbox_pure
     np2kai px68k scummvm retro8 tic80
   # The cores built from source against OpenGL ES, as core:commit: the GPU cores, whose buildbot
-  # builds want desktop GL, and vecx, whose buildbot build links it.
+  # builds want desktop GL, and vecx, whose buildbot build links it. Nodosumi is not among them:
+  # core:nodosumi fetches its latest release.
   GLES_CORES: >-
     vecx:8f671cc9d737f2890c3ce19e177e2984dcae121f
     parallel_n64:a8280501a71c1bcd4c85c5b8bfe75cfa62cd6127
-    nodosumi:ff1d603f8037dd6c5baec850999f9650677622d1
     flycast:6bb0fc3e18dac4b01694f488c7a71f5930e8a648
     ppsspp:5f2d4afbdced51ac056af25a05fd182a1175b558
   # What libslotcast.so, which casting to a TV runs on, is built from: x264, Opus, mbedTLS and
@@ -327,9 +327,40 @@ tasks:
       - rm -f vendor/cores.manifest
       - task: core:fetch
 
+  core:nodosumi:
+    desc: >-
+      Fetch the H700 build from Nodosumi's latest GitHub release, unslot's own Dreamcast core, and
+      note its tag and commit in vendor/nodosumi_libretro.so.meta; fetches again once there is a newer one
+    vars:
+      REPO: https://github.com/cloudwithax/nodosumi
+      # The tag GitHub's latest release redirects to, looked up on every run.
+      TAG:
+        sh: >-
+          curl -fsSIL -o /dev/null -w '%{url_effective}' https://github.com/cloudwithax/nodosumi/releases/latest
+          | sed 's|.*/tag/||'
+    status:
+      - grep -q "^tag={{.TAG}}$" vendor/nodosumi_libretro.so.meta
+    cmds:
+      - |
+        set -eu
+        tag='{{.TAG}}'
+        case "$tag" in v*) ;; *) echo "no latest Nodosumi release: '$tag'" >&2; exit 1 ;; esac
+        commit="$(git ls-remote {{.REPO}} "refs/tags/$tag^{}" | cut -f1)"
+        [ -n "$commit" ] || commit="$(git ls-remote {{.REPO}} "refs/tags/$tag" | cut -f1)"
+        tmp="$(mktemp -d)"
+        trap 'rm -rf "$tmp"' EXIT
+        curl -fsSL -o "$tmp/nodosumi.zip" "{{.REPO}}/releases/download/$tag/nodosumi-${tag#v}-h700.zip"
+        unzip -o -q "$tmp/nodosumi.zip" nodosumi_libretro.so -d "$tmp"
+        file "$tmp/nodosumi_libretro.so" | grep -q aarch64
+        mkdir -p vendor
+        mv "$tmp/nodosumi_libretro.so" vendor/
+        printf 'core=nodosumi\ntag=%s\ncommit=%s\nsource=%s/tree/%s\ngles=yes\n' \
+          "$tag" "$commit" "{{.REPO}}" "$commit" > vendor/nodosumi_libretro.so.meta
+        echo "fetched Nodosumi $tag ($commit)"
+
   core:gles:
     desc: >-
-      Build the GPU cores (ParaLLEl N64, Nodosumi, Flycast, PPSSPP) and vecx against OpenGL ES from their
+      Build the GPU cores (ParaLLEl N64, Flycast, PPSSPP) and vecx against OpenGL ES from their
       pinned commits, natively on an aarch64 Linux box or cross-compiled in cores/gles/Dockerfile
     status:
       - |
@@ -431,7 +462,7 @@ tasks:
 
   dist:device:
     desc: Build the SD2 tree for an H700 device, OUT defaults to ./dist-device
-    deps: [core:device, core:gpsp, core:fetch, core:gles, cast:lib, services, build:device]
+    deps: [core:device, core:gpsp, core:fetch, core:gles, core:nodosumi, cast:lib, services, build:device]
     vars:
       OUT: '{{.OUT | default "dist-device"}}'
       UID: {sh: id -u}
@@ -461,6 +492,9 @@ tasks:
           c="${spec%%:*}"
           cp "vendor/${c}_libretro.so.meta" "{{.OUT}}/System/licenses/${c}-${spec#*:}.meta"
         done
+        cp vendor/nodosumi_libretro.so "{{.OUT}}/System/"
+        commit="$(grep '^commit=' vendor/nodosumi_libretro.so.meta | cut -d= -f2)"
+        cp vendor/nodosumi_libretro.so.meta "{{.OUT}}/System/licenses/nodosumi-$commit.meta"
       - cp vendor/cores.manifest {{.OUT}}/System/licenses/cores.manifest
       - cp -R vendor/services {{.OUT}}/System/services
       - mkdir -p {{.OUT}}/System/Wallpapers
