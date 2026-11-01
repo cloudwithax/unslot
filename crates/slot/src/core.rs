@@ -98,8 +98,7 @@ fn open_named(
     if matches!(
         core,
         Core::Nodosumi | Core::Flycast | Core::ParallelN64 | Core::Ppsspp
-    )
-        && palette.is_none()
+    ) && palette.is_none()
         && link.is_none()
     {
         match open_remote(root, core, platform, serial, colour, paths) {

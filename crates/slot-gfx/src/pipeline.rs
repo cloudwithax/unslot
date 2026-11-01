@@ -40,6 +40,8 @@ pub struct GamePass {
     fills: bool,
     /// Pixels kept for the carousel footer. The picture scales in the space above them.
     bottom: f32,
+    /// Whether the picture fills the viewport, as it does in an overlay's window.
+    whole: bool,
     src: [f32; 4],
 }
 
@@ -101,6 +103,7 @@ impl GamePass {
             power: 1.0,
             fills: false,
             bottom: 0.0,
+            whole: false,
             src: WHOLE_TEXTURE,
         })
     }
@@ -118,6 +121,9 @@ impl GamePass {
     }
 
     fn placed(&self) -> (f32, f32, f32, f32) {
+        if self.whole {
+            return (0.0, 0.0, OUT_W as f32, OUT_H as f32);
+        }
         let foot = self.bottom;
         let rect = match self.fills {
             true => (0.0, 0.0, OUT_W as f32, OUT_H as f32 - foot),
@@ -135,6 +141,10 @@ impl GamePass {
 
     pub fn set_aspect(&mut self, aspect: Option<f32>) {
         self.aspect = aspect.filter(|a| a.is_finite() && *a > 0.0);
+    }
+
+    pub fn set_whole(&mut self, on: bool) {
+        self.whole = on;
     }
 
     pub fn set_fills_frame(&mut self, on: bool) {
@@ -228,7 +238,7 @@ impl GamePass {
         // The footer covers the bottom of a full-frame picture. Keep the part that sat above
         // it, so opening the scale does not squash the picture into the shorter rect.
         let mut src = src;
-        if self.bottom > 0.0 {
+        if self.bottom > 0.0 && !self.whole {
             src[3] *= (OUT_H as f32 - self.bottom) / OUT_H as f32;
         }
         unsafe {

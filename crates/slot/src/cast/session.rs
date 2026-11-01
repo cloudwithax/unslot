@@ -45,7 +45,8 @@ struct Control {
 
 impl Control {
     fn send(&mut self, from: &str, to: &str, namespace: &str, json: &str) -> Result<(), String> {
-        self.tls.write_all(&channel::encode(from, to, namespace, json))
+        self.tls
+            .write_all(&channel::encode(from, to, namespace, json))
     }
 
     fn request(&mut self) -> u32 {
@@ -97,7 +98,9 @@ impl Control {
 }
 
 fn kind(json: &str) -> String {
-    crate::json::string(json, "type").unwrap_or_default().to_uppercase()
+    crate::json::string(json, "type")
+        .unwrap_or_default()
+        .to_uppercase()
 }
 
 pub(super) fn random<const N: usize>() -> [u8; N] {
@@ -173,7 +176,8 @@ impl Session {
         let (session, transport) = launch(&mut control)?;
         let streaming = agree(&mut control, &tap, to, &transport).and_then(|agreed| {
             let udp = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).map_err(|e| e.to_string())?;
-            udp.connect((addr.ip(), agreed.0)).map_err(|e| e.to_string())?;
+            udp.connect((addr.ip(), agreed.0))
+                .map_err(|e| e.to_string())?;
             udp.set_read_timeout(Some(Duration::from_millis(100)))
                 .map_err(|e| e.to_string())?;
             Ok((agreed, udp))
@@ -210,10 +214,16 @@ impl Session {
         };
         let ended = Arc::new(Mutex::new(None));
         let (s, c, e) = (shared.clone(), codecs.clone(), ended.clone());
-        threads.push(spawn("slot-cast-video", Box::new(move || video(&s, &tap, &c, &e)))?);
+        threads.push(spawn(
+            "slot-cast-video",
+            Box::new(move || video(&s, &tap, &c, &e)),
+        )?);
         if audio_on {
             let s = shared.clone();
-            threads.push(spawn("slot-cast-audio", Box::new(move || audio(&s, &codecs)))?);
+            threads.push(spawn(
+                "slot-cast-audio",
+                Box::new(move || audio(&s, &codecs)),
+            )?);
         }
         let s = shared.clone();
         threads.push(spawn("slot-cast-rtcp", Box::new(move || rtcp(&s)))?);
@@ -347,9 +357,8 @@ fn agree(
     let answer = c.wait_for(Duration::from_secs(10), |m| {
         (m.namespace == NS_WEBRTC && kind(&m.json) == "ANSWER").then(|| m.json.clone())
     })?;
-    let port = crate::json::number(&answer, "udpPort").filter(|_| {
-        crate::json::string(&answer, "result").is_none_or(|r| r == "ok")
-    });
+    let port = crate::json::number(&answer, "udpPort")
+        .filter(|_| crate::json::string(&answer, "result").is_none_or(|r| r == "ok"));
     let Some(port) = port else {
         eprintln!("slot: cast: {} said no: {answer}", to.name);
         return Err("the receiver would not take the stream".into());
@@ -423,7 +432,11 @@ impl Spread {
 
     fn show(&self, n: u32) -> String {
         let ms = |d: Duration| d.as_secs_f64() * 1000.0;
-        format!("{:.1}/{:.1} ms", ms(self.total) / f64::from(n.max(1)), ms(self.max))
+        format!(
+            "{:.1}/{:.1} ms",
+            ms(self.total) / f64::from(n.max(1)),
+            ms(self.max)
+        )
     }
 }
 

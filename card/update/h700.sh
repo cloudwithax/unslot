@@ -35,9 +35,27 @@ clear_pack() {
 	sync
 }
 
+# Wallpapers and slots the old System came with stay through the update, so a build that ships
+# its own, or one the next release drops, are not lost: whatever the old one had that the new one
+# has not is copied in beside the new one's. Your own, in Wallpapers/ and Slots/ at the card's
+# root, are never touched.
+keep_bundled() {
+	[ -d "$UPD/System.old" ] || return 0
+	for dir in Wallpapers Slots; do
+		[ -d "$UPD/System.old/$dir" ] || continue
+		/bin/mkdir -p "$SD/System/$dir"
+		for f in "$UPD/System.old/$dir"/* "$UPD/System.old/$dir"/.[!.]*; do
+			[ -e "$f" ] || continue
+			[ -e "$SD/System/$dir/$(basename "$f")" ] && continue
+			/bin/cp -R "$f" "$SD/System/$dir/" || say "$dir/$(basename "$f") could not be kept"
+		done
+	done
+}
+
 # Power went after the new System was moved in but before the pack was cleared.
 if [ ! -d "$PACK/System" ]; then
 	say "the pack is already installed; clearing it"
+	keep_bundled
 	/bin/rm -f "$SD/MinUI.zip"
 	clear_pack
 	exit 0
@@ -69,6 +87,7 @@ fi
 	reject "the new System could not be moved in"
 }
 [ -d "$UPD/System.old" ] && echo 0 > "$UPD/trial"
+keep_bundled
 /bin/rm -f "$SD/MinUI.zip"
 say "installed $version"
 clear_pack

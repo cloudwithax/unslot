@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::SyncSender;
-use std::sync::{Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use slot_ftrace::{self as ft, ev};
@@ -31,6 +31,34 @@ fn cast_tap(played: &[i16]) {
     }
     if let Some(tap) = &*CAST.lock().unwrap_or_else(|e| e.into_inner()) {
         let _ = tap.try_send(played.to_vec());
+    }
+}
+
+/// What is mixed over everything the output plays, at its rate: the music player's, a video's.
+pub type MusicTap = Arc<dyn Fn(&mut [i16], u32) + Send + Sync>;
+static MUSIC: Mutex<Vec<(&'static str, MusicTap)>> = Mutex::new(Vec::new());
+static MUSIC_ON: AtomicBool = AtomicBool::new(false);
+
+/// Starts mixing `tap` into the output as `key`, or stops that key's with None.
+pub fn set_music_tap(key: &'static str, tap: Option<MusicTap>) {
+    let mut taps = MUSIC.lock().unwrap_or_else(|e| e.into_inner());
+    taps.retain(|(k, _)| *k != key);
+    taps.extend(tap.map(|t| (key, t)));
+    MUSIC_ON.store(!taps.is_empty(), Ordering::Relaxed);
+}
+
+fn music_tap(out: &mut [i16], rate: u32) {
+    if !MUSIC_ON.load(Ordering::Relaxed) {
+        return;
+    }
+    let taps: Vec<MusicTap> = MUSIC
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .map(|(_, t)| t.clone())
+        .collect();
+    for tap in taps {
+        tap(out, rate);
     }
 }
 
@@ -193,6 +221,7 @@ impl Ring {
         if self.muted() {
             out.fill(0);
         }
+        music_tap(out, self.sample_rate());
         cast_tap(out);
         // The TV plays it instead.
         if CASTING.load(Ordering::Relaxed) {

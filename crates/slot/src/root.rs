@@ -4,21 +4,24 @@ use slot_store::Platform;
 
 /// Every folder slot keeps on the card, each parent before the folders in it.
 pub fn dirs() -> Vec<String> {
-    let mut dirs: Vec<String> = ["BIOS", "Config", "Logs", "System", "Wallpapers"]
-        .map(String::from)
-        .to_vec();
-    for (top, only_with_bezels) in [
-        ("Bezels", true),
-        ("Games", false),
-        ("Labels", false),
-        ("Saves", false),
-        ("States", false),
-    ] {
+    let mut dirs: Vec<String> = [
+        "BIOS",
+        "Books",
+        "Config",
+        "Logs",
+        "Music",
+        "Pictures",
+        "Ports",
+        "System",
+        "Wallpapers",
+    ]
+    .map(String::from)
+    .to_vec();
+    for top in ["Bezels", "Games", "Labels", "Manuals", "Saves", "States"] {
         dirs.push(top.to_string());
         dirs.extend(
             Platform::ALL
                 .into_iter()
-                .filter(|p| !only_with_bezels || p.spec().bezels)
                 .map(|p| format!("{top}/{}", p.dir_name())),
         );
     }

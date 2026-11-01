@@ -129,7 +129,7 @@ fn y_on_the_core_list_sets_the_core_for_the_whole_system() {
         .iter()
         .map(|r| (r.label.as_str(), r.detail.as_str()))
         .collect();
-assert_eq!(
+    assert_eq!(
         rows,
         [
             ("FinalBurn Neo", "In use"),
@@ -306,7 +306,10 @@ fn a_on_a_core_not_downloaded_yet_downloads_it_into_cores() {
         "a core still downloading was set for the game"
     );
 
-    let file = d.path().join(slot_store::CORES_DIR).join(Core::Mame2003.file_name());
+    let file = d
+        .path()
+        .join(slot_store::CORES_DIR)
+        .join(Core::Mame2003.file_name());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while !file.is_file() {
         assert!(std::time::Instant::now() < deadline, "the core never came");

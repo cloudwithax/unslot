@@ -5,8 +5,8 @@ use common::{
 };
 use slot::app::{App, Phase};
 use slot_input::{Action, Btn};
-use slot_store::{write_slot_state, SlotState};
-use slot_ui::{QuickRow, QuickValue};
+use slot_store::{write_slot_state, Appearance, SlotState};
+use slot_ui::QuickRow;
 use tempfile::TempDir;
 
 const T: u64 = 10_000;
@@ -67,12 +67,12 @@ fn a_held_left_or_right_changes_a_menu_value_once() {
     a.apply_at(Action::GbaUp(Btn::Down), T - 690);
     assert_eq!(a.quick_menu(), Some(QuickRow::Theme));
     a.apply_at(Action::GbaDown(Btn::Right), T);
-    assert_eq!(a.quick_value(QuickRow::Theme), Some(QuickValue::Light));
+    assert_eq!(a.resolved_appearance(), Appearance::Light);
     for ms in [T + 400, T + 510, T + 600, T + 2_000] {
         at(&mut a, ms);
         assert_eq!(
-            a.quick_value(QuickRow::Theme),
-            Some(QuickValue::Light),
+            a.resolved_appearance(),
+            Appearance::Light,
             "the value flipped again by {ms}"
         );
     }

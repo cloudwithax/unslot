@@ -75,11 +75,9 @@ pub fn console_for(platform: Platform, core: Core) -> Option<Console> {
         Platform::Odyssey2 => 23,
         Platform::PokemonMini => 24,
         Platform::Atari2600 => 25,
-        Platform::Arcade
-        | Platform::Cps1
-        | Platform::Cps2
-        | Platform::Cps3
-        | Platform::NeoGeo => 27,
+        Platform::Arcade | Platform::Cps1 | Platform::Cps2 | Platform::Cps3 | Platform::NeoGeo => {
+            27
+        }
         Platform::VirtualBoy => 28,
         Platform::Msx => 29,
         Platform::Sg1000 => 33,
@@ -117,7 +115,11 @@ pub struct Curl;
 
 impl Http for Curl {
     fn send(&self, request: &HttpRequest) -> Result<(u16, Vec<u8>), String> {
-        post(&request.url, request.post.as_deref(), request.content_type.as_deref())
+        post(
+            &request.url,
+            request.post.as_deref(),
+            request.content_type.as_deref(),
+        )
     }
 }
 
@@ -313,10 +315,7 @@ mod tests {
 
     #[test]
     fn cores_in_their_own_process_are_left_out() {
-        assert_eq!(
-            console_for(Platform::Gba, Core::Mgba),
-            Some(Console::GBA)
-        );
+        assert_eq!(console_for(Platform::Gba, Core::Mgba), Some(Console::GBA));
         assert_eq!(console_for(Platform::Dreamcast, Core::Flycast), None);
         assert_eq!(console_for(Platform::ScummVm, Core::Mgba), None);
     }

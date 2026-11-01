@@ -1,4 +1,3 @@
-
 /// How much sound the ring holds, in frames, for a device at `sample_rate`.
 pub fn drc_target(capacity_frames: usize) -> usize {
     capacity_frames / 2
@@ -51,9 +50,13 @@ impl Level {
             return 1.0;
         }
         let error = (target_frames as f64 - queued_frames as f64) / target_frames as f64;
-        let dt = if dt.is_finite() { dt.clamp(0.0, 0.1) } else { 0.0 };
-        self.learned = (self.learned + Self::LEARN * error * dt)
-            .clamp(Self::LEARNED_MIN, Self::LEARNED_MAX);
+        let dt = if dt.is_finite() {
+            dt.clamp(0.0, 0.1)
+        } else {
+            0.0
+        };
+        self.learned =
+            (self.learned + Self::LEARN * error * dt).clamp(Self::LEARNED_MIN, Self::LEARNED_MAX);
         (1.0 + Self::PROPORTION * error + self.learned).clamp(Self::MIN, Self::MAX)
     }
 
@@ -83,14 +86,26 @@ mod tests {
     #[test]
     fn a_core_at_the_device_rate_holds_the_queue() {
         let mut level = Level::new();
-        let queued = settle(&mut level, 3200, 3200, 800.0 * 48000.0 / 44100.0, 800.0 * 48000.0 / 44100.0);
+        let queued = settle(
+            &mut level,
+            3200,
+            3200,
+            800.0 * 48000.0 / 44100.0,
+            800.0 * 48000.0 / 44100.0,
+        );
         assert!(queued.abs_diff(3200) < 200, "settled at {queued}");
     }
 
     #[test]
     fn a_core_a_little_ahead_is_quickened_until_the_queue_holds() {
         let mut level = Level::new();
-        let queued = settle(&mut level, 3200, 3200, 1.003 * 800.0 * 48000.0 / 44100.0, 800.0 * 48000.0 / 44100.0);
+        let queued = settle(
+            &mut level,
+            3200,
+            3200,
+            1.003 * 800.0 * 48000.0 / 44100.0,
+            800.0 * 48000.0 / 44100.0,
+        );
         assert!(queued.abs_diff(3200) < 400, "settled at {queued}");
     }
 

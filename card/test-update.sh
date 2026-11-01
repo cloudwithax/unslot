@@ -23,6 +23,8 @@ mkdir -p "$tree/System/licenses"
 echo "new slot" > "$tree/System/slot"
 echo "v9.9.9" > "$tree/System/version"
 echo "licence" > "$tree/System/licenses/a licence.txt"
+printf '#!/bin/sh\n' > "$tree/System/slotwifi.sh"
+chmod +x "$tree/System/slotwifi.sh"
 sh "$REPO/tools/update/pack.sh" "$tree" "$TMP/MinUI.zip" > /dev/null || fail "pack.sh failed"
 [ "$(unzip -Z1 "$TMP/MinUI.zip" | tail -n 1)" = ".tmp_update/h700.sh" ] ||
 	fail "the installer is not the last thing in the zip"
@@ -69,6 +71,26 @@ boot && rc=0 || rc=$?
 grep -q "installed v9.9.9" "$CARD/Logs/update.log" || fail "the install was not logged"
 boot || true
 [ ! -e "$CARD/.unslot-update/System.old/version" ] || fail "a second boot installed again"
+
+# Wallpapers and slots the old System shipped are kept beside the new one's; the new one's win a
+# name, and your own at the card's root are left alone.
+card
+mkdir -p "$CARD/System/Wallpapers" "$CARD/System/Slots/Fork Teal" "$CARD/Wallpapers"
+echo "fork" > "$CARD/System/Wallpapers/fork pack.png"
+echo "old" > "$CARD/System/Wallpapers/same.jpg"
+echo "teal" > "$CARD/System/Slots/Fork Teal/slot_front.png"
+echo "mine" > "$CARD/Wallpapers/mine.png"
+unpack
+mkdir -p "$CARD/.tmp_update/unslot/System/Wallpapers"
+echo "new" > "$CARD/.tmp_update/unslot/System/Wallpapers/same.jpg"
+(cd "$CARD/.tmp_update/unslot" && find System -type f -exec sha256sum {} + > System.sha256)
+install || fail "the install with bundled wallpapers failed"
+[ "$(cat "$CARD/System/Wallpapers/fork pack.png" 2>/dev/null)" = "fork" ] ||
+	fail "a wallpaper the old System shipped was lost"
+[ "$(cat "$CARD/System/Wallpapers/same.jpg")" = "new" ] || fail "an old wallpaper beat the new one's"
+[ "$(cat "$CARD/System/Slots/Fork Teal/slot_front.png" 2>/dev/null)" = "teal" ] ||
+	fail "a slot the old System shipped was lost"
+[ "$(cat "$CARD/Wallpapers/mine.png")" = "mine" ] || fail "your own wallpaper was touched"
 
 # Power lost with the old System moved aside but the new one not yet in.
 card

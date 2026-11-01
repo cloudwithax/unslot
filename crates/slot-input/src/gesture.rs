@@ -39,6 +39,8 @@ pub enum Action {
     CoreOptions,
     MuteToggle,
     ColourCorrectionToggle,
+    /// Select + Start: the D-pad moves the left stick, or goes back to being the D-pad.
+    DpadStickToggle,
     PaletteNext,
     PalettePrev,
     ShaderNext,
@@ -486,6 +488,7 @@ fn chord(b: Btn) -> Option<(u16, Action)> {
         Btn::VolUp => (2048, Action::MuteToggle),
         Btn::VolDown => (4096, Action::MuteToggle),
         Btn::X => (8192, Action::CoreOptions),
+        Btn::Start => (16384, Action::DpadStickToggle),
         _ => return None,
     })
 }

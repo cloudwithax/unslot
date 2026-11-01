@@ -148,8 +148,11 @@ impl Stream {
         if packet == 0xffff {
             return packets.iter().map(Vec::as_slice).collect();
         }
-        let wanted = std::iter::once(packet)
-            .chain((0..8).filter(|b| more >> b & 1 == 1).map(|b| packet + 1 + b));
+        let wanted = std::iter::once(packet).chain(
+            (0..8)
+                .filter(|b| more >> b & 1 == 1)
+                .map(|b| packet + 1 + b),
+        );
         wanted
             .filter_map(|n| packets.get(n as usize))
             .map(Vec::as_slice)
@@ -254,7 +257,11 @@ mod tests {
         assert_eq!(first[1], 101, "the first of two is not the frame's last");
         assert_eq!(&first[4..8], &3000u32.to_be_bytes());
         assert_eq!(&first[8..12], &77u32.to_be_bytes());
-        assert_eq!(first[12], 0x80 | 0x40 | 1, "key frame, reference id, one extension");
+        assert_eq!(
+            first[12],
+            0x80 | 0x40 | 1,
+            "key frame, reference id, one extension"
+        );
         assert_eq!(first[13], 0, "frame 0");
         assert_eq!(&first[14..18], &[0, 0, 0, 1], "packet 0 of 0..=1");
         assert_eq!(first[18], 0, "a key frame references itself");

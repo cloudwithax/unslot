@@ -70,7 +70,8 @@ pub fn label_left(
         return;
     };
     let layout = text::fit_as_written(font, label, w as f32, px, 12.0);
-    let set = text::line_width(font, label, layout.px, layout.tracking).ceil() as u32 + 2;
+    // label_into fits the text to its box less 8, so the box gets those back.
+    let set = text::line_width(font, label, layout.px, layout.tracking).ceil() as u32 + 2 + 8;
     let set = set.min(w);
     label_into(rgba, face_w, (x, y, set, h), label, ink, layout.px, false);
 }

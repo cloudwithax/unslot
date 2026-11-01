@@ -262,4 +262,31 @@ mod tests {
         );
         assert_ne!(at(LIST_W / 2, ROWS_Y + ROW_H / 2), &LIT, "row 0 is lit too");
     }
+
+    #[test]
+    fn a_one_letter_label_is_drawn_as_big_as_a_longer_one() {
+        if crate::text::label_font().is_none() {
+            return;
+        }
+        let page = ListPage {
+            rows: ["X", "A", "AAAA"]
+                .map(|label| ListRow {
+                    label: label.into(),
+                    ..ListRow::default()
+                })
+                .to_vec(),
+            ..ListPage::default()
+        };
+        let face = page.face();
+        let tall = |row: u32| {
+            let y0 = ROWS_Y + row * ROW_H;
+            (y0..y0 + ROW_H)
+                .filter(|&y| {
+                    (ROW_PAD..LIST_W / 2).any(|x| face.rgba[((y * LIST_W + x) * 4 + 3) as usize] > 0)
+                })
+                .count()
+        };
+        assert!(tall(2) > 0, "the long label drew nothing");
+        assert_eq!(tall(1), tall(2), "the one letter is drawn smaller");
+    }
 }

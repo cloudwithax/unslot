@@ -100,7 +100,7 @@ pub struct Spec {
     pub colour_correction: bool,
     /// Whether the system has a Game Boy palette to pick for monochrome games.
     pub palettes: bool,
-    /// Whether it has a default bezel and a Bezels folder of its own.
+    /// Whether it has a default bezel built into slot.
     pub bezels: bool,
     /// Whether its games read L and R; when they do not, slot keeps the shoulders.
     pub shoulders: bool,

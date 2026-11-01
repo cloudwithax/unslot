@@ -66,7 +66,10 @@ pub fn search(wait: Duration) -> std::io::Result<Vec<Receiver>> {
 
 /// Whether a read gave up for its timeout.
 pub(crate) fn timed_out(e: &std::io::Error) -> bool {
-    matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    )
 }
 
 /// The question: who offers the Cast service.
@@ -185,7 +188,9 @@ fn records(msg: &[u8]) -> Option<Vec<Record>> {
 fn text(mut data: &[u8]) -> Vec<(String, String)> {
     let mut out = Vec::new();
     while let Some((&len, rest)) = data.split_first() {
-        let Some(s) = rest.get(..len as usize) else { break };
+        let Some(s) = rest.get(..len as usize) else {
+            break;
+        };
         let s = String::from_utf8_lossy(s);
         if let Some((k, v)) = s.split_once('=') {
             out.push((k.to_string(), v.to_string()));
@@ -226,7 +231,12 @@ mod tests {
         record(&mut m, &labels(SERVICE), PTR, &ptr);
         let at = (12 + labels(SERVICE).len() + 10) as u8;
         let mut txt = Vec::new();
-        for kv in ["id=1234", "md=Chromecast", &format!("ca={ca}"), "fn=Bedroom TV"] {
+        for kv in [
+            "id=1234",
+            "md=Chromecast",
+            &format!("ca={ca}"),
+            "fn=Bedroom TV",
+        ] {
             txt.push(kv.len() as u8);
             txt.extend_from_slice(kv.as_bytes());
         }

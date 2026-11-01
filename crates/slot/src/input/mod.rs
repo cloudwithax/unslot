@@ -7,10 +7,11 @@ mod keys;
 mod mask;
 #[cfg(feature = "host")]
 mod pad;
+pub mod remap;
 pub mod stick;
 pub mod trace;
 
 pub use device::DeviceInput;
 #[cfg(feature = "host")]
 pub use host::HostInput;
-pub use mask::Pad;
+pub use mask::{dpad_as_stick, Pad};

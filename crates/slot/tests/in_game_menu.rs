@@ -3,7 +3,7 @@ mod common;
 use common::{app_playing_in, tmp_root_with_carts};
 use slot::app::{App, Phase};
 use slot_input::{Action, Btn};
-use slot_store::{Platform, Shader, StateRing};
+use slot_store::{BezelPick, Platform, Shader, StateRing};
 use slot_ui::{
     Draw, QuickMenuFaces, QuickRow, QuickValue, TexId, HINT_EDGE, MOUTH_H, OUT_H, OUT_W,
 };
@@ -94,7 +94,12 @@ fn screen_shows_the_palette_only_when_palettes_are_live() {
     let (_d, mut a) = playing();
     assert_eq!(
         a.in_game_hidden(),
-        &[QuickRow::Palette, QuickRow::Bezel, QuickRow::Disc, QuickRow::PlayCast]
+        &[
+            QuickRow::Palette,
+            QuickRow::Bezel,
+            QuickRow::Disc,
+            QuickRow::PlayCast
+        ]
     );
     a.set_palette_live(true);
     assert_eq!(
@@ -603,4 +608,32 @@ fn gameplay_opens_on_fast_forward_for_one_disc_and_on_the_disc_for_several() {
     );
     press(&mut a, Btn::Left);
     assert_eq!(a.take_disc(), Some(1), "left did not step back");
+}
+
+#[test]
+fn a_shipped_bezel_for_the_panel_gives_any_system_a_bezel_to_pick() {
+    let (d, mut a) = playing();
+    a.set_panel((720, 720));
+    let shipped = d.path().join("System/overlays/720x720/GBA");
+    std::fs::create_dir_all(&shipped).unwrap();
+    std::fs::write(shipped.join("Game Boy Advance.png"), b"").unwrap();
+    assert!(!a.in_game_hidden().contains(&QuickRow::Bezel));
+    assert!(!a.hidden_rows().contains(&QuickRow::BezelOf(Platform::Gba)));
+
+    go_to(&mut a, QuickRow::Bezel);
+    press(&mut a, Btn::Right);
+    assert_eq!(
+        a.resolved_bezel(Platform::Gba),
+        BezelPick::File("Game Boy Advance.png".into())
+    );
+    assert!(!a.overlay_shown(), "shown before the compositor held it");
+    a.set_game_overlay(true);
+    assert!(a.overlay_shown());
+    let [x, y, w, h] = a.source_rect();
+    assert_eq!((x, y, w, h), (0.0, 0.0, 1.0, 1.0), "the Advance's picture is all its canvas");
+
+    // Another panel has none of its size for the Advance, so the pick falls back to none.
+    a.set_panel((720, 480));
+    assert_eq!(a.resolved_bezel(Platform::Gba), BezelPick::None);
+    assert!(a.in_game_hidden().contains(&QuickRow::Bezel));
 }

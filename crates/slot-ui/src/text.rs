@@ -81,6 +81,20 @@ pub fn fit_as_written(font: &Font, text: &str, max_w: f32, max_px: f32, min_px: 
     }
 }
 
+/// `text` as written, in lines no wider than `max_w` at `px`: each of its own lines wrapped at
+/// the spaces, a word too long for a line broken across, and a blank line kept.
+pub fn wrap_as_written(font: &Font, text: &str, max_w: f32, px: f32) -> Vec<String> {
+    let tracking = tracking_for(px);
+    let mut lines = Vec::new();
+    for para in text.lines() {
+        match para.trim().is_empty() {
+            true => lines.push(String::new()),
+            false => lines.extend(wrap(font, para, px, tracking, max_w, true)),
+        }
+    }
+    lines
+}
+
 pub fn draw_centred(dst: &mut [u8], dst_w: u32, dst_h: u32, layout: &Layout, colour: [u8; 3]) {
     for (i, a) in coverage(dst_w, dst_h, layout).into_iter().enumerate() {
         if a > 0 {

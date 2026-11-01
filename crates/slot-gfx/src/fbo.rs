@@ -16,6 +16,13 @@ struct Turn {
     size: (u32, u32),
 }
 
+/// A bezel over the whole panel, as RetroArch lays one, with the game drawn in its window.
+struct Overlay {
+    tex: gl::types::GLuint,
+    size: (u32, u32),
+    window: [f32; 4],
+}
+
 pub struct Compositor {
     fbo: gl::types::GLuint,
     tex: gl::types::GLuint,
@@ -38,6 +45,8 @@ pub struct Compositor {
     bezel: Option<gl::types::GLuint>,
     game_bezel: Option<TexId>,
     sp_frame: bool,
+    overlay: Option<Overlay>,
+    overlay_on: bool,
     turn: Option<Turn>,
     /// Cached buffers the canvas is read back through for casting, made the first time a frame
     /// is cast; `cast_ion_tried` once that has been tried.
@@ -112,6 +121,8 @@ impl Compositor {
                 bezel: None,
                 game_bezel: None,
                 sp_frame: true,
+                overlay: None,
+                overlay_on: false,
                 turn: None,
                 #[cfg(target_os = "linux")]
                 cast_ion: None,
@@ -245,8 +256,50 @@ impl Compositor {
     }
 
     fn native(&self) -> bool {
+        self.overlaid() || self.native_menus()
+    }
+
+    fn native_menus(&self) -> bool {
         let panel = self.window;
         self.layout == Layout::Native && (crate::bezel::framed(panel) || crate::square(panel))
+    }
+
+    /// Lays `rgba`, `w` by `h`, over the whole panel while playing, the game drawn in `window`,
+    /// x, y, w, h on the picture's pixels; None takes it away.
+    pub fn set_overlay(&mut self, overlay: Option<(u32, u32, &[u8], [f32; 4])>) {
+        let made = overlay.map(|(w, h, rgba, window)| Overlay {
+            tex: bottom_up_texture(w, h, rgba),
+            size: (w, h),
+            window,
+        });
+        if let Some(old) = std::mem::replace(&mut self.overlay, made) {
+            unsafe { gl::DeleteTextures(1, &old.tex) };
+        }
+    }
+
+    pub fn show_overlay(&mut self, on: bool) {
+        self.overlay_on = on;
+    }
+
+    fn overlaid(&self) -> bool {
+        self.overlay_on && self.overlay.is_some()
+    }
+
+    /// Where the 720 by 480 canvas's drawing goes on a canvas the panel's size: all of it for
+    /// the menus drawn at the panel's shape, else the band the canvas would be shown in.
+    fn band(&self) -> (i32, i32, i32, i32) {
+        if !self.overlaid() || self.native_menus() {
+            return (0, 0, self.size.0 as i32, self.size.1 as i32);
+        }
+        let (x, _, w, h) = blit_rect(self.window, 0.0);
+        (x, (self.window.1 as i32 - h) / 2, w, h)
+    }
+
+    fn fill_band(&mut self) {
+        let (x, y, w, h) = self.band();
+        self.game
+            .set_fbo_scale(w as f32 / OUT_W as f32, h as f32 / OUT_H as f32);
+        unsafe { gl::Viewport(x, y, w, h) };
     }
 
     fn resize(&mut self, size: (u32, u32)) {
@@ -376,32 +429,17 @@ impl Compositor {
         };
         self.resize(size);
         self.sprites.set_target(Canvas::of(layout, self.window));
-        self.game.set_fbo_scale(
-            self.size.0 as f32 / OUT_W as f32,
-            self.size.1 as f32 / OUT_H as f32,
-        );
         unsafe {
             gl::BindFramebuffer(gl::FRAMEBUFFER, self.fbo);
             gl::Viewport(0, 0, self.size.0 as i32, self.size.1 as i32);
             gl::ClearColor(BACKDROP[0], BACKDROP[1], BACKDROP[2], BACKDROP[3]);
             gl::Clear(gl::COLOR_BUFFER_BIT);
         }
+        self.fill_band();
     }
 
     pub fn set_bezel(&mut self, w: u32, h: u32, rgba: &[u8]) {
-        let stride = w as usize * 4;
-        let mut bottom_up = Vec::with_capacity(rgba.len());
-        for row in rgba.chunks_exact(stride).rev() {
-            bottom_up.extend_from_slice(row);
-        }
-        let tex = crate::gl::texture(
-            w,
-            h,
-            gl::LINEAR,
-            gl::CLAMP_TO_EDGE,
-            gl::RGBA,
-            Some(&bottom_up),
-        );
+        let tex = bottom_up_texture(w, h, rgba);
         if let Some(old) = self.bezel.replace(tex) {
             unsafe { gl::DeleteTextures(1, &old) };
         }
@@ -601,6 +639,36 @@ impl Compositor {
     }
 
     fn in_game_rect(&mut self, draw: impl FnOnce(&mut Self)) {
+        if let Some(overlay) = self.overlay.as_ref().filter(|_| self.overlay_on) {
+            let (tex, (whole, game)) = (
+                overlay.tex,
+                overlay_rects(self.size, overlay.size, overlay.window),
+            );
+            let (x, y, w, h) = game;
+            self.game
+                .set_fbo_scale(w as f32 / OUT_W as f32, h as f32 / OUT_H as f32);
+            self.game.set_origin(x as f32, y as f32);
+            self.game.set_whole(true);
+            unsafe { gl::Viewport(x, y, w, h) };
+            draw(self);
+            self.game.set_whole(false);
+            self.game.set_origin(0.0, 0.0);
+            let (x, y, w, h) = whole;
+            unsafe {
+                gl::Viewport(x, y, w, h);
+                gl::UseProgram(self.bezel_prog);
+                // The canvas takes the blue light filter as it is shown.
+                gl::Uniform3f(self.u_bezel_gain, 1.0, 1.0, 1.0);
+                gl::Uniform1f(self.u_bezel_alpha, 1.0);
+                gl::ActiveTexture(gl::TEXTURE0);
+                gl::BindTexture(gl::TEXTURE_2D, tex);
+                gl::Enable(gl::BLEND);
+                gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+            }
+            self.quad.draw();
+            unsafe { gl::Disable(gl::BLEND) };
+            return self.fill_band();
+        }
         if !self.native() {
             return draw(self);
         }
@@ -631,6 +699,40 @@ impl Compositor {
     }
 }
 
+fn bottom_up_texture(w: u32, h: u32, rgba: &[u8]) -> gl::types::GLuint {
+    let stride = w as usize * 4;
+    let mut bottom_up = Vec::with_capacity(rgba.len());
+    for row in rgba.chunks_exact(stride).rev() {
+        bottom_up.extend_from_slice(row);
+    }
+    crate::gl::texture(
+        w,
+        h,
+        gl::LINEAR,
+        gl::CLAMP_TO_EDGE,
+        gl::RGBA,
+        Some(&bottom_up),
+    )
+}
+
+/// An overlay `size` big fitted whole in `canvas` and centred, and the game's `window` in it, as
+/// x, y, w, h in GL's pixels, which count up from the bottom.
+pub fn overlay_rects(
+    canvas: (u32, u32),
+    size: (u32, u32),
+    window: [f32; 4],
+) -> ((i32, i32, i32, i32), (i32, i32, i32, i32)) {
+    let scale = (canvas.0 as f32 / size.0 as f32).min(canvas.1 as f32 / size.1 as f32);
+    let (w, h) = (size.0 as f32 * scale, size.1 as f32 * scale);
+    let (x, top) = ((canvas.0 as f32 - w) / 2.0, (canvas.1 as f32 - h) / 2.0);
+    let up = |top: f32, h: f32| (canvas.1 as f32 - top - h).round() as i32;
+    let whole = (x.round() as i32, up(top, h), w.round() as i32, h.round() as i32);
+    let (gx, gtop) = (x + window[0] * scale, top + window[1] * scale);
+    let (gw, gh) = (window[2] * scale, window[3] * scale);
+    let game = (gx.round() as i32, up(gtop, gh), gw.round() as i32, gh.round() as i32);
+    (whole, game)
+}
+
 pub fn canvas_size(window: (u32, u32)) -> (u32, u32) {
     let (_, _, w, h) = blit_rect(window, 0.0);
     let (w, h) = (w.max(1) as u32, h.max(1) as u32);
@@ -650,6 +752,9 @@ impl Drop for Compositor {
             gl::DeleteProgram(self.bezel_prog);
             if let Some(tex) = self.bezel {
                 gl::DeleteTextures(1, &tex);
+            }
+            if let Some(overlay) = &self.overlay {
+                gl::DeleteTextures(1, &overlay.tex);
             }
             if let Some(turn) = &self.turn {
                 gl::DeleteProgram(turn.prog);

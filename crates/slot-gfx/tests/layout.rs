@@ -283,3 +283,64 @@ fn the_overlay_fills_the_strip_when_up_and_drops_as_it_slides() {
         }
     }
 }
+
+#[test]
+fn a_game_overlay_shows_the_game_in_its_window_on_every_panel() {
+    let Some((_g, _s, mut c)) = compositor() else {
+        return;
+    };
+    // Each panel with an overlay of its own shape, and a wide one with the 720 by 480 ones.
+    for (panel, size, window) in [
+        ((640, 480), (640, 480), [80.0, 0.0, 480.0, 480.0]),
+        ((720, 480), (720, 480), [104.0, 16.0, 512.0, 448.0]),
+        ((720, 720), (720, 720), [60.0, 80.0, 600.0, 540.0]),
+        ((1280, 720), (720, 480), [104.0, 16.0, 512.0, 448.0]),
+    ] {
+        let (w, h) = size;
+        let mut rgba = [220u8, 30, 30, 255].repeat((w * h) as usize);
+        for y in window[1] as u32..(window[1] + window[3]) as u32 {
+            for x in window[0] as u32..(window[0] + window[2]) as u32 {
+                let o = ((y * w + x) * 4) as usize;
+                rgba[o..o + 4].copy_from_slice(&[0, 0, 0, 0]);
+            }
+        }
+        c.fit(panel);
+        c.set_screen_effect(ScreenEffect::None);
+        c.set_screen_power(1.0);
+        c.set_overlay(Some((w, h, &rgba, window)));
+        c.show_overlay(true);
+        c.begin_frame(Layout::Framed);
+        c.upload_game(
+            &[30, 220, 30, 255].repeat((SRC_W * SRC_H) as usize),
+            (SRC_W, SRC_H),
+        );
+        c.draw_list(&[Draw::Game]);
+        let shown = c.read_window(panel);
+        let (whole, game) = slot_gfx::overlay_rects(panel, size, window);
+        let at = |x: i32, y_up: i32| {
+            let o = (((panel.1 as i32 - 1 - y_up) * panel.0 as i32 + x) * 4) as usize;
+            [shown[o], shown[o + 1], shown[o + 2]]
+        };
+        let (gx, gy, gw, gh) = game;
+        for (x, y) in [
+            (gx + 2, gy + 2),
+            (gx + gw - 3, gy + gh - 3),
+            (gx + gw / 2, gy + gh / 2),
+        ] {
+            let p = at(x, y);
+            assert!(
+                p[1] > 200 && p[0] < 60,
+                "{panel:?}: no game at {x},{y}: {p:?}"
+            );
+        }
+        let (ox, oy, ow, oh) = whole;
+        for (x, y) in [(ox + 2, oy + 2), (ox + ow - 3, oy + oh - 3)] {
+            let p = at(x, y);
+            assert!(
+                p[0] > 200 && p[1] < 60,
+                "{panel:?}: no overlay at {x},{y}: {p:?}"
+            );
+        }
+        c.set_overlay(None);
+    }
+}

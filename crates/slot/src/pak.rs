@@ -55,7 +55,12 @@ pub fn check(bytes: &[u8], key: &[u8; 32]) -> Result<Pak, String> {
     };
     let note = entry("pak")?;
     let sig = entry("pak.sig")?;
-    verify("the pack", note, std::str::from_utf8(sig).unwrap_or_default(), key)?;
+    verify(
+        "the pack",
+        note,
+        std::str::from_utf8(sig).unwrap_or_default(),
+        key,
+    )?;
 
     let note = std::str::from_utf8(note).map_err(|_| "the pack's note is not text")?;
     let field = |key: &str| {

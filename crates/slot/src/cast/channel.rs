@@ -143,7 +143,9 @@ pub fn numbers(json: &str, key: &str) -> Vec<u64> {
         .split_once('[')
         .and_then(|(_, after)| after.split_once(']'))
         .map_or("", |(list, _)| list);
-    list.split(',').filter_map(|n| n.trim().parse().ok()).collect()
+    list.split(',')
+        .filter_map(|n| n.trim().parse().ok())
+        .collect()
 }
 
 #[cfg(test)]
@@ -152,7 +154,12 @@ mod tests {
 
     #[test]
     fn a_message_comes_back_as_it_went() {
-        let bytes = encode("sender-0", "receiver-0", NS_RECEIVER, r#"{"type":"LAUNCH"}"#);
+        let bytes = encode(
+            "sender-0",
+            "receiver-0",
+            NS_RECEIVER,
+            r#"{"type":"LAUNCH"}"#,
+        );
         let len = u32::from_be_bytes(bytes[..4].try_into().unwrap()) as usize;
         assert_eq!(len, bytes.len() - 4);
         let m = decode(&bytes[4..]).unwrap();
@@ -168,7 +175,10 @@ mod tests {
             {"appId":"E8C28D3C","sessionId":"backdrop","transportId":"t-0"},
             {"appId":"0F5096E8","displayName":"Chrome Mirroring","namespaces":[{"name":"x"}],
              "sessionId":"abc-123","statusText":"{curly}","transportId":"abc-123"}]}}"#;
-        assert_eq!(mirroring_app(status), Some(("abc-123".into(), "abc-123".into())));
+        assert_eq!(
+            mirroring_app(status),
+            Some(("abc-123".into(), "abc-123".into()))
+        );
         assert_eq!(mirroring_app(r#"{"status":{"applications":[]}}"#), None);
     }
 

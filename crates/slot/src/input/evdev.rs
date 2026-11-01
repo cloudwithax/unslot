@@ -75,7 +75,11 @@ impl Triggers {
             return None;
         }
         self.held[i] = now;
-        Some(if now { RawEvent::Down(btn) } else { RawEvent::Up(btn) })
+        Some(if now {
+            RawEvent::Down(btn)
+        } else {
+            RawEvent::Up(btn)
+        })
     }
 }
 

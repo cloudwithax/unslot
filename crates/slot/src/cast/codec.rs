@@ -43,7 +43,8 @@ impl Codecs {
         unsafe {
             macro_rules! sym {
                 ($name:literal) => {
-                    *lib.get(concat!($name, "\0").as_bytes()).map_err(|e| e.to_string())?
+                    *lib.get(concat!($name, "\0").as_bytes())
+                        .map_err(|e| e.to_string())?
                 };
             }
             Ok(Arc::new(Codecs {
@@ -386,20 +387,18 @@ fn rows_to_i420(bgrx: &[u8], at: &Place, luma: &mut [u8], u: &mut [u8], v: &mut 
         let pixels = r0.chunks_exact(8).zip(r1.chunks_exact(8));
         let lumas = l0.chunks_exact_mut(2).zip(l1.chunks_exact_mut(2));
         for (((p0, p1), (y0, y1)), (u, v)) in pixels.zip(lumas).zip(u.iter_mut().zip(v)) {
-            let px = |p: &[u8], i: usize| {
-                (i32::from(p[i + 2]), i32::from(p[i + 1]), i32::from(p[i]))
-            };
+            let px =
+                |p: &[u8], i: usize| (i32::from(p[i + 2]), i32::from(p[i + 1]), i32::from(p[i]));
             let quad = [px(p0, 0), px(p0, 4), px(p1, 0), px(p1, 4)];
-            let y_of = |(r, g, b): (i32, i32, i32)| {
-                (((66 * r + 129 * g + 25 * b + 128) >> 8) + 16) as u8
-            };
+            let y_of =
+                |(r, g, b): (i32, i32, i32)| (((66 * r + 129 * g + 25 * b + 128) >> 8) + 16) as u8;
             y0[0] = y_of(quad[0]);
             y0[1] = y_of(quad[1]);
             y1[0] = y_of(quad[2]);
             y1[1] = y_of(quad[3]);
-            let (r, g, b) = quad
-                .iter()
-                .fold((0, 0, 0), |(r, g, b), &(pr, pg, pb)| (r + pr, g + pg, b + pb));
+            let (r, g, b) = quad.iter().fold((0, 0, 0), |(r, g, b), &(pr, pg, pb)| {
+                (r + pr, g + pg, b + pb)
+            });
             *u = (((-38 * r - 74 * g + 112 * b + 512) >> 10) + 128) as u8;
             *v = (((112 * r - 94 * g - 18 * b + 512) >> 10) + 128) as u8;
         }
@@ -417,7 +416,11 @@ mod tests {
         let mut bgrx = vec![0u8; stride * 2 * 4];
         for y in 0..2 {
             for x in 0..4 {
-                let px = if x < 2 { [255, 255, 255, 0] } else { [0, 0, 255, 0] };
+                let px = if x < 2 {
+                    [255, 255, 255, 0]
+                } else {
+                    [0, 0, 255, 0]
+                };
                 bgrx[(y * stride + x) * 4..][..4].copy_from_slice(&px);
             }
         }
@@ -434,12 +437,25 @@ mod tests {
         let (w, h) = (2usize, 6usize);
         let mut bgrx = vec![0u8; w * h * 4];
         for (y, row) in bgrx.chunks_exact_mut(w * 4).enumerate() {
-            let px = if y / 2 == 1 { [255, 255, 255, 0] } else { [0, 0, 255, 0] };
+            let px = if y / 2 == 1 {
+                [255, 255, 255, 0]
+            } else {
+                [0, 0, 255, 0]
+            };
             row.chunks_exact_mut(4).for_each(|p| p.copy_from_slice(&px));
         }
         let mut out = vec![0u8; w * h * 3 / 2];
-        bgrx_to_i420(&bgrx, w as u32, (w as u32, h as u32), (w as u32, h as u32), &mut out);
-        assert_eq!(&out[..12], &[82, 82, 82, 82, 235, 235, 235, 235, 82, 82, 82, 82]);
+        bgrx_to_i420(
+            &bgrx,
+            w as u32,
+            (w as u32, h as u32),
+            (w as u32, h as u32),
+            &mut out,
+        );
+        assert_eq!(
+            &out[..12],
+            &[82, 82, 82, 82, 235, 235, 235, 235, 82, 82, 82, 82]
+        );
         assert_eq!(&out[12..15], &[90, 128, 90], "U");
         assert_eq!(&out[15..18], &[240, 128, 240], "V");
     }

@@ -23,8 +23,10 @@ unsafe impl Send for Tls {}
 impl Tls {
     pub fn connect(lib: &Arc<Codecs>, addr: SocketAddr, timeout: Duration) -> Result<Tls, String> {
         let tcp = TcpStream::connect_timeout(&addr, timeout).map_err(|e| e.to_string())?;
-        tcp.set_read_timeout(Some(timeout)).map_err(|e| e.to_string())?;
-        tcp.set_write_timeout(Some(timeout)).map_err(|e| e.to_string())?;
+        tcp.set_read_timeout(Some(timeout))
+            .map_err(|e| e.to_string())?;
+        tcp.set_write_timeout(Some(timeout))
+            .map_err(|e| e.to_string())?;
         tcp.set_nodelay(true).map_err(|e| e.to_string())?;
         // SAFETY: a connected socket, which outlives the connection made over it.
         let conn = unsafe { (lib.tls_connect)(tcp.as_raw_fd()) };

@@ -115,7 +115,11 @@ fn exact_rate(device: &cpal::Device, sample_rate: u32) -> Option<cpal::Supported
             && r.sample_format() == cpal::SampleFormat::F32
             && r.min_sample_rate() <= want
             && want <= r.max_sample_rate();
-        if usable { Some(r.with_sample_rate(want)) } else { None }
+        if usable {
+            Some(r.with_sample_rate(want))
+        } else {
+            None
+        }
     })
 }
 

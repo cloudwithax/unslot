@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use slot_gfx::OUT_W;
 
-use slot_store::Platform;
+use slot_store::{Platform, SpColour};
 
 use crate::art::decode_png;
 use crate::media::Media;
@@ -252,6 +252,76 @@ pub fn link_port() -> &'static [u8] {
 pub fn link_port_light() -> &'static [u8] {
     static P: OnceLock<Vec<u8>> = OnceLock::new();
     load(PORT_LIGHT_PNG, PORT_W, PORT_H, &P)
+}
+
+/// A slot in a look other than the plain dark or light: the back of the mouth, its front and
+/// the link port, each `SLOT_W` by `SLOT_H`.
+pub struct SlotSkin {
+    pub back: Vec<u8>,
+    pub front: Vec<u8>,
+    pub port: Vec<u8>,
+}
+
+/// The slot in an SP shell colour.
+pub fn sp_slot(colour: SpColour) -> SlotSkin {
+    macro_rules! strips {
+        ($dir:literal) => {
+            [
+                include_bytes!(concat!("../../../assets/slots/sp/", $dir, "/slot_back.png"))
+                    .as_slice(),
+                include_bytes!(concat!(
+                    "../../../assets/slots/sp/",
+                    $dir,
+                    "/slot_front.png"
+                ))
+                .as_slice(),
+                include_bytes!(concat!("../../../assets/slots/sp/", $dir, "/link_port.png"))
+                    .as_slice(),
+            ]
+        };
+    }
+    let [back, front, port] = match colour {
+        SpColour::Graphite => strips!("graphite"),
+        SpColour::Platinum => strips!("platinum"),
+        SpColour::PearlPink => strips!("pearl-pink"),
+        SpColour::PearlBlue => strips!("pearl-blue"),
+        SpColour::PearlBlueDark => strips!("pearl-blue-dark"),
+    };
+    slot_skin(back, front, Some(port)).expect("a bundled slot decodes")
+}
+
+/// A slot from PNGs of your own, fitted to the strip's size as the bundled ones are. Without a
+/// port of its own it borrows the plain one that suits its front.
+pub fn slot_skin(back: &[u8], front: &[u8], port: Option<&[u8]>) -> Option<SlotSkin> {
+    let fit = |bytes: &[u8]| {
+        let (mut rgba, sw, sh) = decode_png(bytes)?;
+        if sh == SLOT_H && sw > SLOT_W {
+            rgba = crop_centre(&rgba, sw, sh, SLOT_W);
+        } else if (sw, sh) != (SLOT_W, SLOT_H) {
+            rgba = scale(&rgba, sw, sh, SLOT_W, SLOT_H);
+        }
+        bleed(&mut rgba, SLOT_W, SLOT_H);
+        Some(rgba)
+    };
+    let back = fit(back)?;
+    let front = fit(front)?;
+    let port = match port.and_then(fit) {
+        Some(port) => port,
+        None if strip_is_light(&front) => link_port_light().to_vec(),
+        None => link_port().to_vec(),
+    };
+    Some(SlotSkin { back, front, port })
+}
+
+/// Whether a strip is pale enough that the footer printed on it should be black: the mean
+/// luma of its opaque pixels, against the middle of the range.
+pub fn strip_is_light(rgba: &[u8]) -> bool {
+    let (mut sum, mut n) = (0u64, 0u64);
+    for p in rgba.chunks_exact(4).filter(|p| p[3] > 127) {
+        sum += (299 * p[0] as u64 + 587 * p[1] as u64 + 114 * p[2] as u64) / 1000;
+        n += 1;
+    }
+    n > 0 && sum / n >= 140
 }
 
 pub fn link_plug_host() -> &'static [u8] {

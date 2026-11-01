@@ -78,6 +78,21 @@ echo "|/bin/sh $SYS/coresave.sh %p %s %e %t" > /proc/sys/kernel/core_pattern 2>/
 # governor never raises; the driver's performance scene holds it at 648 MHz.
 echo 1 > /sys/class/devfreq/gpu/device/scenectrl/command 2>/dev/null
 
+# A port slot quit for, from the Apps page: it runs from its own folder with slot gone, and slot
+# starts once it ends. The note goes first, so a port that hangs the device is not run again.
+if [ -f "$SD/.unslot-port" ]; then
+	port="$(cat "$SD/.unslot-port")"
+	rm -f "$SD/.unslot-port"
+	sync
+	if [ -f "$port" ]; then
+		run=sh
+		head -n 1 "$port" | grep -q bash && command -v bash > /dev/null && run=bash
+		log "port $port"
+		(cd "$(dirname "$port")" && $run "$port") >> "$LOGS/ports.log" 2>&1
+		log "port ended $?"
+	fi
+fi
+
 [ -f "$LOGS/slot.log" ] && mv -f "$LOGS/slot.log" "$LOGS/slot.log.1"
 log "exec $SYS/slot"
 

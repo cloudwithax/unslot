@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use slot_ftrace::{self as ft, ev};
@@ -6,17 +7,16 @@ use slot_gfx::{Canvas, Compositor, Draw, Layout, ScreenEffect, TexId, OUT_H, OUT
 const PAPER: &[u8] = include_bytes!("../assets/paper.png");
 use slot_input::{InputSource, Millis};
 use slot_power::{Platform, Power};
-use slot_store::{format_stamp, BezelPick, Platform as Console};
+use slot_store::{format_stamp, Appearance, BezelPick, Platform as Console};
 use slot_ui::{
     badge_face, bezel_face, chip_face, chip_shadow_face, core_button_legends, date_time,
-    default_game_bezel_face, footer_ink, game_bezel_face, hint_face, icon_face,
+    default_game_bezel_face, footer_ink, hint_face, icon_face,
     link_button_legends, menu_face, mould_shadow, photo_face, quick_caret_face, quick_label_face,
-    quick_legend_faces, quick_pointer_face, value_face, rebuild_count_face,
-    rebuild_title_face, set_clock_hint_face, slot_back, slot_back_light, slot_front,
-    slot_front_light, socket_face, sticker_face, time_text, title_face, toast_face, wallpaper_face,
-    word_ink, CartFace, GbShell, Icon, LinkBadge, Mould, PowerChoice, QuickMenuFaces, QuickRow,
-    QuickValue, RebuildScreen, StickerFields, Toast, UndoFace, ALERT_PX, BOLT_PX, HUD_ICON_PX,
-    HUD_INK, LEGEND,
+    quick_legend_faces, quick_pointer_face, rebuild_count_face, rebuild_title_face,
+    set_clock_hint_face, slot_back, slot_back_light, slot_front, slot_front_light, socket_face,
+    sticker_face, time_text, title_face, toast_face, value_face, wallpaper_face, word_ink,
+    CartFace, GbShell, Icon, LinkBadge, Mould, PowerChoice, QuickMenuFaces, QuickRow, QuickValue,
+    RebuildScreen, StickerFields, Toast, UndoFace, ALERT_PX, BOLT_PX, HUD_ICON_PX, HUD_INK, LEGEND,
 };
 
 use crate::app::{App, LinkRow, Phase};
@@ -95,6 +95,7 @@ pub struct Frontend {
     about: AboutFace,
     quick_clock: QuickClock,
     quick_palette: QuickPalette,
+    quick_theme: QuickTheme,
     wallpaper: WallpaperSync,
     page: PageSync,
     game_bezel: BezelSync,
@@ -128,6 +129,13 @@ struct QuickPalette {
     dim: Option<TexId>,
     lit: Option<TexId>,
     shown: &'static str,
+}
+
+#[derive(Default)]
+struct QuickTheme {
+    dim: Option<TexId>,
+    lit: Option<TexId>,
+    shown: String,
 }
 
 struct BezelSync {
@@ -191,7 +199,13 @@ struct ShelfLook {
     net: [[TexId; 3]; 2],
     port: [Option<TexId>; 2],
     legend: [Vec<(TexId, u32)>; 2],
-    applied: Option<(bool, bool, bool)>,
+    /// The textures for a slot in a look other than the plain dark or light: its back, front
+    /// and link port. Made once and drawn over for each look after.
+    skin: Option<[TexId; 3]>,
+    /// The look last loaded into `skin`, and whether it loaded. One that did not is not asked of
+    /// the card again until the look changes.
+    skin_of: Option<(Appearance, bool)>,
+    applied: Option<(Appearance, bool, bool, bool)>,
 }
 
 #[derive(Default)]
@@ -312,6 +326,7 @@ impl Frontend {
             about: AboutFace::default(),
             quick_clock: QuickClock::default(),
             quick_palette: QuickPalette::default(),
+            quick_theme: QuickTheme::default(),
             wallpaper: WallpaperSync::default(),
             page: PageSync::default(),
             game_bezel: BezelSync::default(),
@@ -425,9 +440,11 @@ impl Frontend {
             net,
             port: [None, None],
             legend: [Vec::new(), Vec::new()],
+            skin: None,
+            skin_of: None,
             applied: None,
         });
-        self.apply_look();
+        self.apply_look(compositor);
         crate::boot_time::mark("shelf faces");
         self.upload_ground(compositor);
     }
@@ -444,18 +461,28 @@ impl Frontend {
         }
     }
 
-    fn apply_look(&mut self) {
+    fn apply_look(&mut self, compositor: &mut Compositor) {
+        self.sync_skin(compositor);
+        let appearance = self.session.app().appearance().clone();
         let light = self.session.app().light();
         let ready = self.look.as_ref().map(|look| {
             let i = usize::from(light);
             let legend_ready = !look.legend[i].is_empty();
-            let port_ready = look.port[i].is_some();
+            let skin = match &look.skin_of {
+                Some((of, true)) if *of == appearance => look.skin,
+                _ => None,
+            };
+            let port = match skin {
+                Some([_, _, port]) => Some(port),
+                None => look.port[i],
+            };
+            let port_ready = port.is_some();
             (
-                look.applied == Some((light, legend_ready, port_ready)),
-                look.slot[i],
+                look.applied == Some((appearance.clone(), light, legend_ready, port_ready)),
+                skin.map_or(look.slot[i], |[back, front, _]| [back, front]),
                 look.bolt[i],
                 look.bolt[0],
-                look.port[i],
+                port,
                 look.legend[i].clone(),
                 legend_ready,
                 port_ready,
@@ -482,7 +509,40 @@ impl Frontend {
             self.session.app_mut().set_link_legend_faces(legend);
         }
         if let Some(look) = &mut self.look {
-            look.applied = Some((light, legend_ready, port_ready));
+            look.applied = Some((appearance, light, legend_ready, port_ready));
+        }
+    }
+
+    /// Loads the slot for the look picked into the skin textures when the look changes to one
+    /// that is not the plain dark or light.
+    fn sync_skin(&mut self, compositor: &mut Compositor) {
+        let appearance = self.session.app().appearance().clone();
+        let root = self.session.app().root().map(Path::to_path_buf);
+        let Some(look) = &mut self.look else {
+            return;
+        };
+        if matches!(&look.skin_of, Some((of, _)) if *of == appearance) {
+            return;
+        }
+        let skin = crate::slot_skin::load(root.as_deref(), &appearance);
+        look.skin_of = Some((appearance.clone(), skin.is_some()));
+        let Some(skin) = skin else {
+            return;
+        };
+        let (w, h) = (slot_ui::SLOT_W, slot_ui::SLOT_H);
+        let strips = [&skin.back, &skin.front, &skin.port];
+        match look.skin {
+            Some(texes) => {
+                for (tex, rgba) in texes.into_iter().zip(strips) {
+                    compositor.update_texture(tex, w, h, rgba);
+                }
+            }
+            None => look.skin = Some(strips.map(|rgba| compositor.create_texture(w, h, rgba))),
+        }
+        if let Appearance::Own(_) = appearance {
+            self.session
+                .app_mut()
+                .set_own_slot_light(slot_ui::strip_is_light(&skin.front));
         }
     }
 
@@ -660,6 +720,7 @@ impl Frontend {
         compositor.set_screen_footer(self.session.app().screen_footer());
         compositor.set_overlay_slide(self.session.app().overlay_slide());
         compositor.set_game_source_rect(self.session.app().source_rect());
+        compositor.show_overlay(self.session.app().overlay_shown());
         self.grab_link_shot(compositor);
         let begun = ft::span(ev::GFX_BEGIN_FRAME, 0);
         compositor.begin_frame(self.session.app().layout());
@@ -694,6 +755,7 @@ impl Frontend {
         sync_about(self.session.app_mut(), compositor, &mut self.about);
         sync_quick_clock(self.session.app_mut(), compositor, &mut self.quick_clock);
         sync_quick_palette(self.session.app_mut(), compositor, &mut self.quick_palette);
+        sync_quick_theme(self.session.app_mut(), compositor, &mut self.quick_theme);
         sync_wallpaper(self.session.app_mut(), compositor, &mut self.wallpaper);
         sync_page(self.session.app_mut(), compositor, &mut self.page);
         sync_game_bezel(self.session.app_mut(), compositor, &mut self.game_bezel);
@@ -743,7 +805,7 @@ impl Frontend {
                 self.link_art_done = true;
             }
         }
-        self.apply_look();
+        self.apply_look(compositor);
         sync_switcher(
             self.session.app_mut(),
             compositor,
@@ -1167,18 +1229,24 @@ fn sync_game_bezel(app: &mut App, compositor: &mut Compositor, state: &mut Bezel
     let pick = app.resolved_bezel(platform);
     let shown = (platform, pick);
     if state.image.as_ref() != Some(&shown) {
+        let mut overlay = None;
         let rgba = match &shown.1 {
             BezelPick::None | BezelPick::Ags102 => None,
             BezelPick::Default => default_game_bezel_face(platform == Console::Gbc),
-            BezelPick::File(name) => app
-                .root()
-                .map(|root| {
-                    root.join(crate::bezel::GAME_BEZELS)
-                        .join(platform.dir_name())
-                        .join(name)
-                })
-                .and_then(|path| game_bezel_face(&path)),
+            BezelPick::File(name) => {
+                overlay = app
+                    .root()
+                    .and_then(|root| crate::bezel::find(root, platform, name, app.panel()))
+                    .and_then(|path| crate::bezel::load(&path));
+                None
+            }
         };
+        compositor.set_overlay(
+            overlay
+                .as_ref()
+                .map(|o| (o.w, o.h, o.rgba.as_slice(), o.window)),
+        );
+        app.set_game_overlay(overlay.is_some());
         let tex = rgba.map(|rgba| match state.tex {
             Some(id) => {
                 compositor.update_texture(id, OUT_W, OUT_H, &rgba);
@@ -1201,10 +1269,7 @@ fn sync_game_bezel(app: &mut App, compositor: &mut Compositor, state: &mut Bezel
         if state.labels[at] == label {
             continue;
         }
-        let (dim, lit) = (
-            value_face(&label, false),
-            value_face(&label, true),
-        );
+        let (dim, lit) = (value_face(&label, false), value_face(&label, true));
         let (dim_size, lit_size) = ((dim.w, dim.h), (lit.w, lit.h));
         let dim = upload(compositor, &mut state.faces[at].0, dim);
         let lit = upload(compositor, &mut state.faces[at].1, lit);
@@ -1249,10 +1314,7 @@ fn sync_wallpaper(app: &mut App, compositor: &mut Compositor, state: &mut Wallpa
     if state.label == label {
         return;
     }
-    let (dim, lit) = (
-        value_face(&label, false),
-        value_face(&label, true),
-    );
+    let (dim, lit) = (value_face(&label, false), value_face(&label, true));
     let (dim_size, lit_size) = ((dim.w, dim.h), (lit.w, lit.h));
     let dim = upload(compositor, &mut state.dim, dim);
     let lit = upload(compositor, &mut state.lit, lit);
@@ -1268,14 +1330,27 @@ fn sync_quick_clock(app: &mut App, compositor: &mut Compositor, state: &mut Quic
     if text == state.shown {
         return;
     }
-    let (dim, lit) = (
-        value_face(&text, false),
-        value_face(&text, true),
-    );
+    let (dim, lit) = (value_face(&text, false), value_face(&text, true));
     let (dim_size, lit_size) = ((dim.w, dim.h), (lit.w, lit.h));
     let dim = upload(compositor, &mut state.dim, dim);
     let lit = upload(compositor, &mut state.lit, lit);
     app.set_quick_clock_faces((dim, dim_size.0, dim_size.1), (lit, lit_size.0, lit_size.1));
+    state.shown = text;
+}
+
+fn sync_quick_theme(app: &mut App, compositor: &mut Compositor, state: &mut QuickTheme) {
+    if app.quick_menu().is_none() {
+        return;
+    }
+    let text = app.resolved_appearance().label();
+    if text == state.shown {
+        return;
+    }
+    let (dim, lit) = (value_face(&text, false), value_face(&text, true));
+    let (dim_size, lit_size) = ((dim.w, dim.h), (lit.w, lit.h));
+    let dim = upload(compositor, &mut state.dim, dim);
+    let lit = upload(compositor, &mut state.lit, lit);
+    app.set_quick_theme_faces((dim, dim_size.0, dim_size.1), (lit, lit_size.0, lit_size.1));
     state.shown = text;
 }
 
@@ -1389,6 +1464,18 @@ fn sync_page(app: &mut App, compositor: &mut Compositor, state: &mut PageSync) {
             crate::app::PageModel::List(list) => list.face(),
             crate::app::PageModel::Keys(keys) => keys.face(),
             crate::app::PageModel::Qr(qr) => qr.face(),
+            crate::app::PageModel::Text(text) => text.face(),
+            crate::app::PageModel::Picture(picture) => picture.face(),
+            crate::app::PageModel::Video(video) => {
+                let (w, h) = (crate::apps::video::W, crate::apps::video::H);
+                // Nothing to show until the first picture is in.
+                if video.frame.rgba.len() == (w * h * 4) as usize {
+                    let tex = upload_rgba(compositor, &mut state.tex, w, h, &video.frame.rgba);
+                    app.set_page_face(tex, w, h);
+                }
+                state.shown = model;
+                return;
+            }
         };
         let (w, h) = (face.w, face.h);
         let tex = upload(compositor, &mut state.tex, face);

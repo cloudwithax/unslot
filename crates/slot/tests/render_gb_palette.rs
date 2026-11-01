@@ -95,7 +95,11 @@ fn without_palette(root: &Path, dylib: &Path, rom: &Path) -> Vec<u8> {
 
 fn card_cart(name: &str) -> Option<PathBuf> {
     let p = repo_root().join(name);
-    if p.exists() { Some(p) } else { None }
+    if p.exists() {
+        Some(p)
+    } else {
+        None
+    }
 }
 
 #[test]

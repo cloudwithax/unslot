@@ -89,4 +89,17 @@ launch
 launch
 [ "$(cat "$TMP/card/System/slot")" = new ] || fail "a System with no trial was rolled back"
 
+# A port slot quit for runs once, from its own folder, before slot starts again.
+setup
+mkdir -p "$TMP/card/Ports/game"
+printf '#!/bin/bash\npwd > "$1ran"; echo said\n' > "$TMP/card/Ports/Game.sh"
+printf '%s' "$TMP/card/Ports/Game.sh" > "$TMP/card/.unslot-port"
+launch
+[ "$(cat "$TMP/card/Ports/ran")" = "$TMP/card/Ports" ] || fail "the port did not run from its folder"
+[ ! -e "$TMP/card/.unslot-port" ] || fail "the port was left to run again"
+grep -q said "$TMP/card/Logs/ports.log" || fail "the port's output was not logged"
+rm "$TMP/card/Ports/ran"
+launch
+[ ! -e "$TMP/card/Ports/ran" ] || fail "the port ran a second time"
+
 echo "launch: all passed"

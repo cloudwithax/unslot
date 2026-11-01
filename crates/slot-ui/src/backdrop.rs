@@ -20,10 +20,6 @@ pub fn bezel_face(path: &Path, w: u32, h: u32) -> Option<Vec<u8>> {
     art::cover(path, w, h)
 }
 
-pub fn game_bezel_face(path: &Path) -> Option<Vec<u8>> {
-    art::cover(path, OUT_W, OUT_H)
-}
-
 pub fn default_game_bezel_face(colour: bool) -> Option<Vec<u8>> {
     let png = if colour { BEZEL_GBC_PNG } else { BEZEL_GB_PNG };
     art::cover_bytes(png, OUT_W, OUT_H)

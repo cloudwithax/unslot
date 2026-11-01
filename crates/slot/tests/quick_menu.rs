@@ -8,11 +8,11 @@ use slot::app::{App, Phase};
 use slot_input::{Action, Btn};
 use slot_store::{
     read_slot_state, write_slot_state, Appearance, BezelPick, Platform, Shader, SlotState,
-    WallpaperPick,
+    SpColour, WallpaperPick,
 };
 use slot_ui::{
     Draw, Icon, QuickMenuFaces, QuickRow, QuickValue, TexId, HINT_EDGE, MENU_PAD, MOUTH_H, OUT_H,
-    OUT_W, QUICK_EDGE, QUICK_LABEL_X,
+    OUT_W, QUICK_EDGE, QUICK_LABEL_X, QUICK_ROWS_MAX,
 };
 use tempfile::TempDir;
 
@@ -207,15 +207,74 @@ fn theme_switches_between_dark_and_light_and_saves() {
     let (d, mut a, _) = on_carousel();
     open_at(&mut a, QuickRow::Theme);
     assert_eq!(a.quick_menu(), Some(QuickRow::Theme));
-    assert_eq!(a.quick_value(QuickRow::Theme), Some(QuickValue::Dark));
+    assert_eq!(a.resolved_appearance(), Appearance::Dark);
+    assert!(!a.light());
     press(&mut a, Btn::Right);
-    assert_eq!(a.quick_value(QuickRow::Theme), Some(QuickValue::Light));
+    assert_eq!(a.resolved_appearance(), Appearance::Light);
+    assert!(a.light());
     assert_eq!(read_slot_state(d.path()).appearance, Appearance::Light);
     press(&mut a, Btn::A);
     assert_eq!(a.quick_menu(), Some(QuickRow::Theme), "theme opened a page");
     press(&mut a, Btn::Left);
-    assert_eq!(a.quick_value(QuickRow::Theme), Some(QuickValue::Dark));
+    assert_eq!(a.resolved_appearance(), Appearance::Dark);
     assert_eq!(read_slot_state(d.path()).appearance, Appearance::Dark);
+}
+
+#[test]
+fn theme_goes_on_through_the_sp_colours_and_wraps() {
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::Theme);
+    press(&mut a, Btn::Right);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.resolved_appearance(), Appearance::Sp(SpColour::Graphite));
+    assert!(!a.light(), "graphite is printed on in white");
+    press(&mut a, Btn::Right);
+    assert_eq!(a.resolved_appearance(), Appearance::Sp(SpColour::Platinum));
+    assert!(a.light(), "platinum is printed on in black");
+    assert_eq!(
+        read_slot_state(d.path()).appearance,
+        Appearance::Sp(SpColour::Platinum)
+    );
+    for _ in 0..3 {
+        press(&mut a, Btn::Right);
+    }
+    assert_eq!(
+        a.resolved_appearance(),
+        Appearance::Sp(SpColour::PearlBlueDark)
+    );
+    press(&mut a, Btn::Right);
+    assert_eq!(
+        a.resolved_appearance(),
+        Appearance::Dark,
+        "no sets of your own, so it wraps"
+    );
+}
+
+#[test]
+fn a_slot_of_your_own_on_the_card_comes_after_the_sp_colours() {
+    let (d, mut a, _) = on_carousel();
+    let mine = d.path().join(slot::slot_skin::OWN).join("Atomic Purple");
+    std::fs::create_dir_all(&mine).unwrap();
+    std::fs::write(mine.join("slot_back.png"), b"png").unwrap();
+    std::fs::write(mine.join("slot_front.png"), b"png").unwrap();
+    // Without a front it is not a slot.
+    std::fs::create_dir_all(d.path().join(slot::slot_skin::OWN).join("Half")).unwrap();
+    open_at(&mut a, QuickRow::Theme);
+    press(&mut a, Btn::Left);
+    assert_eq!(
+        a.resolved_appearance(),
+        Appearance::Own("Atomic Purple".into())
+    );
+    assert_eq!(
+        read_slot_state(d.path()).appearance,
+        Appearance::Own("Atomic Purple".into())
+    );
+    std::fs::remove_dir_all(&mine).unwrap();
+    assert_eq!(
+        a.resolved_appearance(),
+        Appearance::Dark,
+        "a set taken off the card"
+    );
 }
 
 #[test]
@@ -232,6 +291,7 @@ fn up_and_down_move_the_bar_and_wrap_at_the_ends() {
         QuickRow::General,
         QuickRow::Screen,
         QuickRow::Game,
+        QuickRow::Apps,
         QuickRow::Network,
         QuickRow::Power,
         QuickRow::About,
@@ -369,6 +429,8 @@ fn the_game_page_flips_eject_save_turbo_and_rewind_and_saves_each() {
     press(&mut a, Btn::Left);
     assert_eq!(card(&d), (true, false, false));
     assert!(!a.turbo());
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::Down);
     press(&mut a, Btn::Down);
     press(&mut a, Btn::Down);
     press(&mut a, Btn::Right);
@@ -753,11 +815,19 @@ fn fake_faces(a: &mut App) {
 }
 
 fn label(row: QuickRow, lit: bool) -> usize {
-    if lit { 130 + row.index() } else { 100 + row.index() }
+    if lit {
+        130 + row.index()
+    } else {
+        100 + row.index()
+    }
 }
 
 fn value(v: QuickValue, lit: bool) -> usize {
-    if lit { 210 + v.index() } else { 200 + v.index() }
+    if lit {
+        210 + v.index()
+    } else {
+        200 + v.index()
+    }
 }
 
 fn frame(a: &App) -> Vec<Draw> {
@@ -964,6 +1034,7 @@ fn labels_leave_room_for_the_pointer_and_values_end_thirty_two_pixels_in() {
     for row in QuickRow::GAME
         .into_iter()
         .filter(|r| !a.hidden_rows().contains(r))
+        .take(QUICK_ROWS_MAX)
     {
         let lit = row == QuickRow::FastForward;
         let [x, ..] = placed(&out, label(row, lit)).expect("a label was not drawn");

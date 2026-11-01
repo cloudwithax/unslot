@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.10.0
+
+- Bezels for every system. Each system's Screen settings, and the Screen page in the menu over a game, have a Bezel row, with the overlays from R. Savant's Anbernic H700 Overlays pack built in at 640 by 480, 720 by 480 and 720 by 720 for the NES, SNES, Genesis and Mega Drive, Master System, Game Gear, PC Engine, Game Boy family, Neo Geo, WonderSwan and more. The game is drawn in the bezel's window, as RetroArch does, and the bezel over the whole screen. A PNG of your own in `Bezels/<system>` is listed with them; with a KNULLI or Batocera `.info` beside it the game goes where that says, else in the PNG's clear middle. Stretch shows the game without the bezel.
+- Apps, in the menu: Files, Books, Manuals, Gallery and Music, and ports. Books reads text, EPUBs and PDFs and keeps your page; Gallery shows pictures; videos play with L1 and R1 skipping ten seconds; Music plays on with its page closed and holds while a game runs. Ports in `Ports`, laid out as PortMaster does, run with unslot closed and it comes back when they end.
+- Upload from Phone: scan the code with a phone on the same Wi-Fi to send the card a wallpaper or a game.
+- Controls: remap the buttons for every game, for a system or for one game.
+- The SP's slot comes in Graphite, Platinum, Pearl Pink, Pearl Blue and Pearl Blue Dark, and slots of your own can be added to the card.
+- Clear All Art on the Game Art page, after a second press, takes every label off the card.
+- Auto-Update Cores fetches new builds of the cores on the card once a start has the Wi-Fi up.
+- D-Pad as Stick: on a handheld without an analog stick, the D-pad moves the left stick in games.
+
 ## v2.9.1
 
 - Nodosumi, the Dreamcast core, is now 1.1. Games that support vibration rumble, rendering is faster, which smooths out Crazy Taxi 2, and depth is fast by default; a game that shows z-fighting can turn on the new Accurate depth core option. Each release now ships Nodosumi's latest release.

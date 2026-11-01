@@ -15,6 +15,12 @@ vars:
   # The cores built from source against OpenGL ES, as core:commit: the GPU cores, whose buildbot
   # builds want desktop GL, and vecx, whose buildbot build links it. Nodosumi is not among them:
   # core:nodosumi fetches its latest release.
+  # What the Apps open PDFs and videos with: MuPDF's mutool, built from this release, and a
+  # static arm64 ffmpeg.
+  MUPDF_VERSION: 1.24.10
+  FFMPEG_URL: https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz
+  # The bezels a build ships, R. Savant's overlays for the H700's three screen sizes.
+  OVERLAYS_COMMIT: e9b5f47ee76c16c6fdfe761f9e726984b85d2d30
   GLES_CORES: >-
     vecx:8f671cc9d737f2890c3ce19e177e2984dcae121f
     parallel_n64:a8280501a71c1bcd4c85c5b8bfe75cfa62cd6127
@@ -358,6 +364,108 @@ tasks:
           "$tag" "$commit" "{{.REPO}}" "$commit" > vendor/nodosumi_libretro.so.meta
         echo "fetched Nodosumi $tag ($commit)"
 
+  media:
+    desc: >-
+      Build MuPDF's mutool for the H700 and fetch a static arm64 ffmpeg into vendor/media, for the
+      Apps' PDF reader and video player
+    status:
+      - grep -q "^mupdf={{.MUPDF_VERSION}}$" vendor/media/media.meta
+      - test -f vendor/media/mutool
+      - test -f vendor/media/ffmpeg
+    cmds:
+      - mkdir -p vendor/media target-device
+      - |
+        set -eu
+        src="target-device/mupdf-{{.MUPDF_VERSION}}-source"
+        if [ ! -d "$src" ]; then
+          curl -fsSL -o target-device/mupdf.tar.gz \
+            "https://mupdf.com/downloads/archive/mupdf-{{.MUPDF_VERSION}}-source.tar.gz"
+          tar -xzf target-device/mupdf.tar.gz -C target-device
+          rm -f target-device/mupdf.tar.gz
+        fi
+      - task: device:sh
+        vars:
+          CMD: >-
+            make -C target-device/mupdf-{{.MUPDF_VERSION}}-source -j"$(nproc)" build=release
+            HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no HAVE_LIBCRYPTO=no tools
+            && cp target-device/mupdf-{{.MUPDF_VERSION}}-source/build/release/mutool vendor/media/mutool
+            && chown {{.UID}}:{{.GID}} vendor/media/mutool
+      - file vendor/media/mutool | grep -q aarch64
+      - |
+        set -eu
+        tmp="$(mktemp -d)"
+        trap 'rm -rf "$tmp"' EXIT
+        curl -fsSL -o "$tmp/ffmpeg.tar.xz" "{{.FFMPEG_URL}}"
+        tar -xJf "$tmp/ffmpeg.tar.xz" -C "$tmp"
+        dir="$(ls -d "$tmp"/ffmpeg-*-static | head -n 1)"
+        file "$dir/ffmpeg" | grep -q aarch64
+        cp "$dir/ffmpeg" vendor/media/ffmpeg
+        cp "$dir/GPLv3.txt" vendor/media/ffmpeg-GPLv3.txt
+        ffmpeg_version="$(basename "$dir" | sed 's/^ffmpeg-//; s/-arm64-static$//')"
+        printf 'mupdf={{.MUPDF_VERSION}}\nmupdf_source=https://mupdf.com/downloads/archive/mupdf-{{.MUPDF_VERSION}}-source.tar.gz\nffmpeg=%s\nffmpeg_source={{.FFMPEG_URL}}\n' \
+          "$ffmpeg_version" > vendor/media/media.meta
+        echo "vendored mutool {{.MUPDF_VERSION}} and ffmpeg $ffmpeg_version"
+    vars:
+      UID: {sh: id -u}
+      GID: {sh: id -g}
+
+  overlays:
+    desc: >-
+      Fetch R. Savant's H700 overlays at OVERLAYS_COMMIT and lay them out as slot's bezels in
+      vendor/overlays, a folder per screen size and per system
+    status:
+      - grep -q "^commit={{.OVERLAYS_COMMIT}}$" vendor/overlays/overlays.meta
+    cmds:
+      - |
+        set -eu
+        tmp="$(mktemp -d)"
+        trap 'rm -rf "$tmp"' EXIT
+        rm -rf vendor/overlays
+        mkdir -p vendor/overlays
+        # The pack's name for a system, slot's folder for it, and the bezel's name in the menu.
+        map='gb:GB:Game Boy
+        gbc:GBC:Game Boy Color
+        gba:GBA:Game Boy Advance
+        gamegear:GG:Game Gear
+        genesis:MD:Genesis
+        megadrive:MD:Mega Drive
+        lynx:LYNX:Lynx
+        mastersystem:SMS:Master System
+        neogeo:NEOGEO:Neo Geo
+        neogeocd:NEOCD:Neo Geo CD
+        nes:NES:NES
+        ngpc:NGP:Neo Geo Pocket Color
+        pcengine:PCE:PC Engine
+        tg16:PCE:TurboGrafx-16
+        pcenginecd:PCECD:PC Engine CD
+        tg16cd:PCECD:TurboGrafx-CD
+        psx:PS:PlayStation
+        sega32x:32X:32X
+        segacd:SEGACD:Sega CD
+        snes:SNES:Super Nintendo
+        supergrafx:SGFX:SuperGrafx
+        wswan:WS:WonderSwan
+        wswanc:WS:WonderSwan Color'
+        for res in 640x480:4_3 720x480:3_2 720x720:1_1; do
+          size="${res%%:*}" aspect="${res#*:}"
+          curl -fsSL -o "$tmp/$size.zip" \
+            "https://github.com/RighteousSavant/Anbernic-H700-Overlays/raw/{{.OVERLAYS_COMMIT}}/KNULLI%20Overlays/R.%20Savant%27s%20${size}%20KNULLI%20Overlays.zip"
+          unzip -o -q "$tmp/$size.zip" -d "$tmp/$size"
+          src="$tmp/$size/righteous-savant-overlays/systems"
+          echo "$map" | while IFS=: read -r name dir label; do
+            png="$src/$name-$aspect.png"
+            # One of the 640x480 pictures is named as if it were its .info.
+            [ -f "$png" ] || png="$src/$name-$aspect.info.png"
+            [ -f "$png" ] || continue
+            mkdir -p "vendor/overlays/$size/$dir"
+            cp "$png" "vendor/overlays/$size/$dir/$label.png"
+            cp "$src/$name-$aspect.info" "vendor/overlays/$size/$dir/$label.info"
+          done
+        done
+        printf 'overlays=R. Savant'"'"'s H700 overlays\ncommit={{.OVERLAYS_COMMIT}}\nsource=https://github.com/RighteousSavant/Anbernic-H700-Overlays/tree/{{.OVERLAYS_COMMIT}}\n' \
+          > vendor/overlays/overlays.meta
+        echo "vendored $(ls vendor/overlays/*/*/*.png | wc -l) overlays"
+
   core:gles:
     desc: >-
       Build the GPU cores (ParaLLEl N64, Flycast, PPSSPP) and vecx against OpenGL ES from their
@@ -462,7 +570,7 @@ tasks:
 
   dist:device:
     desc: Build the SD2 tree for an H700 device, OUT defaults to ./dist-device
-    deps: [core:device, core:gpsp, core:fetch, core:gles, core:nodosumi, cast:lib, services, build:device]
+    deps: [core:device, core:gpsp, core:fetch, core:gles, core:nodosumi, cast:lib, services, media, overlays, build:device]
     vars:
       OUT: '{{.OUT | default "dist-device"}}'
       UID: {sh: id -u}
@@ -496,9 +604,34 @@ tasks:
         commit="$(grep '^commit=' vendor/nodosumi_libretro.so.meta | cut -d= -f2)"
         cp vendor/nodosumi_libretro.so.meta "{{.OUT}}/System/licenses/nodosumi-$commit.meta"
       - cp vendor/cores.manifest {{.OUT}}/System/licenses/cores.manifest
+      - |
+        set -eu
+        # The Apps' PDF reader and video player; MuPDF is AGPL and ffmpeg GPL, with their sources
+        # noted in media.meta.
+        mkdir -p "{{.OUT}}/System/bin"
+        cp vendor/media/mutool vendor/media/ffmpeg "{{.OUT}}/System/bin/"
+        cp vendor/media/media.meta vendor/media/ffmpeg-GPLv3.txt "{{.OUT}}/System/licenses/"
       - cp -R vendor/services {{.OUT}}/System/services
-      - mkdir -p {{.OUT}}/System/Wallpapers
-      - cp assets/wallpapers/*.jpg assets/wallpapers/*.png {{.OUT}}/System/Wallpapers/
+      - |
+        set -eu
+        # R. Savant's overlays, free for any H700 handheld, with where they came from.
+        mkdir -p "{{.OUT}}/System/overlays"
+        cp -R vendor/overlays/*x* "{{.OUT}}/System/overlays/"
+        cp vendor/overlays/overlays.meta "{{.OUT}}/System/licenses/overlays.meta"
+      - |
+        set -eu
+        # The wallpapers and extra slot sets a build ships. A fork can ship its own, or none:
+        # an empty or missing folder is fine.
+        mkdir -p "{{.OUT}}/System/Wallpapers" "{{.OUT}}/System/Slots"
+        for f in assets/wallpapers/*; do
+          case "$f" in *.[jJ][pP][gG] | *.[jJ][pP][eE][gG] | *.[pP][nN][gG]) cp "$f" "{{.OUT}}/System/Wallpapers/" ;; esac
+        done
+        # assets/slots/sp holds the SP colours, which are built into slot; any other folder there
+        # is a set of its own.
+        for d in assets/slots/*/; do
+          [ -d "$d" ] && [ "$(basename "$d")" != sp ] && cp -R "$d" "{{.OUT}}/System/Slots/"
+        done
+        true
       - |
         set -eu
         # The release this tree is, which the updater compares with the latest.
@@ -589,8 +722,15 @@ tasks:
       - for c in {{.FETCHED}}; do adb push "vendor/${c}_libretro.so" '{{.SD}}/System/'; done
       - adb push licenses '{{.SD}}/System/'
       - adb push vendor/services '{{.SD}}/System/'
-      - adb shell 'mkdir -p {{.SD}}/System/Wallpapers'
-      - for f in assets/wallpapers/*.jpg assets/wallpapers/*.png; do adb push "$f" '{{.SD}}/System/Wallpapers/'; done
+      - adb shell 'mkdir -p {{.SD}}/System/Wallpapers {{.SD}}/System/Slots'
+      - |
+        for f in assets/wallpapers/*; do
+          case "$f" in *.[jJ][pP][gG] | *.[jJ][pP][eE][gG] | *.[pP][nN][gG]) adb push "$f" '{{.SD}}/System/Wallpapers/' ;; esac
+        done
+        for d in assets/slots/*/; do
+          [ -d "$d" ] && [ "$(basename "$d")" != sp ] && adb push "$d" '{{.SD}}/System/Slots/'
+        done
+        true
       - |
         set -euo pipefail
         sha="$(cat vendor/gpsp-src.sha)"

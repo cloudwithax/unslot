@@ -11,7 +11,7 @@ use slot_ui::{
     cart_face_with, contain, cover, face_size, label_size, render_of, CartFace, RENDERS,
 };
 
-const DIR: &str = "System/Cache/Labels";
+pub const DIR: &str = "System/Cache/Labels";
 const HEAD: usize = 24;
 
 pub fn label_art(root: &Path, cart: &Cart) -> Option<Vec<u8>> {

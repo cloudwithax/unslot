@@ -2,8 +2,8 @@ mod art;
 pub use art::{contain, cover, is_cutout};
 mod bitmaps;
 pub use bitmaps::{
-    link_port, link_port_light, slot_back, slot_back_light, slot_front, slot_front_light, Mould,
-    SLOT_H, SLOT_W,
+    link_port, link_port_light, slot_back, slot_back_light, slot_front, slot_front_light, slot_skin,
+    sp_slot, strip_is_light, Mould, SlotSkin, SLOT_H, SLOT_W,
 };
 mod backdrop;
 mod barcode;
@@ -20,6 +20,7 @@ mod link_art;
 mod list_page;
 mod media;
 mod page;
+mod picture_page;
 mod plate;
 mod polaroids;
 mod power_menu;
@@ -34,11 +35,12 @@ mod silhouette;
 mod slot_chrome;
 mod sticker;
 pub mod text;
+mod text_page;
 mod toast;
 
 pub use backdrop::{
     bezel_face, blur_background, default_background, default_game_bezel_face, draw_backdrop,
-    draw_ground, game_bezel_face, wallpaper_face,
+    draw_ground, wallpaper_face,
 };
 pub use barcode::{code39, CODE39_NARROW, CODE39_WIDE};
 pub use battery::{draw_gauge, BOLT_PX, GAUGE_H, GAUGE_W, WALL};
@@ -75,7 +77,7 @@ pub use link_art::{
     ARROW_LEFT_X, ARROW_RIGHT_X, ARROW_W, ARROW_Y, CLICKS_H, CLICKS_W, CLICKS_X, CLICKS_Y, PLUG_H,
     PLUG_TIP_X, PLUG_W, PORT_H, PORT_W, PORT_Y,
 };
-pub use list_page::{ListIcon, ListPage, ListRow, LIST_ROWS};
+pub use list_page::{ListIcon, ListPage, ListRow, LIST_H, LIST_ROWS, LIST_W};
 pub use media::Media;
 pub use page::Legend;
 pub use plate::{
@@ -87,6 +89,8 @@ pub use plate::{
 pub use polaroids::{photo_face, PhotoFace, Polaroids, DOT, LEGEND, PHOTO_H, PHOTO_W};
 pub use power_menu::{menu_face, PowerChoice, MENU_PAD};
 pub use qr_page::QrPage;
+pub use picture_page::{PicturePage, PICTURE_H, PICTURE_W};
+pub use text_page::{wrap as wrap_text, TextPage, TEXT_LINES, TEXT_PX, TEXT_W};
 pub use quick_menu::{
     core_button_legends, draw_menu_ground, link_button_legends, quick_caret_face, quick_label_face,
     quick_legend_faces, quick_pointer_face, quick_row_top, quick_row_top_at, value_face,

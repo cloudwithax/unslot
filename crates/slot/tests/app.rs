@@ -842,7 +842,11 @@ fn start_opens_no_picker_on_a_system_with_one_core() {
 
     let (_d, mut gb) = on_shelf_gb(&["Tetris", "Zzz"]);
     gb.apply(Action::GbaDown(Btn::Start));
-    assert_eq!(gb.core_picker(), None, "a Game Boy cart opened the GBA picker");
+    assert_eq!(
+        gb.core_picker(),
+        None,
+        "a Game Boy cart opened the GBA picker"
+    );
     assert!(
         matches!(gb.phase(), Phase::Cores { .. }),
         "a Game Boy cart's cores are a list: {:?}",
@@ -2001,7 +2005,11 @@ fn a_shoulder_still_held_when_the_cart_seats_never_reaches_a_game_boy_core() {
             pad(&s) & ButtonMask::L != 0,
             want_held,
             "{label}: the core is holding L {} the cart seated under a thumb that never moved",
-            if want_held { "nowhere after" } else { "ever since" }
+            if want_held {
+                "nowhere after"
+            } else {
+                "ever since"
+            }
         );
     }
 }
@@ -2241,6 +2249,22 @@ fn the_colour_shortcut_names_the_state_it_arrived_at() {
             Some(want),
             "the banner named the state the toggle left, not the one it reached"
         );
+    }
+}
+
+#[test]
+fn select_and_start_flip_the_dpad_onto_the_stick_and_back_and_save_it() {
+    let d = common::tmp_root_with_carts(&["Emerald"]);
+    let (mut s, _motor) = common::session_with_platform(d.path());
+    s.app_mut().apply(slot_input::Action::Insert);
+    for (on, said) in [
+        (true, slot_ui::Toast::DpadStickOn),
+        (false, slot_ui::Toast::DpadStickOff),
+    ] {
+        s.app_mut().apply(slot_input::Action::DpadStickToggle);
+        assert_eq!(s.app().dpad_stick(), on);
+        assert_eq!(s.app().toast(), Some(said));
+        assert_eq!(slot_store::read_slot_state(d.path()).dpad_stick, on);
     }
 }
 

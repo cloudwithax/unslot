@@ -190,9 +190,8 @@ fn the_boot_splash_draws_the_card_logo_before_the_shelf() {
         "the card's logo drew nothing"
     );
     let frame = c.read_frame();
-    let ink = (0..OUT_H as usize).any(|y| {
-        (0..OUT_W as usize).any(|x| px(&frame, x, y).iter().all(|c| *c > 0x80))
-    });
+    let ink = (0..OUT_H as usize)
+        .any(|y| (0..OUT_W as usize).any(|x| px(&frame, x, y).iter().all(|c| *c > 0x80)));
     assert!(ink, "the wordmark is not on the first frame");
     assert_eq!(
         px(&frame, 4, 4),
@@ -207,5 +206,9 @@ fn a_card_without_a_logo_draws_no_first_frame() {
         return;
     };
     let d = tempfile::tempdir().unwrap();
-    assert!(!slot::frontend::draw_boot_splash(&mut c, d.path(), (OUT_W, OUT_H)));
+    assert!(!slot::frontend::draw_boot_splash(
+        &mut c,
+        d.path(),
+        (OUT_W, OUT_H)
+    ));
 }

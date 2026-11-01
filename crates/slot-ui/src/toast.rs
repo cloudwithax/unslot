@@ -24,11 +24,13 @@ pub enum Toast {
     ShaderSimpletex,
     CardUnwritable,
     NoBios,
+    DpadStickOn,
+    DpadStickOff,
     Palette(GbPalette),
 }
 
 impl Toast {
-    const FIXED: [Toast; 16] = [
+    const FIXED: [Toast; 18] = [
         Toast::StateSaved,
         Toast::StateLoaded,
         Toast::NeedsGpsp,
@@ -45,6 +47,8 @@ impl Toast {
         Toast::ShaderSimpletex,
         Toast::CardUnwritable,
         Toast::NoBios,
+        Toast::DpadStickOn,
+        Toast::DpadStickOff,
     ];
 
     pub fn all() -> Vec<Toast> {
@@ -90,6 +94,8 @@ impl Toast {
             Toast::ShaderSimpletex => "Shader: Simpletex",
             Toast::CardUnwritable => "Can't write to SD card",
             Toast::NoBios => "BIOS missing",
+            Toast::DpadStickOn => "D-Pad: Left Stick",
+            Toast::DpadStickOff => "D-Pad: D-Pad",
             Toast::Palette(p) => p.label(),
         }
     }

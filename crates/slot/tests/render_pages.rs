@@ -158,7 +158,10 @@ fn the_settings_pages_draw_their_own_rows() {
     // The screen page lists one row per platform; open the first platform's page too.
     tap(&mut f, &mut input, Btn::A);
     let px = composed(&mut f, &mut c);
-    assert!(body_ink(&px) > 40, "a platform's screen page drew almost nothing");
+    assert!(
+        body_ink(&px) > 40,
+        "a platform's screen page drew almost nothing"
+    );
     tap(&mut f, &mut input, Btn::B);
     tap(&mut f, &mut input, Btn::B);
 

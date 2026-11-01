@@ -289,7 +289,13 @@ impl EmuHandle {
 
     /// What the game's achievements have said since last asked.
     pub fn take_cheevos(&self) -> Vec<slot_cheevos::Notice> {
-        std::mem::take(&mut *self.shared.cheevos.lock().unwrap_or_else(|e| e.into_inner()))
+        std::mem::take(
+            &mut *self
+                .shared
+                .cheevos
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        )
     }
 
     pub fn end_link(&self) {

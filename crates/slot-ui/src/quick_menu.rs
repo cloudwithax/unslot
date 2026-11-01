@@ -14,6 +14,10 @@ pub enum QuickRow {
     FastForwardSound,
     Screen,
     Rumble,
+    /// Whether the D-pad moves the left stick in a game.
+    DpadStick,
+    /// Which of the device's buttons press each of the game's.
+    Controls,
     DateTime,
     Clock,
     /// Whether the menus click and clack.
@@ -62,6 +66,12 @@ pub enum QuickRow {
     Updates,
     /// The cores that do not come with unslot, to download.
     Cores,
+    /// Whether the downloaded cores update themselves once the Wi-Fi is up.
+    AutoCores,
+    /// A page a phone opens to send a wallpaper or a game.
+    Upload,
+    /// The built-in apps and the ports.
+    Apps,
     /// Labels for the card's games, found online.
     GameArt,
     /// Signing in to RetroAchievements, or out.
@@ -80,7 +90,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 49] = [
+const GENERIC: [QuickRow; 54] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -130,6 +140,11 @@ const GENERIC: [QuickRow; 49] = [
     QuickRow::Cast,
     QuickRow::PlayCast,
     QuickRow::TvSound,
+    QuickRow::DpadStick,
+    QuickRow::Controls,
+    QuickRow::AutoCores,
+    QuickRow::Upload,
+    QuickRow::Apps,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -218,10 +233,11 @@ impl QuickRow {
         all
     };
 
-    pub const MAIN: [QuickRow; 6] = [
+    pub const MAIN: [QuickRow; 7] = [
         QuickRow::General,
         QuickRow::Screen,
         QuickRow::Game,
+        QuickRow::Apps,
         QuickRow::Network,
         QuickRow::Power,
         QuickRow::About,
@@ -229,15 +245,17 @@ impl QuickRow {
 
     pub const POWER: [QuickRow; 3] = [QuickRow::Restart, QuickRow::ShutDown, QuickRow::Reload];
 
-    pub const NETWORK: [QuickRow; 10] = [
+    pub const NETWORK: [QuickRow; 12] = [
         QuickRow::Wifi,
         QuickRow::WifiNetworks,
         QuickRow::Bluetooth,
         QuickRow::BtDevices,
         QuickRow::Cast,
+        QuickRow::Upload,
         QuickRow::Services,
         QuickRow::Updates,
         QuickRow::Cores,
+        QuickRow::AutoCores,
         QuickRow::GameArt,
         QuickRow::Achievements,
     ];
@@ -255,7 +273,7 @@ impl QuickRow {
         QuickRow::TvSound,
     ];
 
-    pub const GAME: [QuickRow; 8] = [
+    pub const GAME: [QuickRow; 10] = [
         QuickRow::Disc,
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
@@ -263,6 +281,8 @@ impl QuickRow {
         QuickRow::RunAhead,
         QuickRow::Turbo,
         QuickRow::Rumble,
+        QuickRow::DpadStick,
+        QuickRow::Controls,
         QuickRow::EjectSave,
     ];
 
@@ -344,6 +364,8 @@ impl QuickRow {
             | QuickRow::RunAhead
             | QuickRow::Turbo
             | QuickRow::Rumble
+            | QuickRow::DpadStick
+            | QuickRow::Controls
             | QuickRow::EjectSave => QuickRow::GAME.to_vec(),
             QuickRow::Wallpaper
             | QuickRow::WallpaperTint
@@ -366,9 +388,11 @@ impl QuickRow {
             | QuickRow::Bluetooth
             | QuickRow::BtDevices
             | QuickRow::Cast
+            | QuickRow::Upload
             | QuickRow::Services
             | QuickRow::Updates
             | QuickRow::Cores
+            | QuickRow::AutoCores
             | QuickRow::GameArt
             | QuickRow::Achievements => QuickRow::NETWORK.to_vec(),
             QuickRow::Restart | QuickRow::ShutDown | QuickRow::Reload => QuickRow::POWER.to_vec(),
@@ -444,6 +468,8 @@ impl QuickRow {
             QuickRow::FastForwardSound => "Fast Forward Sound",
             QuickRow::Screen => "Screen",
             QuickRow::Rumble => "Rumble",
+            QuickRow::DpadStick => "D-Pad as Stick",
+            QuickRow::Controls => "Controls",
             QuickRow::DateTime => "Date & Time",
             QuickRow::Clock => "Clock",
             QuickRow::MenuSounds => "Menu Sounds",
@@ -483,6 +509,9 @@ impl QuickRow {
             QuickRow::Services => "Services",
             QuickRow::Updates => "Updates",
             QuickRow::Cores => "Cores",
+            QuickRow::AutoCores => "Auto-Update Cores",
+            QuickRow::Upload => "Upload from Phone",
+            QuickRow::Apps => "Apps",
             QuickRow::GameArt => "Game Art",
             QuickRow::Achievements => "RetroAchievements",
             QuickRow::Power => "Power",
@@ -496,6 +525,7 @@ impl QuickRow {
         matches!(
             self,
             QuickRow::DateTime
+                | QuickRow::Controls
                 | QuickRow::About
                 | QuickRow::Screen
                 | QuickRow::Game
@@ -511,6 +541,8 @@ impl QuickRow {
                 | QuickRow::WifiNetworks
                 | QuickRow::BtDevices
                 | QuickRow::Cast
+                | QuickRow::Upload
+                | QuickRow::Apps
                 | QuickRow::PlayCast
                 | QuickRow::Services
                 | QuickRow::Updates
@@ -883,6 +915,8 @@ pub struct QuickMenu<'a> {
     pub values: [Option<QuickValue>; QuickRow::COUNT],
     pub clock: Option<[(TexId, u32, u32); 2]>,
     pub wallpaper: Option<[(TexId, u32, u32); 2]>,
+    /// The slot's look, by name.
+    pub theme: Option<[(TexId, u32, u32); 2]>,
     pub faces: Option<&'a QuickMenuFaces>,
     pub ground: Option<TexId>,
     pub palette: Option<[(TexId, u32, u32); 2]>,
@@ -953,6 +987,7 @@ impl QuickMenu<'_> {
             let value = match row {
                 QuickRow::DateTime => self.clock.map(|c| c[lit as usize]),
                 QuickRow::Wallpaper => self.wallpaper.map(|c| c[lit as usize]),
+                QuickRow::Theme => self.theme.map(|c| c[lit as usize]),
                 QuickRow::Palette => self.palette.map(|c| c[lit as usize]),
                 QuickRow::BezelOf(p) => self.bezels[p.index()].map(|c| c[lit as usize]),
                 QuickRow::Bezel => self.bezel.map(|c| c[lit as usize]),

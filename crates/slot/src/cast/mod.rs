@@ -196,7 +196,10 @@ impl CastBackend for NetCast {
         let p2p = (self.p2p && free)
             .then(|| std::thread::spawn(move || p2p::Radio::up(&root)?.sinks(SEARCH_P2P)));
         let cast = mdns::search(SEARCH).map_err(|e| e.to_string());
-        let tvs = p2p.map(|t| t.join().unwrap_or_else(|_| Err("Wi-Fi Direct failed".into())));
+        let tvs = p2p.map(|t| {
+            t.join()
+                .unwrap_or_else(|_| Err("Wi-Fi Direct failed".into()))
+        });
         let tvs = match tvs {
             Some(Ok(tvs)) => Some(tvs),
             Some(Err(e)) => {

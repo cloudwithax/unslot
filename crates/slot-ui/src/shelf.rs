@@ -128,6 +128,16 @@ impl Shelf {
         }
     }
 
+    /// Takes cart `i`'s label off, back to the plain cart.
+    pub fn unlabel(&mut self, i: usize) {
+        if let Some(cart) = self.carts.get_mut(i) {
+            cart.label = None;
+            self.clears[i] = OnceLock::new();
+            self.reals[i] = OnceLock::new();
+            self.sizes[i] = OnceLock::new();
+        }
+    }
+
     pub fn restock(&mut self, carts: Vec<Cart>) -> Vec<TexId> {
         let old: Vec<TexId> = self
             .faces
