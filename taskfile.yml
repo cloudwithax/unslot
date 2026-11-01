@@ -629,7 +629,7 @@ tasks:
         # assets/slots/sp holds the SP colours, which are built into slot; any other folder there
         # is a set of its own.
         for d in assets/slots/*/; do
-          [ -d "$d" ] && [ "$(basename "$d")" != sp ] && cp -R "$d" "{{.OUT}}/System/Slots/"
+          if [ -d "$d" ] && [ "$(basename "$d")" != sp ]; then cp -R "$d" "{{.OUT}}/System/Slots/"; fi
         done
         true
       - |
@@ -728,7 +728,7 @@ tasks:
           case "$f" in *.[jJ][pP][gG] | *.[jJ][pP][eE][gG] | *.[pP][nN][gG]) adb push "$f" '{{.SD}}/System/Wallpapers/' ;; esac
         done
         for d in assets/slots/*/; do
-          [ -d "$d" ] && [ "$(basename "$d")" != sp ] && adb push "$d" '{{.SD}}/System/Slots/'
+          if [ -d "$d" ] && [ "$(basename "$d")" != sp ]; then adb push "$d" '{{.SD}}/System/Slots/'; fi
         done
         true
       - |
