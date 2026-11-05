@@ -165,7 +165,10 @@ extern "C" fn slot_retro_log_line(level: c_uint, line: *const c_char) {
 /// Microseconds on a steady clock, which Flycast reads unasked around its save states.
 extern "C" fn perf_time_usec() -> i64 {
     static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-    START.get_or_init(std::time::Instant::now).elapsed().as_micros() as i64
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_micros() as i64
 }
 
 extern "C" fn perf_cpu_features() -> u64 {
@@ -2174,14 +2177,21 @@ mod tests {
             .join()
             .unwrap();
         *PADS.lock().unwrap() = ([0; 2], [[0; 4]; 2]);
-        assert_eq!(mask as u16, ButtonMask::A, "the pads last handed over, not none held");
+        assert_eq!(
+            mask as u16,
+            ButtonMask::A,
+            "the pads last handed over, not none held"
+        );
     }
 
     #[test]
     fn flycast_finds_the_callbacks_it_calls_unasked() {
         let mut clear: Option<EnvironmentFn> = None;
         let ok = unsafe {
-            environment(GET_CLEAR_ALL_THREAD_WAITS_CB, &mut clear as *mut _ as *mut c_void)
+            environment(
+                GET_CLEAR_ALL_THREAD_WAITS_CB,
+                &mut clear as *mut _ as *mut c_void,
+            )
         };
         assert!(ok && clear.is_some(), "unloading calls it without a check");
 
@@ -2195,11 +2205,17 @@ mod tests {
             perf_log: ptr::null(),
         };
         let ok = unsafe { environment(GET_PERF_INTERFACE, &mut perf as *mut _ as *mut c_void) };
-        assert!(ok && !perf.get_time_usec.is_null(), "save states time themselves with it");
+        assert!(
+            ok && !perf.get_time_usec.is_null(),
+            "save states time themselves with it"
+        );
 
         let mut ff = true;
         let ok = unsafe { environment(GET_FASTFORWARDING, &mut ff as *mut bool as *mut c_void) };
-        assert!(ok && !ff, "it sends no sound while it thinks it is fast-forwarding");
+        assert!(
+            ok && !ff,
+            "it sends no sound while it thinks it is fast-forwarding"
+        );
     }
 
     /// The tests that fill THREAD_AUDIO, one at a time.

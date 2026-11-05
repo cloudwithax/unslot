@@ -27,7 +27,9 @@ impl Header {
         let title = &bytes[TITLE_OFF as usize..][..TITLE_LEN];
         let end = title.iter().position(|b| *b == 0).unwrap_or(TITLE_LEN);
         let code = &bytes[CODE_OFF..CODE_OFF + 4];
-        let is_code = code.iter().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
+        let is_code = code
+            .iter()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
         let mut code_text = String::new();
         if is_code {
             code_text = String::from_utf8_lossy(code).into_owned();

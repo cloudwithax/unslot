@@ -282,7 +282,8 @@ mod tests {
             let y0 = ROWS_Y + row * ROW_H;
             (y0..y0 + ROW_H)
                 .filter(|&y| {
-                    (ROW_PAD..LIST_W / 2).any(|x| face.rgba[((y * LIST_W + x) * 4 + 3) as usize] > 0)
+                    (ROW_PAD..LIST_W / 2)
+                        .any(|x| face.rgba[((y * LIST_W + x) * 4 + 3) as usize] > 0)
                 })
                 .count()
         };

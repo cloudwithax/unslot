@@ -9,6 +9,7 @@ links = "rcheevos"
 
 [dependencies]
 chd = { version = "0.4", default-features = false, features = ["std", "want_raw_data_sector"] }
+serde_json = "1"
 
 [build-dependencies]
 cc = "1"

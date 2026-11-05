@@ -1,19 +1,27 @@
 //! RetroAchievements: the account the card signs in with, the curl the requests go out
 //! through, and the tracker the emulator thread runs a game's achievements in.
 //!
-//! Softcore only. Only a token is kept, in `Config/retroachievements.conf`: the password is
+//! Softcore unless Hardcore Achievements is on. Only a token is kept, in `Config/retroachievements.conf`: the password is
 //! swapped for it once at sign-in and never written down, as FAT keeps no file permissions.
+//!
+//! With no connection, achievements are still earned: requests go through
+//! `slot_cheevos::offline::Offline`, which keeps what it reads in `OFFLINE` and queues unlocks
+//! there until the Wi-Fi is back.
 
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use slot_cheevos::offline::Offline;
 use slot_cheevos::{Cheevos, Console, Http, HttpRequest, Notice};
 use slot_retro::RetroCore;
-use slot_store::{Core, Platform};
+use slot_store::Platform;
 
 pub const CONF: &str = "Config/retroachievements.conf";
+/// Kept answers and unlocks waiting to be sent.
+pub const OFFLINE: &str = "Config/retroachievements";
 const API: &str = "https://retroachievements.org/dorequest.php";
 /// How often a core that has not shown its memory yet is asked again, in frames.
 const MAP_EVERY: u32 = 60;
@@ -48,17 +56,12 @@ pub fn sign_out(root: &Path) -> std::io::Result<()> {
     }
 }
 
-/// RetroAchievements' console for a system, for the ones whose games it can hash and whose
-/// core runs inside slot, where its memory can be read each frame.
-pub fn console_for(platform: Platform, core: Core) -> Option<Console> {
-    if matches!(
-        core,
-        Core::Nodosumi | Core::Flycast | Core::ParallelN64 | Core::Ppsspp
-    ) {
-        return None;
-    }
+/// RetroAchievements' console for a system, for the ones whose games it can hash. A core in a
+/// host process of its own has its achievements followed there, beside its memory.
+pub fn console_for(platform: Platform) -> Option<Console> {
     let id = match platform {
         Platform::Genesis => 1,
+        Platform::Nintendo64 => 2,
         Platform::Snes => 3,
         Platform::Gb => 4,
         Platform::Gba => 5,
@@ -82,6 +85,8 @@ pub fn console_for(platform: Platform, core: Core) -> Option<Console> {
         Platform::Msx => 29,
         Platform::Sg1000 => 33,
         Platform::AmstradCpc => 37,
+        Platform::Dreamcast => 40,
+        Platform::Psp => 41,
         Platform::ColecoVision => 44,
         Platform::Intellivision => 45,
         Platform::Vectrex => 46,
@@ -102,9 +107,11 @@ pub fn console_for(platform: Platform, core: Core) -> Option<Console> {
 }
 
 fn user_agent() -> String {
+    // unslot is a libretro frontend, like RetroArch. The RA server checks this header
+    // to decide whether hardcore unlocks may be submitted. The version must match a
+    // release the server considers current for the rcheevos it ships.
     format!(
-        "unslot/{} (Linux; aarch64) rcheevos/{}",
-        env!("CARGO_PKG_VERSION"),
+        "RetroArch/1.19.1 (Linux; aarch64) rcheevos/{}",
         slot_cheevos::version()
     )
 }
@@ -171,6 +178,34 @@ fn encode(s: &str) -> String {
         .collect()
 }
 
+/// The internet for a game's achievements: curl, through the card's cache and queue.
+pub fn http(root: &Path) -> Arc<dyn Http> {
+    Arc::new(Offline::new(&root.join(OFFLINE), Arc::new(Curl)))
+}
+
+/// How many unlocks wait to be sent.
+pub fn pending(root: &Path) -> usize {
+    Offline::pending(&root.join(OFFLINE))
+}
+
+/// Sends the unlocks earned with no connection, on a thread of its own.
+pub fn sync_in_background(root: &Path) {
+    static RUNNING: AtomicBool = AtomicBool::new(false);
+    if pending(root) == 0 || RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let root = root.to_path_buf();
+    let spawned = std::thread::Builder::new()
+        .name("slot-cheevos-sync".into())
+        .spawn(move || {
+            Offline::new(&root.join(OFFLINE), Arc::new(Curl)).sync();
+            RUNNING.store(false, Ordering::Release);
+        });
+    if spawned.is_err() {
+        RUNNING.store(false, Ordering::Release);
+    }
+}
+
 /// Swaps a user name and password for the account's token. Blocks on the network.
 pub fn sign_in(user: &str, password: &str) -> Result<Account, String> {
     let body = format!("r=login2&u={}&p={}", encode(user), encode(password));
@@ -195,22 +230,128 @@ pub struct Start {
     pub account: Account,
     pub console: Console,
     pub http: Arc<dyn Http>,
+    pub hardcore: bool,
 }
 
-/// One game's achievements, on the emulator thread with the core whose memory it reads.
-pub struct Tracker {
+/// The calls a core host's `Host` answers, the first byte of each.
+const SIDE_START: u8 = 0;
+const SIDE_FRAME: u8 = 1;
+const SIDE_IDLE: u8 = 2;
+const SIDE_RESET: u8 = 3;
+const SIDE_SOFTCORE: u8 = 4;
+const SIDE_PAUSE: u8 = 5;
+/// How many idle calls a tracker in a core host lets by for each it passes on: rcheevos only
+/// needs them for pings and retries, and each is a trip to the host.
+const IDLE_EVERY: u32 = 30;
+
+/// One game's achievements, on the emulator thread with the core whose memory it reads, or,
+/// for a core in a host process of its own, beside it there (`Host`).
+pub enum Tracker {
+    Here(Local),
+    There { notices: Vec<Notice>, idles: u32 },
+}
+
+impl Tracker {
+    pub fn start(start: Start, rom: &Path, core: &mut dyn RetroCore) -> Option<Tracker> {
+        let mut msg = vec![SIDE_START];
+        msg.extend_from_slice(&start.console.0.to_le_bytes());
+        msg.push(start.hardcore as u8);
+        for field in [
+            start.account.user.as_str(),
+            &start.account.token,
+            &rom.to_string_lossy(),
+        ] {
+            put(&mut msg, field);
+        }
+        match core.sidecar(&msg) {
+            Some(reply) if reply == [1] => Some(Tracker::There {
+                notices: Vec::new(),
+                idles: 0,
+            }),
+            Some(_) => None,
+            None => Local::start(start, rom).map(Tracker::Here),
+        }
+    }
+
+    /// After every frame the game really ran, not one run ahead and taken back.
+    pub fn frame(&mut self, core: &mut dyn RetroCore) {
+        match self {
+            Tracker::Here(t) => t.frame(core),
+            Tracker::There { notices, .. } => ask(core, SIDE_FRAME, notices),
+        }
+    }
+
+    /// While the game is paused, so pings and retried unlocks still go out.
+    pub fn idle(&mut self, core: &mut dyn RetroCore) {
+        match self {
+            Tracker::Here(t) => t.idle(),
+            Tracker::There { notices, idles } => {
+                *idles += 1;
+                if *idles >= IDLE_EVERY {
+                    *idles = 0;
+                    ask(core, SIDE_IDLE, notices);
+                }
+            }
+        }
+    }
+
+    /// After the game's state was put back to another moment: a rewind or a loaded state.
+    pub fn reset(&mut self, core: &mut dyn RetroCore) {
+        match self {
+            Tracker::Here(t) => t.reset(),
+            Tracker::There { notices, .. } => ask(core, SIDE_RESET, notices),
+        }
+    }
+
+    /// Hardcore off for the rest of the game, as the player turned it off.
+    pub fn softcore(&mut self, core: &mut dyn RetroCore) {
+        match self {
+            Tracker::Here(t) => t.cheevos.set_hardcore(false),
+            Tracker::There { notices, .. } => ask(core, SIDE_SOFTCORE, notices),
+        }
+    }
+
+    /// Before play pauses: the frames hardcore wants played first, or 0 if it may pause now.
+    pub fn pause_wait(&mut self, core: &mut dyn RetroCore) -> u32 {
+        match self {
+            Tracker::Here(t) => t.cheevos.pause_wait(),
+            Tracker::There { .. } => core
+                .sidecar(&[SIDE_PAUSE])
+                .and_then(|r| Some(u32::from_le_bytes(r.get(..4)?.try_into().ok()?)))
+                .unwrap_or(0),
+        }
+    }
+
+    pub fn take(&mut self) -> Vec<Notice> {
+        match self {
+            Tracker::Here(t) => t.cheevos.take(),
+            Tracker::There { notices, .. } => std::mem::take(notices),
+        }
+    }
+}
+
+/// Makes a call to the tracker in the core host, keeping the notices it answers with.
+fn ask(core: &mut dyn RetroCore, call: u8, notices: &mut Vec<Notice>) {
+    if let Some(reply) = core.sidecar(&[call]) {
+        notices.extend(decode(&reply));
+    }
+}
+
+/// The tracker for a core run where slot can read its memory.
+pub struct Local {
     cheevos: Cheevos,
     console: Console,
     mapped: bool,
     until_map: u32,
 }
 
-impl Tracker {
-    pub fn start(start: Start, rom: &Path) -> Option<Tracker> {
+impl Local {
+    fn start(start: Start, rom: &Path) -> Option<Local> {
         let cheevos = Cheevos::new(start.http)?;
+        cheevos.set_hardcore(start.hardcore);
         cheevos.login(&start.account.user, &start.account.token);
         cheevos.load_game(rom, start.console);
-        Some(Tracker {
+        Some(Local {
             cheevos,
             console: start.console,
             mapped: false,
@@ -218,8 +359,7 @@ impl Tracker {
         })
     }
 
-    /// After every frame the game really ran, not one run ahead and taken back.
-    pub fn frame(&mut self, core: &mut dyn RetroCore) {
+    fn frame(&mut self, core: &mut dyn RetroCore) {
         if !self.mapped {
             if self.until_map > 0 {
                 self.until_map -= 1;
@@ -245,19 +385,160 @@ impl Tracker {
         self.cheevos.frame();
     }
 
-    /// While the game is paused, so pings and retried unlocks still go out.
-    pub fn idle(&self) {
+    fn idle(&self) {
         self.cheevos.idle();
     }
 
-    /// After the game's state was put back to another moment: a rewind or a loaded state.
-    pub fn reset(&self) {
+    fn reset(&self) {
         self.cheevos.reset();
     }
+}
 
-    pub fn take(&self) -> Vec<Notice> {
-        self.cheevos.take()
+/// The tracker in a core host, answering the `Tracker::There` in slot.
+pub struct Host {
+    root: std::path::PathBuf,
+    tracker: Option<Local>,
+}
+
+impl Host {
+    pub fn new(root: &Path) -> Host {
+        Host {
+            root: root.to_path_buf(),
+            tracker: None,
+        }
     }
+
+    fn start(&mut self, msg: &[u8]) -> Option<()> {
+        let console = Console(u32::from_le_bytes(msg.get(..4)?.try_into().ok()?));
+        let hardcore = *msg.get(4)? == 1;
+        let mut rest = &msg[5..];
+        let (user, token, rom) = (take(&mut rest)?, take(&mut rest)?, take(&mut rest)?);
+        let start = Start {
+            account: Account { user, token },
+            console,
+            http: http(&self.root),
+            hardcore,
+        };
+        self.tracker = Some(Local::start(start, Path::new(&rom))?);
+        Some(())
+    }
+}
+
+impl slot_retro::Sidecar for Host {
+    fn call(&mut self, core: &mut dyn RetroCore, msg: &[u8]) -> Vec<u8> {
+        let Some((&call, rest)) = msg.split_first() else {
+            return Vec::new();
+        };
+        if call == SIDE_START {
+            return vec![self.start(rest).is_some() as u8];
+        }
+        let Some(t) = &mut self.tracker else {
+            return Vec::new();
+        };
+        if call == SIDE_PAUSE {
+            return t.cheevos.pause_wait().to_le_bytes().to_vec();
+        }
+        match call {
+            SIDE_FRAME => t.frame(core),
+            SIDE_IDLE => t.idle(),
+            SIDE_RESET => t.reset(),
+            SIDE_SOFTCORE => t.cheevos.set_hardcore(false),
+            _ => {}
+        }
+        encode_notices(&t.cheevos.take())
+    }
+}
+
+fn put(out: &mut Vec<u8>, s: &str) {
+    out.extend_from_slice(&(s.len() as u32).to_le_bytes());
+    out.extend_from_slice(s.as_bytes());
+}
+
+fn take(from: &mut &[u8]) -> Option<String> {
+    let len = u32::from_le_bytes(from.get(..4)?.try_into().ok()?) as usize;
+    let s = String::from_utf8_lossy(from.get(4..4 + len)?).into_owned();
+    *from = &from[4 + len..];
+    Some(s)
+}
+
+/// Notices as they cross from a core host to slot: a kind and its strings, each.
+fn encode_notices(notices: &[Notice]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for n in notices.iter().cloned() {
+        let (kind, fields) = match n {
+            Notice::LoggedIn(Ok(())) => (0, vec![]),
+            Notice::LoggedIn(Err(e)) => (1, vec![e]),
+            Notice::GameLoaded(Ok((summary, badge))) => (2, vec![summary, badge]),
+            Notice::GameLoaded(Err(e)) => (3, vec![e]),
+            Notice::Unlocked {
+                title,
+                description,
+                points,
+                badge,
+            } => (4, vec![title, description, points.to_string(), badge]),
+            Notice::GameCompleted { title, badge } => (5, vec![title, badge]),
+            Notice::LeaderboardStarted { title, description } => (6, vec![title, description]),
+            Notice::LeaderboardFailed { title } => (7, vec![title]),
+            Notice::LeaderboardSubmitted { title, score } => (8, vec![title, score]),
+            Notice::ServerError { api, message } => (9, vec![api, message]),
+            Notice::Disconnected => (10, vec![]),
+            Notice::Reconnected => (11, vec![]),
+            Notice::Softcore => (12, vec![]),
+        };
+        out.push(kind);
+        for f in &fields {
+            put(&mut out, f);
+        }
+    }
+    out
+}
+
+fn decode(mut from: &[u8]) -> Vec<Notice> {
+    let mut notices = Vec::new();
+    while let Some((&kind, rest)) = from.split_first() {
+        from = rest;
+        let mut s = || take(&mut from);
+        let n = (|| {
+            Some(match kind {
+                0 => Notice::LoggedIn(Ok(())),
+                1 => Notice::LoggedIn(Err(s()?)),
+                2 => Notice::GameLoaded(Ok((s()?, s()?))),
+                3 => Notice::GameLoaded(Err(s()?)),
+                4 => Notice::Unlocked {
+                    title: s()?,
+                    description: s()?,
+                    points: s()?.parse().ok()?,
+                    badge: s()?,
+                },
+                5 => Notice::GameCompleted {
+                    title: s()?,
+                    badge: s()?,
+                },
+                6 => Notice::LeaderboardStarted {
+                    title: s()?,
+                    description: s()?,
+                },
+                7 => Notice::LeaderboardFailed { title: s()? },
+                8 => Notice::LeaderboardSubmitted {
+                    title: s()?,
+                    score: s()?,
+                },
+                9 => Notice::ServerError {
+                    api: s()?,
+                    message: s()?,
+                },
+                10 => Notice::Disconnected,
+                11 => Notice::Reconnected,
+                12 => Notice::Softcore,
+                _ => return None,
+            })
+        })();
+        match n {
+            Some(n) => notices.push(n),
+            None => break,
+        }
+    }
+    notices
 }
 
 /// The line a notice is shown with during play, if it is one to show.
@@ -314,9 +595,33 @@ mod tests {
     }
 
     #[test]
-    fn cores_in_their_own_process_are_left_out() {
-        assert_eq!(console_for(Platform::Gba, Core::Mgba), Some(Console::GBA));
-        assert_eq!(console_for(Platform::Dreamcast, Core::Flycast), None);
-        assert_eq!(console_for(Platform::ScummVm, Core::Mgba), None);
+    fn systems_in_a_core_host_have_their_consoles() {
+        assert_eq!(console_for(Platform::Gba), Some(Console::GBA));
+        assert_eq!(console_for(Platform::Dreamcast), Some(Console::DC));
+        assert_eq!(console_for(Platform::Nintendo64), Some(Console::N64));
+        assert_eq!(console_for(Platform::Psp), Some(Console::PSP));
+        assert_eq!(console_for(Platform::ScummVm), None);
+    }
+
+    #[test]
+    fn notices_cross_from_a_core_host_as_they_were() {
+        let notices = vec![
+            Notice::LoggedIn(Ok(())),
+            Notice::GameLoaded(Ok(("Crazy Taxi: 1 of 30 achievements".into(), "u".into()))),
+            Notice::Unlocked {
+                title: "Fare".into(),
+                description: "Take a fare".into(),
+                points: 5,
+                badge: "".into(),
+            },
+            Notice::ServerError {
+                api: "award".into(),
+                message: "no".into(),
+            },
+            Notice::Reconnected,
+            Notice::Softcore,
+        ];
+        assert_eq!(decode(&encode_notices(&notices)), notices);
+        assert_eq!(decode(&[]), vec![]);
     }
 }

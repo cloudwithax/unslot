@@ -182,7 +182,12 @@ pub fn host(args: &[String]) -> Result<(), String> {
         &paths,
     )
     .ok_or("no core opened")?;
-    slot_retro::serve(opened, stream);
+    // The game's achievements are followed here, beside the core's memory.
+    slot_retro::serve(
+        opened,
+        stream,
+        &mut crate::cheevos::Host::new(Path::new(root)),
+    );
     Ok(())
 }
 

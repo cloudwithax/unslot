@@ -291,8 +291,8 @@ fn up_and_down_move_the_bar_and_wrap_at_the_ends() {
         QuickRow::General,
         QuickRow::Screen,
         QuickRow::Game,
-        QuickRow::Apps,
         QuickRow::Network,
+        QuickRow::Online,
         QuickRow::Power,
         QuickRow::About,
         QuickRow::General,
@@ -410,6 +410,74 @@ fn each_systems_colour_correction_flips_on_either_arrow_and_saves_alone() {
             assert_eq!(a.quick_value(row), Some(QuickValue::flag(want)));
         }
     }
+}
+
+#[test]
+fn a_hardcore_game_has_no_rewind_or_loaded_state_until_hardcore_is_turned_off() {
+    let (d, mut a, _) = on_carousel();
+    assert!(a.may_rewind() && a.may_load_state());
+    open_at(&mut a, QuickRow::Hardcore);
+    press(&mut a, Btn::Right);
+    assert!(read_slot_state(d.path()).hardcore);
+    assert!(a.wants_hardcore());
+    assert!(
+        a.may_rewind(),
+        "turning hardcore on waits for the next game"
+    );
+    // As the session does when a game starts with it on.
+    a.set_hardcore_game(true);
+    assert!(!a.may_rewind(), "rewind in a hardcore game");
+    assert!(!a.records_rewind(), "rewind recorded in a hardcore game");
+    assert!(!a.may_load_state(), "a state loaded in a hardcore game");
+    assert!(!a.take_softcore());
+    press(&mut a, Btn::Left);
+    assert!(!read_slot_state(d.path()).hardcore);
+    assert!(a.may_rewind() && a.may_load_state());
+    assert!(a.take_softcore(), "the tracker was not told");
+    assert!(!a.take_softcore());
+    press(&mut a, Btn::Right);
+    assert!(
+        a.may_rewind(),
+        "hardcore back on mid-game, for a game now softcore"
+    );
+}
+
+/// A game hardcore wants played for `wait` more frames before it pauses.
+struct Waiting(std::sync::Arc<std::sync::atomic::AtomicU32>);
+
+impl slot::persist::Snapshot for Waiting {
+    fn state(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn save_ram(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn thumb(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn load(&self, _: Vec<u8>) {}
+    fn pause_wait(&self) -> u32 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[test]
+fn a_hardcore_game_pauses_only_when_it_has_been_played_long_enough() {
+    let d = tmp_root_with_carts(&["Emerald"]);
+    let wait = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(90));
+    let mut a = common::app_playing_with(d.path(), "Emerald", Box::new(Waiting(wait.clone())));
+    a.set_hardcore_game(true);
+    a.apply(Action::QuickMenu);
+    a.update(1.0);
+    assert_eq!(a.in_game_menu(), None, "paused while hardcore wanted play");
+    assert_eq!(
+        a.cheevo_text().as_deref(),
+        Some("Hardcore: play 2 more seconds before pausing")
+    );
+    wait.store(0, std::sync::atomic::Ordering::Relaxed);
+    a.apply(Action::QuickMenu);
+    a.update(1.0);
+    assert!(a.in_game_menu().is_some());
 }
 
 #[test]
@@ -1103,7 +1171,7 @@ fn no_row_in_hand_runs_its_arrows_into_its_label() {
             .enumerate()
             .map(|(i, r)| {
                 let w = slot_ui::quick_label_face(*r, true).w;
-                [(id(100 + i), w, 40), (id(130 + i), w, 40)]
+                [(id(1000 + i), w, 40), (id(2000 + i), w, 40)]
             })
             .collect(),
         pointer: (id(700), 32, 48),
@@ -1147,7 +1215,7 @@ fn no_row_in_hand_runs_its_arrows_into_its_label() {
             }
             open_at(&mut a, row);
             let out = frame(&a);
-            let [lx, _, lw, _] = placed(&out, 130 + row.index()).expect("the lit label");
+            let [lx, _, lw, _] = placed(&out, 2000 + row.index()).expect("the lit label");
             let label_ends = lx + lw - MENU_PAD as f32;
             if let Some([cx, ..]) = placed(&out, 300) {
                 assert!(
@@ -1343,6 +1411,42 @@ fn a_wide_panel_offers_gb_and_gbc_frames_from_none_through_the_card() {
     press(&mut a, Btn::Down);
     assert_eq!(a.quick_menu(), Some(QuickRow::ShaderOf(Platform::Gbc)));
     assert!(!a.sp_frame());
+}
+
+#[test]
+fn the_shader_row_steps_past_the_built_in_shaders_to_the_cards_shader_files() {
+    let (d, mut a, _) = on_carousel();
+    std::fs::create_dir_all(d.path().join("Shaders")).unwrap();
+    std::fs::write(d.path().join("Shaders/crt.glsl"), b"glsl").unwrap();
+    std::fs::write(d.path().join("Shaders/notes.txt"), b"no").unwrap();
+    assert_eq!(
+        a.quick_value(QuickRow::ShaderOf(Platform::Gbc)),
+        Some(QuickValue::Simpletex)
+    );
+    open_at(&mut a, QuickRow::ShaderOf(Platform::Gbc));
+    press(&mut a, Btn::Right);
+    assert_eq!(a.custom_shader(Platform::Gbc), Some("crt.glsl"));
+    assert_eq!(
+        read_slot_state(d.path())
+            .screen(Platform::Gbc)
+            .custom_shader
+            .as_deref(),
+        Some("crt.glsl")
+    );
+    press(&mut a, Btn::Right);
+    assert_eq!(a.custom_shader(Platform::Gbc), None);
+    assert_eq!(
+        a.quick_value(QuickRow::ShaderOf(Platform::Gbc)),
+        Some(QuickValue::Off)
+    );
+    press(&mut a, Btn::Left);
+    press(&mut a, Btn::Left);
+    assert_eq!(a.custom_shader(Platform::Gbc), None);
+    assert_eq!(
+        a.quick_value(QuickRow::ShaderOf(Platform::Gbc)),
+        Some(QuickValue::Simpletex)
+    );
+    assert_eq!(a.custom_shader(Platform::Gb), None);
 }
 
 #[test]

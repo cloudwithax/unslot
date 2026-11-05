@@ -1,5 +1,6 @@
-//! Apps: what the Apps page opens, the built-in ones and the ports in `Ports`. Each opens over the
-//! last, and B goes back to the one before.
+//! Apps: the Apps shelf's carts, the built-in ones and the ports in `Ports`. Each opens on its own
+//! from the shelf; a page opens over the last, and B goes back to the one before, then to the
+//! shelf.
 
 pub mod epub;
 pub mod files;
@@ -11,6 +12,7 @@ pub mod video;
 use std::path::{Path, PathBuf};
 
 use slot_input::{Action, Btn};
+use slot_store::{Cart, Platform};
 use slot_ui::{ButtonLegend, Legend, ListPage, ListRow, PicturePage, TextPage};
 
 use crate::app::PageModel;
@@ -25,7 +27,7 @@ const GALLERY: &[Kind] = &[Kind::Picture, Kind::Video];
 /// How far L1 and R1 skip through a video, in seconds.
 const VIDEO_SKIP: f64 = 10.0;
 
-/// The built-in apps, as the launcher lists them: a name and the folder each opens on.
+/// The built-in apps, as the shelf lists them: a name and the folder each opens on.
 const BUILT_IN: [(&str, &str, Option<&[Kind]>); 5] = [
     ("Files", "", None),
     ("Books", "Books", Some(BOOKS)),
@@ -35,7 +37,6 @@ const BUILT_IN: [(&str, &str, Option<&[Kind]>); 5] = [
 ];
 
 pub enum Screen {
-    Launcher { cursor: usize },
     Browser(Browser),
     Picture { files: Vec<PathBuf>, at: usize },
     Reader(Reader),
@@ -47,7 +48,7 @@ pub enum Screen {
 #[derive(PartialEq, Eq, Debug)]
 pub enum Done {
     Stay,
-    /// Back out of the launcher, to the menu.
+    /// Back out of the app, to the shelf.
     Leave,
     /// Quit slot for this port to run.
     Port(PathBuf),
@@ -60,13 +61,57 @@ pub struct Apps {
     note: Option<String>,
 }
 
+/// The Apps shelf: the built-in apps, then the ports. A built-in one has no file; each can have
+/// a label in `Labels/APPS`, named as the shelf names it.
+pub fn carts(root: &Path) -> Vec<Cart> {
+    let labels = root.join("Labels").join(Platform::Apps.dir_name());
+    BUILT_IN
+        .iter()
+        .map(|b| (b.0.to_string(), PathBuf::new()))
+        .chain(
+            ports::scripts(root)
+                .into_iter()
+                .map(|p| (music::name(&p), p)),
+        )
+        .map(|(stem, rom)| Cart {
+            platform: Platform::Apps,
+            label: Some(labels.join(format!("{stem}.png"))).filter(|l| l.is_file()),
+            stem,
+            rom,
+            title: String::new(),
+            code: String::new(),
+            shell: None,
+        })
+        .collect()
+}
+
 impl Apps {
-    pub fn new(root: &Path) -> Apps {
-        Apps {
+    /// Opens the app `cart` is, straight from the shelf. A port has slot quit for it.
+    pub fn open(root: &Path, cart: &Cart, music: &Option<Music>) -> (Apps, Done) {
+        let mut apps = Apps {
             root: root.to_path_buf(),
-            stack: vec![Screen::Launcher { cursor: 0 }],
+            stack: Vec::new(),
             note: None,
+        };
+        if !cart.rom.as_os_str().is_empty() {
+            let done = apps.port(&cart.rom);
+            return (apps, done);
         }
+        let Some(&(name, dir, only)) = BUILT_IN.iter().find(|b| b.0 == cart.stem) else {
+            return (apps, Done::Leave);
+        };
+        let screen = match name {
+            "Music" => {
+                let _ = std::fs::create_dir_all(root.join(dir));
+                let view = music.as_ref().map(Music::view).unwrap_or_default();
+                Screen::Music {
+                    cursor: view.at.unwrap_or(0),
+                }
+            }
+            _ => Screen::Browser(Browser::new(name, root.join(dir), only)),
+        };
+        apps.stack.push(screen);
+        (apps, Done::Stay)
     }
 
     pub fn screen(&self) -> Option<&Screen> {
@@ -103,16 +148,6 @@ impl Apps {
         }
     }
 
-    /// What the launcher lists: the built-in apps, then the ports.
-    fn launcher_rows(&self) -> Vec<(String, &'static str)> {
-        let ports = ports::scripts(&self.root);
-        BUILT_IN
-            .iter()
-            .map(|b| (b.0.to_string(), ""))
-            .chain(ports.iter().map(|p| (music::name(p), "Port")))
-            .collect()
-    }
-
     /// The music page's tracks: the queue playing, else all of `Music`.
     fn music_rows(&self, view: &MusicView) -> Vec<PathBuf> {
         match view.queue.is_empty() {
@@ -142,29 +177,8 @@ impl Apps {
             Some(Screen::Music { .. }) => self.music_rows(&view),
             _ => Vec::new(),
         };
-        let launcher_n = self.launcher_rows().len();
         let mut open = None;
         match self.stack.last_mut() {
-            Some(Screen::Launcher { cursor }) => match btn {
-                Btn::Up => *cursor = (*cursor + launcher_n - 1) % launcher_n,
-                Btn::Down => *cursor = (*cursor + 1) % launcher_n,
-                Btn::A => {
-                    let at = *cursor;
-                    if let Some(&(name, dir, only)) = BUILT_IN.get(at) {
-                        open = Some(match name {
-                            "Music" => {
-                                let _ = std::fs::create_dir_all(root.join(dir));
-                                let cursor = view.at.unwrap_or(0);
-                                Screen::Music { cursor }
-                            }
-                            _ => Screen::Browser(Browser::new(name, root.join(dir), only)),
-                        });
-                    } else if let Some(port) = ports::scripts(&root).get(at - BUILT_IN.len()) {
-                        return self.port(port);
-                    }
-                }
-                _ => {}
-            },
             Some(Screen::Browser(b)) => {
                 let n = b.entries.len().max(1);
                 match btn {
@@ -297,28 +311,6 @@ impl Apps {
         let note = self.note.clone().unwrap_or_default();
         let back = Legend::new(ButtonLegend::B, "Back");
         Some(match self.stack.last()? {
-            Screen::Launcher { cursor } => {
-                let rows: Vec<ListRow> = self
-                    .launcher_rows()
-                    .into_iter()
-                    .map(|(label, detail)| ListRow {
-                        label,
-                        detail: detail.into(),
-                        ..ListRow::default()
-                    })
-                    .collect();
-                let status = match (note.is_empty(), music.and_then(|m| m.playing())) {
-                    (true, Some(track)) => format!("Playing {}", music::name(track)),
-                    _ => note,
-                };
-                PageModel::List(ListPage {
-                    title: "Apps".into(),
-                    status,
-                    cursor: (*cursor).min(rows.len().saturating_sub(1)),
-                    rows,
-                    legends: vec![back, Legend::new(ButtonLegend::A, "Open")],
-                })
-            }
             Screen::Browser(b) => {
                 let rows: Vec<ListRow> = b
                     .entries

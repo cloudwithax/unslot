@@ -227,8 +227,17 @@ mod tests {
         let gpu = Gpu(vec![1; 8], first_gone.clone());
         tap.lend(2, 1, t0, Box::new(gpu), Duration::ZERO);
         let gpu = Gpu(vec![3; 8], std::sync::Arc::default());
-        tap.lend(2, 1, t0 + Duration::from_millis(17), Box::new(gpu), Duration::ZERO);
-        assert!(first_gone.load(Ordering::Relaxed), "its buffer back for the GPU");
+        tap.lend(
+            2,
+            1,
+            t0 + Duration::from_millis(17),
+            Box::new(gpu),
+            Duration::ZERO,
+        );
+        assert!(
+            first_gone.load(Ordering::Relaxed),
+            "its buffer back for the GPU"
+        );
         let mut f = tap.take(Duration::ZERO).expect("a frame");
         assert_eq!(f.pixels(), &[3u8; 8][..]);
         tap.give_back(f);

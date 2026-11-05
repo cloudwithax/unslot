@@ -81,6 +81,10 @@ impl Pass {
     fn ring(&self, stem: &str) -> StateRing {
         StateRing::new(&self.root, Platform::Gba, Core::Mgba, stem)
     }
+
+    fn join(&mut self) {
+        self.session.app_mut().join_writes();
+    }
 }
 
 #[test]
@@ -156,6 +160,7 @@ fn the_whole_pass_from_boot_to_resume() {
         !matches!(s.app().phase(), Phase::Playing { .. })
     });
     p.event(RawEvent::Up(Btn::Menu));
+    p.join();
     assert!(p
         .ring("Emerald")
         .read_resume()

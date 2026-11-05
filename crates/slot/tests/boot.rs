@@ -215,7 +215,7 @@ fn a_loose_card_shows_an_empty_shelf_and_nothing_on_it_is_moved() {
     let a = App::boot(d.path());
 
     assert_eq!(
-        a.carts().count(),
+        a.carts().filter(|c| c.platform != Platform::Apps).count(),
         0,
         "a loose rom reached the shelf, so something is still reading outside Games/<platform>/"
     );

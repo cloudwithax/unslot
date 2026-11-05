@@ -506,13 +506,13 @@ fn on_updates(d: &tempfile::TempDir) -> App {
     let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
     a.apply(Action::QuickMenu);
     for _ in 0..QuickRow::MAIN.len() {
-        if a.quick_menu() == Some(QuickRow::Network) {
+        if a.quick_menu() == Some(QuickRow::Online) {
             break;
         }
         press(&mut a, Btn::Down);
     }
     press(&mut a, Btn::A);
-    for _ in 0..QuickRow::NETWORK.len() {
+    for _ in 0..QuickRow::ONLINE.len() {
         if a.quick_menu() == Some(QuickRow::Updates) {
             break;
         }
@@ -571,13 +571,13 @@ fn game_art_labels_what_it_finds_and_shows_it_without_a_restart() {
     let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
     a.apply(Action::QuickMenu);
     for _ in 0..QuickRow::MAIN.len() {
-        if a.quick_menu() == Some(QuickRow::Network) {
+        if a.quick_menu() == Some(QuickRow::Online) {
             break;
         }
         press(&mut a, Btn::Down);
     }
     press(&mut a, Btn::A);
-    for _ in 0..QuickRow::NETWORK.len() {
+    for _ in 0..QuickRow::ONLINE.len() {
         if a.quick_menu() == Some(QuickRow::GameArt) {
             break;
         }
@@ -668,13 +668,13 @@ fn a_screenscraper_login_is_typed_in_on_game_art_and_saved_to_the_card() {
     let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
     a.apply(Action::QuickMenu);
     for _ in 0..QuickRow::MAIN.len() {
-        if a.quick_menu() == Some(QuickRow::Network) {
+        if a.quick_menu() == Some(QuickRow::Online) {
             break;
         }
         press(&mut a, Btn::Down);
     }
     press(&mut a, Btn::A);
-    for _ in 0..QuickRow::NETWORK.len() {
+    for _ in 0..QuickRow::ONLINE.len() {
         if a.quick_menu() == Some(QuickRow::GameArt) {
             break;
         }
@@ -798,13 +798,13 @@ fn the_cores_page_downloads_a_core_and_removes_it() {
     let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
     a.apply(Action::QuickMenu);
     for _ in 0..QuickRow::MAIN.len() {
-        if a.quick_menu() == Some(QuickRow::Network) {
+        if a.quick_menu() == Some(QuickRow::Online) {
             break;
         }
         press(&mut a, Btn::Down);
     }
     press(&mut a, Btn::A);
-    for _ in 0..QuickRow::NETWORK.len() {
+    for _ in 0..QuickRow::ONLINE.len() {
         if a.quick_menu() == Some(QuickRow::Cores) {
             break;
         }
@@ -1053,7 +1053,15 @@ fn upload_from_phone_sets_a_wallpaper_and_shelves_a_game() {
     let (d, mut a) = on_network_list();
     join_cafe(&mut a);
     press(&mut a, Btn::B);
-    for _ in 0..QuickRow::NETWORK.len() {
+    press(&mut a, Btn::B);
+    for _ in 0..QuickRow::MAIN.len() {
+        if a.quick_menu() == Some(QuickRow::Online) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    press(&mut a, Btn::A);
+    for _ in 0..QuickRow::ONLINE.len() {
         if a.quick_menu() == Some(QuickRow::Upload) {
             break;
         }
@@ -1122,4 +1130,59 @@ fn upload_from_phone_sets_a_wallpaper_and_shelves_a_game() {
     back_to_shelf(&mut a);
     until(&mut a, |a| a.carts().any(|c| c.stem == "Advance Wars"));
     assert!(d.path().join("Games/GBA/Advance Wars.gba").is_file());
+}
+
+/// Boots with a game only the pretend database knows and Art While Asleep as given, joins
+/// Wi-Fi, then shuts the lid.
+fn asleep_online(art_asleep: bool) -> (tempfile::TempDir, App) {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    // Eight zero bytes: the game the pretend database knows by its CRC.
+    std::fs::write(d.path().join("Games/GBA/Zero.gba"), [0u8; 8]).unwrap();
+    let set = SlotState {
+        clock_set: true,
+        wifi: true,
+        art_asleep,
+        ..SlotState::default()
+    };
+    write_slot_state(d.path(), &set).expect("write slot.state");
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    a.apply(Action::QuickMenu);
+    for row in [QuickRow::Network, QuickRow::WifiNetworks] {
+        for _ in 0..QuickRow::MAIN.len() {
+            if a.quick_menu() == Some(row) {
+                break;
+            }
+            press(&mut a, Btn::Down);
+        }
+        press(&mut a, Btn::A);
+    }
+    until(&mut a, |a| !a.wifi_view().networks.is_empty());
+    join_cafe(&mut a);
+    a.apply(Action::LidClose);
+    assert!(matches!(a.phase(), Phase::Doze { .. }), "{:?}", a.phase());
+    (d, a)
+}
+
+#[test]
+fn with_art_while_asleep_on_missing_art_is_found_with_the_lid_shut() {
+    let (d, mut a) = asleep_online(true);
+    until(&mut a, |a| {
+        !a.scrape_view().running && a.scrape_view().done == 3
+    });
+    assert!(d.path().join("Labels/GBA/Zero.png").exists());
+    assert!(matches!(a.phase(), Phase::Doze { .. }), "{:?}", a.phase());
+}
+
+#[test]
+fn with_art_while_asleep_off_the_lid_shut_finds_nothing() {
+    let (d, mut a) = asleep_online(false);
+    let deadline = Instant::now() + Duration::from_millis(500);
+    let mut now = 0;
+    while Instant::now() < deadline {
+        now += 16;
+        a.tick_ms(now);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(!a.scrape_view().running);
+    assert!(!d.path().join("Labels/GBA/Zero.png").exists());
 }

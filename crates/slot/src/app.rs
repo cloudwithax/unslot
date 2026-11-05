@@ -335,7 +335,7 @@ pub enum Phase {
     TailscaleLogin,
     /// Syncthing's device ID, as a code for its phone app to scan.
     SyncthingId,
-    /// The code a phone scans to send a wallpaper or a game. `note` says what came in last.
+    /// The code a phone scans to send a game, a bezel or a wallpaper. `note` says what came in last.
     Upload {
         note: Option<String>,
     },
@@ -542,6 +542,8 @@ pub struct App {
     own_slot_light: Option<bool>,
     quick_palette_faces: Option<[(TexId, u32, u32); 2]>,
     quick_bezel_faces: [Option<[(TexId, u32, u32); 2]>; Platform::COUNT],
+    /// Each platform's shader file name, while it has one.
+    quick_shader_faces: [Option<[(TexId, u32, u32); 2]>; Platform::COUNT],
     game_bezel: Option<TexId>,
     /// Whether the picked bezel is a whole-screen overlay the compositor holds.
     game_overlay: bool,
@@ -589,6 +591,12 @@ pub struct App {
     clock: f64,
     power: Option<Power>,
     dozed_at: Millis,
+    /// Whether this doze has started a search for missing art, for Art While Asleep.
+    art_asleep: bool,
+    /// Whether the game in the slot was started with hardcore achievements.
+    hardcore_game: bool,
+    /// Hardcore was turned off during a game, for its tracker to hear.
+    softcore_pending: bool,
     woke_on_press: bool,
     autosave_at: Millis,
     pending_save: Option<std::thread::JoinHandle<()>>,
@@ -615,6 +623,10 @@ pub struct App {
     updates: Option<Updates>,
     /// Whether this start has looked online for updates, once the Wi-Fi was up.
     online_checked: bool,
+    /// Whether the Wi-Fi was up at the last look, to send RetroAchievements' queue each time it
+    /// comes up.
+    cheevos_online: bool,
+    cheevos_sync_at: Millis,
     /// Whether the cores are to be updated once their list is read, for Auto-Update Cores.
     cores_auto: bool,
     /// Whether the player has seen the Updates page since a new version turned up.
@@ -737,9 +749,10 @@ pub fn sync_line(p: SyncProgress) -> String {
 impl App {
     pub fn new(carts: Vec<Cart>) -> Self {
         let shelves = shelves_of(carts);
+        // The apps are no game to come up on.
         let shelf_at = shelves
             .iter()
-            .position(|(_, s)| !s.carts.is_empty())
+            .position(|(r, s)| !s.carts.is_empty() && *r != Rack::Of(Platform::Apps))
             .unwrap_or(0);
         let state_writer = crate::state_writer::StateWriter::spawn();
         let card_writes = state_writer.card_writes();
@@ -816,6 +829,7 @@ impl App {
             own_slot_light: None,
             quick_palette_faces: None,
             quick_bezel_faces: [None; Platform::COUNT],
+            quick_shader_faces: [None; Platform::COUNT],
             game_bezel: None,
             game_overlay: false,
             in_game_menu: None,
@@ -855,6 +869,9 @@ impl App {
             clock: 0.0,
             power: None,
             dozed_at: 0,
+            art_asleep: false,
+            hardcore_game: false,
+            softcore_pending: false,
             woke_on_press: false,
             autosave_at: AUTOSAVE_MS,
             pending_save: None,
@@ -878,6 +895,8 @@ impl App {
             services_view: ServicesView::default(),
             updates: None,
             online_checked: false,
+            cheevos_online: false,
+            cheevos_sync_at: 0,
             cores_auto: false,
             update_seen: false,
             upload: None,
@@ -909,7 +928,8 @@ impl App {
     pub fn boot(root: &Path) -> Self {
         crate::root::ensure(root);
         crate::boot_time::mark("root");
-        let carts = scan(root).unwrap_or_default();
+        let mut carts = scan(root).unwrap_or_default();
+        carts.extend(crate::apps::carts(root));
         crate::boot_time::mark("scan");
         let mut app = App::new(carts);
         app.root = Some(root.to_path_buf());
@@ -1264,6 +1284,8 @@ impl App {
             QuickRow::DpadStick => Some(QuickValue::flag(self.state.dpad_stick)),
             QuickRow::Controls => None,
             QuickRow::AutoCores => Some(QuickValue::flag(self.state.auto_cores)),
+            QuickRow::ArtAsleep => Some(QuickValue::flag(self.state.art_asleep)),
+            QuickRow::Hardcore => Some(QuickValue::flag(self.state.hardcore)),
             QuickRow::EjectSave => Some(QuickValue::flag(self.state.eject_save)),
             QuickRow::Turbo => Some(QuickValue::flag(self.state.turbo)),
             QuickRow::Rewind => Some(QuickValue::flag(self.state.rewind)),
@@ -1308,6 +1330,7 @@ impl App {
             | QuickRow::ScreenOf(_)
             | QuickRow::BezelOf(_)
             | QuickRow::Network
+            | QuickRow::Online
             | QuickRow::WifiNetworks
             | QuickRow::Bezel => None,
             QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
@@ -1315,7 +1338,6 @@ impl App {
             QuickRow::BtDevices
             | QuickRow::Cast
             | QuickRow::Upload
-            | QuickRow::Apps
             | QuickRow::PlayCast
             | QuickRow::Services
             | QuickRow::Updates
@@ -1350,6 +1372,54 @@ impl App {
         self.quick_bezel_faces[platform.index()] = Some([dim, lit]);
     }
 
+    pub fn set_quick_shader_faces(
+        &mut self,
+        platform: Platform,
+        faces: Option<[(TexId, u32, u32); 2]>,
+    ) {
+        self.quick_shader_faces[platform.index()] = faces;
+    }
+
+    pub fn shader_files(&self) -> Vec<String> {
+        self.root().map(crate::shader::list).unwrap_or_default()
+    }
+
+    /// The shader file a platform's game is drawn with, if any.
+    pub fn custom_shader(&self, platform: Platform) -> Option<&str> {
+        self.state.screen(platform).custom_shader.as_deref()
+    }
+
+    /// Steps through the built-in shaders, then the files in `Shaders`.
+    fn cycle_shader(&mut self, platform: Platform, right: bool) {
+        let builtins = platform.spec().shaders;
+        let files = self.shader_files();
+        let screen = self.state.screen_mut(platform);
+        let n = builtins.len() + files.len();
+        if n == 0 {
+            return;
+        }
+        let at = match &screen.custom_shader {
+            Some(name) => files
+                .iter()
+                .position(|f| f == name)
+                .map(|i| builtins.len() + i),
+            None => builtins.iter().position(|s| *s == screen.shader),
+        }
+        .unwrap_or(0);
+        let to = if right {
+            (at + 1) % n
+        } else {
+            (at + n - 1) % n
+        };
+        match to.checked_sub(builtins.len()) {
+            Some(file) => screen.custom_shader = Some(files[file].clone()),
+            None => {
+                screen.custom_shader = None;
+                screen.shader = builtins[to];
+            }
+        }
+    }
+
     pub fn bezel_files(&self, platform: Platform) -> Vec<String> {
         self.root()
             .map(|root| crate::bezel::choices(root, platform, self.panel))
@@ -1379,9 +1449,9 @@ impl App {
             BezelPick::None => true,
             BezelPick::Default => platform.spec().bezels,
             BezelPick::Ags102 => self.framed_panel(),
-            BezelPick::File(name) => self.root().is_some_and(|root| {
-                crate::bezel::find(root, platform, name, self.panel).is_some()
-            }),
+            BezelPick::File(name) => self
+                .root()
+                .is_some_and(|root| crate::bezel::find(root, platform, name, self.panel).is_some()),
         };
         match offered {
             true => pick.clone(),
@@ -1741,8 +1811,12 @@ impl App {
         self.shelf().carts.iter().find(|c| c.stem == *stem)
     }
 
+    /// One game on the card; the apps beside it are not games.
     pub fn single_cart(&self) -> bool {
-        self.carts().count() == 1
+        self.carts()
+            .filter(|c| c.platform != Platform::Apps)
+            .count()
+            == 1
     }
 
     pub fn set_faces(&mut self, faces: Vec<TexId>) {
@@ -1984,12 +2058,33 @@ impl App {
         self.records_rewind() && !self.link_active()
     }
 
+    /// Whether the game in the slot earns hardcore achievements, which no rewind or loaded state
+    /// may touch. Turning Hardcore on waits for the next game; turning it off counts at once.
+    pub fn hardcore(&self) -> bool {
+        self.hardcore_game
+    }
+
+    pub fn set_hardcore_game(&mut self, on: bool) {
+        self.hardcore_game = on;
+        self.softcore_pending = false;
+    }
+
+    /// Whether Hardcore was turned off during the game since last asked.
+    pub fn take_softcore(&mut self) -> bool {
+        std::mem::take(&mut self.softcore_pending)
+    }
+
+    /// Whether the next game started would earn hardcore achievements.
+    pub fn wants_hardcore(&self) -> bool {
+        self.state.hardcore
+    }
+
     pub fn turbo(&self) -> bool {
         self.state.turbo && self.platform.spec().turbo
     }
 
     pub fn records_rewind(&self) -> bool {
-        self.state.rewind && self.platform.spec().rewind
+        self.state.rewind && self.platform.spec().rewind && !self.hardcore()
     }
 
     /// Whether L2 and R2 belong to the game, not to rewind and fast forward.
@@ -2007,7 +2102,25 @@ impl App {
     }
 
     pub fn may_load_state(&self) -> bool {
-        !self.link_active()
+        !self.link_active() && !self.hardcore()
+    }
+
+    /// Whether play may pause for a menu now. Hardcore, as in RetroArch, wants some play between
+    /// pauses, so that pausing cannot step through the game a few frames at a time.
+    fn may_pause(&mut self) -> bool {
+        if !self.hardcore() {
+            return true;
+        }
+        let wait = self.snapshot.as_ref().map_or(0, |s| s.pause_wait());
+        if wait == 0 {
+            return true;
+        }
+        let secs = wait.div_ceil(60);
+        let s = if secs == 1 { "" } else { "s" };
+        self.cheevo_line(format!(
+            "Hardcore: play {secs} more second{s} before pausing"
+        ));
+        false
     }
 
     pub fn may_fast_forward(&self) -> bool {
@@ -2844,6 +2957,7 @@ impl App {
                 Action::Eject => self.eject(),
                 Action::GameMenu => self.game_menu_shortcut(),
                 Action::CoreOptions => self.core_options_wanted = true,
+                Action::QuickMenu | Action::Polaroids if !self.may_pause() => {}
                 Action::QuickMenu => self.tap_in_game_menu(Some(QuickRow::PLAY[0])),
                 Action::Polaroids => self.double_tap_states(),
                 Action::SaveState => self.save_state(),
@@ -3094,7 +3208,7 @@ impl App {
         self.shelves
             .iter()
             .filter_map(|(rack, shelf)| match rack {
-                Rack::Of(p) if !shelf.carts.is_empty() => Some(*p),
+                Rack::Of(p) if *p != Platform::Apps && !shelf.carts.is_empty() => Some(*p),
                 _ => None,
             })
             .collect()
@@ -3108,7 +3222,7 @@ impl App {
             .iter()
             .filter(|(rack, _)| match (rack, platform) {
                 (Rack::Of(p), Some(want)) => *p == want,
-                (Rack::Of(_), None) => true,
+                (Rack::Of(p), None) => *p != Platform::Apps,
                 _ => false,
             })
             .flat_map(|(_, shelf)| shelf.carts.iter())
@@ -3183,6 +3297,7 @@ impl App {
                 } else {
                     if let Some(scraper) = &self.scraper {
                         scraper.fetch(missing);
+                        self.scrape_view = scraper.view();
                     }
                     (cursor, None)
                 }
@@ -3527,18 +3642,36 @@ impl App {
         }
     }
 
+    /// Opens the app on the shelf at `at` on its own; B from it comes back to the shelf.
+    fn open_app(&mut self, at: usize) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let Some(cart) = self.shelf().carts.get(at).cloned() else {
+            return;
+        };
+        let (apps, done) = Apps::open(&root, &cart, &self.music);
+        self.play_held = None;
+        self.apps = Some(apps);
+        self.phase = Phase::Apps;
+        self.apps_done(done);
+    }
+
     fn apps_input(&mut self, action: Action) {
         let volume = self.output_volume();
         let Some(apps) = &mut self.apps else {
             return;
         };
-        match apps.input(action, &mut self.music, volume) {
+        let done = apps.input(action, &mut self.music, volume);
+        self.apps_done(done);
+    }
+
+    fn apps_done(&mut self, done: AppDone) {
+        match done {
             AppDone::Stay => {}
             AppDone::Leave => {
                 self.apps = None;
-                self.phase = Phase::QuickMenu {
-                    row: QuickRow::Apps,
-                };
+                self.phase = Phase::Shelf;
             }
             AppDone::Port(script) => {
                 eprintln!("slot: ports: starting {}", script.display());
@@ -3605,6 +3738,16 @@ impl App {
                     self.rescan();
                     format!("{name} is on the {} shelf", platform.name())
                 }
+                Landed::Bezel(platform, name)
+                    if [".png", ".cfg"]
+                        .iter()
+                        .any(|x| name.to_lowercase().ends_with(x)) =>
+                {
+                    *self.bezel_pick(platform) = BezelPick::File(name.clone());
+                    self.persist();
+                    format!("{name} is the {} bezel now", platform.name())
+                }
+                Landed::Bezel(_, name) => format!("{name} is beside its bezel"),
             };
             if let Phase::Upload { note: at } = &mut self.phase {
                 *at = Some(note);
@@ -4119,7 +4262,7 @@ impl App {
                 title: "Upload from Phone".into(),
                 status: match (note, self.upload_url()) {
                     (Some(note), _) => note.clone(),
-                    (None, Some(_)) => "Scan to send a wallpaper or a game from your phone".into(),
+                    (None, Some(_)) => "Scan to send games, bezels or wallpapers".into(),
                     (None, None) => "Waiting for an address on the Wi-Fi".into(),
                 },
                 url: self.upload_url().unwrap_or_default(),
@@ -4302,7 +4445,7 @@ impl App {
                 self.phase = clock_screen(self.utc_secs(), self.state.utc_offset_min, true);
             }
             QuickRow::About => self.phase = Phase::About,
-            QuickRow::Controls => return self.open_controls(),
+            QuickRow::Controls => self.open_controls(),
             QuickRow::Services => {
                 self.phase = Phase::Services {
                     cursor: 0,
@@ -4317,6 +4460,13 @@ impl App {
             }
             QuickRow::Achievements => {
                 let user = self.cheevos_account().map(|a| a.user).unwrap_or_default();
+                let waiting = self.root.as_deref().map_or(0, crate::cheevos::pending);
+                if waiting > 0 {
+                    self.cheevo_line(match waiting {
+                        1 => "1 achievement earned offline waits for the Wi-Fi".into(),
+                        n => format!("{n} achievements earned offline wait for the Wi-Fi"),
+                    });
+                }
                 self.phase = Phase::Keyboard {
                     keys: Keyboard::new(
                         "RetroAchievements username, or none to sign out",
@@ -4343,12 +4493,6 @@ impl App {
                 }
             }
             QuickRow::Upload => self.open_upload(),
-            QuickRow::Apps => {
-                if let Some(root) = &self.root {
-                    self.apps = Some(Apps::new(root));
-                    self.phase = Phase::Apps;
-                }
-            }
             QuickRow::Cast => {
                 self.phase = Phase::Casting { cursor: 0 };
                 // TVs come and go, so each visit looks again.
@@ -4381,6 +4525,7 @@ impl App {
             | QuickRow::Game
             | QuickRow::General
             | QuickRow::Network
+            | QuickRow::Online
             | QuickRow::Power
             | QuickRow::ScreenOf(_) => {
                 if let Some(row) = row.child() {
@@ -4401,6 +4546,8 @@ impl App {
             | QuickRow::Rumble
             | QuickRow::DpadStick
             | QuickRow::AutoCores
+            | QuickRow::ArtAsleep
+            | QuickRow::Hardcore
             | QuickRow::Theme
             | QuickRow::Clock
             | QuickRow::MenuSounds
@@ -4471,6 +4618,11 @@ impl App {
             self.persist();
             return;
         }
+        if let QuickRow::ShaderOf(platform) = row {
+            self.cycle_shader(platform, right);
+            self.persist();
+            return;
+        }
         if row == QuickRow::Wallpaper {
             self.cycle_wallpaper(right);
             self.persist();
@@ -4509,17 +4661,16 @@ impl App {
                 screen.colour_correction = !screen.colour_correction;
                 self.colour_pending = Some(self.colour_correction());
             }
-            QuickRow::ShaderOf(p) => {
-                let screen = s.screen_mut(p);
-                let to = screen.shader.step(p.spec().shaders, right);
-                if to == screen.shader {
-                    return;
-                }
-                screen.shader = to;
-            }
             QuickRow::Rumble => s.rumble = !s.rumble,
             QuickRow::DpadStick => s.dpad_stick = !s.dpad_stick,
             QuickRow::AutoCores => s.auto_cores = !s.auto_cores,
+            QuickRow::ArtAsleep => s.art_asleep = !s.art_asleep,
+            QuickRow::Hardcore => {
+                s.hardcore = !s.hardcore;
+                if !s.hardcore && std::mem::take(&mut self.hardcore_game) {
+                    self.softcore_pending = true;
+                }
+            }
             QuickRow::EjectSave => s.eject_save = !s.eject_save,
             QuickRow::Turbo => s.turbo = !s.turbo,
             QuickRow::Rewind => s.rewind = !s.rewind,
@@ -4553,15 +4704,16 @@ impl App {
             | QuickRow::Palette
             | QuickRow::Disc
             | QuickRow::ScreenOf(_)
+            | QuickRow::ShaderOf(_)
             | QuickRow::BezelOf(_)
             | QuickRow::Network
+            | QuickRow::Online
             | QuickRow::Wifi
             | QuickRow::WifiNetworks
             | QuickRow::Bluetooth
             | QuickRow::BtDevices
             | QuickRow::Cast
             | QuickRow::Upload
-            | QuickRow::Apps
             | QuickRow::PlayCast
             | QuickRow::Services
             | QuickRow::Updates
@@ -4588,7 +4740,10 @@ impl App {
             return;
         }
         let platform = self.playing_platform();
-        let shader = &mut self.state.screen_mut(platform).shader;
+        let screen = self.state.screen_mut(platform);
+        // The hotkey steps the built-in shaders, leaving any file.
+        screen.custom_shader = None;
+        let shader = &mut screen.shader;
         *shader = shader.step(platform.spec().shaders, right);
         let said = match *shader {
             Shader::Off => Toast::ShaderOff,
@@ -5120,6 +5275,10 @@ impl App {
         if let Some(p) = &mut self.polaroids {
             p.set_undo(offer);
         }
+        self.find_art_asleep();
+        if matches!(self.phase, Phase::Doze { .. }) && self.finding_art_asleep() {
+            self.dozed_at = self.now();
+        }
         if self.doze_expired() {
             self.on_doze_timeout();
         }
@@ -5283,7 +5442,8 @@ impl App {
         let spawned = std::thread::Builder::new()
             .name("slot-rescan".into())
             .spawn(move || {
-                if let Ok(carts) = scan(&root) {
+                if let Ok(mut carts) = scan(&root) {
+                    carts.extend(crate::apps::carts(&root));
                     let _ = tx.send(carts);
                 }
             });
@@ -5379,6 +5539,14 @@ impl App {
     /// Once a start has the Wi-Fi up, looks for a new unslot and, with Auto-Update Cores on,
     /// for new builds of the cores on the card, and fetches those.
     fn check_online(&mut self) {
+        let online = self.wifi_view.connected.is_some();
+        if online && (!self.cheevos_online || self.now() >= self.cheevos_sync_at) {
+            self.cheevos_sync_at = self.now().saturating_add(60_000);
+            if let Some(root) = self.root.as_deref() {
+                crate::cheevos::sync_in_background(root);
+            }
+        }
+        self.cheevos_online = online;
         if !self.online_checked && self.wifi_view.connected.is_some() {
             self.online_checked = true;
             if self.updates_view.unslot.stage == Stage::Unchecked {
@@ -5417,7 +5585,13 @@ impl App {
 
     pub fn on_cheevo(&mut self, notice: &slot_cheevos::Notice) {
         eprintln!("slot: cheevos: {notice:?}");
-        if let Some(line) = crate::cheevos::line(notice) {
+        if *notice == slot_cheevos::Notice::Softcore {
+            self.set_hardcore_game(false);
+        }
+        if let Some(mut line) = crate::cheevos::line(notice) {
+            if self.hardcore() && matches!(notice, slot_cheevos::Notice::GameLoaded(Ok(_))) {
+                line.push_str(" (Hardcore)");
+            }
             self.cheevo_line(line);
         }
     }
@@ -5525,6 +5699,15 @@ impl App {
 
     pub fn flush_state(&self) {
         self.state_writer.flush();
+    }
+
+    /// Waits on the flushes and card writes in flight, which eject, autosave and flush run on
+    /// their own threads.
+    pub fn join_writes(&mut self) {
+        self.state_writer.flush();
+        if let Some(h) = self.pending_save.take() {
+            let _ = h.join();
+        }
     }
 
     pub fn on_core_ready(&mut self) {
@@ -5762,6 +5945,8 @@ impl App {
                 palette: None,
                 bezels: self.quick_bezel_faces,
                 bezel: None,
+                shaders: self.quick_shader_faces,
+                shader: None,
                 over_game: false,
                 footer_legends: true,
                 footer_top: self.canvas().h,
@@ -5931,6 +6116,8 @@ impl App {
                 palette: self.quick_palette_faces,
                 bezels: [None; Platform::COUNT],
                 bezel: self.quick_bezel_faces[self.playing_platform().index()],
+                shaders: [None; Platform::COUNT],
+                shader: self.quick_shader_faces[self.playing_platform().index()],
                 over_game: true,
                 footer_legends: false,
                 footer_top: self.canvas().h - MOUTH_H + self.menu_footer_offset(),
@@ -6529,6 +6716,9 @@ impl App {
         }) else {
             return;
         };
+        if platform == Platform::Apps {
+            return self.open_app(at);
+        }
         if let Some(missing) = self.missing_bios(platform) {
             eprintln!("slot: launch: {cart} needs BIOS/{missing}, which is not on the card");
             self.hud.toast(Toast::NoBios, self.now());
@@ -6662,6 +6852,7 @@ impl App {
         self.polaroids = None;
         self.phase = Phase::Doze { cart };
         self.dozed_at = self.now();
+        self.art_asleep = false;
         self.cool_radio();
         if let Some(power) = &mut self.power {
             power.on_close();
@@ -7370,8 +7561,48 @@ impl App {
         self.begin_power_off();
     }
 
+    /// With Art While Asleep on, the first moment of a doze with the Wi-Fi up starts a search
+    /// for every game's missing label.
+    fn find_art_asleep(&mut self) {
+        if !self.state.art_asleep
+            || self.art_asleep
+            || !matches!(self.phase, Phase::Doze { .. })
+            || self.wifi_view.connected.is_none()
+            || self.scrape_view.running
+            || !self.battery_lasts()
+        {
+            return;
+        }
+        let Some(scraper) = &self.scraper else {
+            return;
+        };
+        let missing: Vec<Cart> = self
+            .art_carts(None)
+            .into_iter()
+            .filter(|(_, has)| !has)
+            .map(|(c, _)| c)
+            .collect();
+        self.art_asleep = true;
+        if !missing.is_empty() {
+            scraper.fetch(missing);
+            self.scrape_view = scraper.view();
+        }
+    }
+
+    /// Whether the battery can spare a search while asleep: charging, or not yet low.
+    fn battery_lasts(&self) -> bool {
+        self.battery().is_none_or(|b| {
+            matches!(b.charge, Charge::Charging | Charge::Full) || b.percent > BATTERY_LOW
+        })
+    }
+
+    /// Whether a doze is kept from timing out by its search for art.
+    fn finding_art_asleep(&self) -> bool {
+        self.scrape_view.running && self.battery_lasts()
+    }
+
     fn doze_expired(&self) -> bool {
-        if self.link_active() {
+        if self.link_active() || self.finding_art_asleep() {
             return false;
         }
         let (Phase::Doze { .. }, Some(power)) = (&self.phase, &self.power) else {
@@ -7489,6 +7720,7 @@ impl App {
         let cart = std::mem::take(cart);
         let mut p = Polaroids::new(entries);
         p.set_undo(self.undo_label());
+        p.set_loads(self.may_load_state());
         self.polaroids = Some(p);
         self.phase = Phase::Polaroids { cart };
         self.push_hint_faces();

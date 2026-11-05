@@ -3,8 +3,13 @@
 //!
 //! The host supplies HTTP (`Http`), the core's memory (`set_memory`) and calls `frame`
 //! once per emulated frame. What happens comes back from `take` as `Notice`s.
-//! Softcore only: unslot is not an approved hardcore emulator.
+//! Softcore unless the host asks for hardcore with `set_hardcore`.
+//!
+//! A ROM whose hash RetroAchievements does not know (often another region's release) gets the
+//! achievements of the game there with the same title, in softcore, as another release's memory
+//! may not line up for every one of them.
 mod chd;
+pub mod offline;
 
 use std::cell::RefCell;
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr, CString};
@@ -42,9 +47,12 @@ extern "C" {
         console: c_uint,
     ) -> c_int;
     fn slot_cheevos_load_game(s: *mut Raw, path: *const c_char, console: c_uint);
+    fn slot_cheevos_load_hash(s: *mut Raw, hash: *const c_char);
     fn slot_cheevos_frame(s: *mut Raw);
+    fn slot_cheevos_pause_wait(s: *mut Raw) -> c_uint;
     fn slot_cheevos_idle(s: *mut Raw);
     fn slot_cheevos_reset(s: *mut Raw);
+    fn slot_cheevos_set_hardcore(s: *mut Raw, on: c_int);
     fn slot_cheevos_unload(s: *mut Raw);
     fn slot_cheevos_badges(s: *mut Raw, each: EachFn, ctx: *mut c_void) -> c_uint;
     fn slot_cheevos_version() -> *const c_char;
@@ -64,6 +72,7 @@ pub struct Console(pub u32);
 
 impl Console {
     pub const MD: Console = Console(1);
+    pub const N64: Console = Console(2);
     pub const SNES: Console = Console(3);
     pub const GB: Console = Console(4);
     pub const GBA: Console = Console(5);
@@ -76,6 +85,9 @@ impl Console {
     /// Both Neo Geo Pockets: RetroAchievements files them as one console.
     pub const NGP: Console = Console(14);
     pub const GG: Console = Console(15);
+    pub const NDS: Console = Console(18);
+    pub const DC: Console = Console(40);
+    pub const PSP: Console = Console(41);
     /// Both WonderSwans, also one console there.
     pub const WS: Console = Console(53);
 
@@ -132,12 +144,21 @@ pub enum Notice {
     Disconnected,
     /// Everything waiting has been sent.
     Reconnected,
+    /// The game has another release's achievements, so it is played in softcore. Comes before
+    /// its GameLoaded.
+    Softcore,
 }
 
 struct State {
     raw: usize,
     inflight: usize,
     closing: bool,
+    /// The title and console of the game being identified, to look up if its hash is unknown.
+    title: Option<(String, u32)>,
+    /// The hash of the release found under that title, to load next.
+    borrow: Option<String>,
+    /// Whether the game loading or loaded is another release's.
+    borrowed: bool,
 }
 
 /// What the C callbacks reach through their host pointer.
@@ -276,14 +297,89 @@ unsafe extern "C" fn on_done(
     message: *const c_char,
     badge: *const c_char,
 ) {
+    let s = &*(host as *const Shared);
     let message = text(message);
     let notice = match (op, ok != 0) {
         (1, true) => Notice::LoggedIn(Ok(())),
         (1, false) => Notice::LoggedIn(Err(message)),
-        (_, true) => Notice::GameLoaded(Ok((message, text(badge)))),
+        (_, true) => {
+            let message = if s.state.lock().unwrap_or_else(|e| e.into_inner()).borrowed {
+                s.push(Notice::Softcore);
+                format!("{message} (another release's set)")
+            } else {
+                message
+            };
+            Notice::GameLoaded(Ok((message, text(badge))))
+        }
+        (3, false) => {
+            // Called on an HTTP worker, which may block on one more request.
+            let title = s
+                .state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .title
+                .take();
+            if let Some(hash) = title.and_then(|(t, c)| other_release(&*s.http, &t, c)) {
+                eprintln!("slot: cheevos: unknown hash, borrowing {hash} by title");
+                s.state.lock().unwrap_or_else(|e| e.into_inner()).borrow = Some(hash);
+                return;
+            }
+            Notice::GameLoaded(Err(message))
+        }
         (_, false) => Notice::GameLoaded(Err(message)),
     };
-    (*(host as *const Shared)).push(notice);
+    s.push(notice);
+}
+
+/// A title with its bracketed tags, case and punctuation left out, so "Crazy Taxi (Europe)
+/// (2000)" and "Crazy Taxi" are both "crazy taxi".
+pub fn plain_title(title: &str) -> String {
+    let mut depth = 0u32;
+    let mut out = String::new();
+    for c in title.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            _ if depth > 0 => {}
+            c if c.is_alphanumeric() => out.extend(c.to_lowercase()),
+            _ => out.push(' '),
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A hash RetroAchievements knows for the game titled `title`, from a `systemgames` answer:
+/// the one with the most achievements if several share the title.
+pub fn same_title(games: &serde_json::Value, title: &str) -> Option<String> {
+    let want = plain_title(title);
+    games["Response"]
+        .as_array()?
+        .iter()
+        .filter(|g| g["NumAchievements"].as_u64().unwrap_or(0) > 0)
+        .filter(|g| plain_title(g["Title"].as_str().unwrap_or("")) == want)
+        .filter_map(|g| {
+            Some((
+                g["NumAchievements"].as_u64()?,
+                g["SupportedHashes"][0].as_str()?,
+            ))
+        })
+        .max_by_key(|(n, _)| *n)
+        .map(|(_, hash)| hash.to_string())
+}
+
+/// A hash of the release of `title` RetroAchievements has achievements for on `console`.
+fn other_release(http: &dyn Http, title: &str, console: u32) -> Option<String> {
+    let (status, body) = http
+        .send(&HttpRequest {
+            url: "https://retroachievements.org/dorequest.php".into(),
+            post: Some(format!("r=systemgames&s={console}")),
+            content_type: Some("application/x-www-form-urlencoded".into()),
+        })
+        .ok()?;
+    if status != 200 {
+        return None;
+    }
+    same_title(&serde_json::from_slice(&body).ok()?, title)
 }
 
 /// Answers retro_get_memory_data/size for a libretro memory id.
@@ -327,6 +423,9 @@ impl Cheevos {
                 raw: 0,
                 inflight: 0,
                 closing: false,
+                title: None,
+                borrow: None,
+                borrowed: false,
             }),
         }));
         let raw = unsafe {
@@ -383,17 +482,60 @@ impl Cheevos {
             unsafe { (*self.shared).push(Notice::GameLoaded(Err("bad ROM path".into()))) };
             return;
         };
+        {
+            let mut st = self.state();
+            let stem = rom.file_stem().map(|s| s.to_string_lossy().into_owned());
+            st.title = stem.map(|t| (t, console.id()));
+            st.borrow = None;
+            st.borrowed = false;
+        }
         unsafe { slot_cheevos_load_game(self.raw, path.as_ptr(), console.id()) };
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, State> {
+        unsafe { &*self.shared }
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Loads the release found for an unknown ROM, on this thread, in softcore.
+    fn borrow(&self) {
+        let hash = {
+            let mut st = self.state();
+            let hash = st.borrow.take();
+            st.borrowed |= hash.is_some();
+            hash
+        };
+        let Some(hash) = hash.and_then(|h| CString::new(h).ok()) else {
+            return;
+        };
+        self.set_hardcore(false);
+        unsafe { slot_cheevos_load_hash(self.raw, hash.as_ptr()) };
     }
 
     /// Once per emulated frame, after the core ran it.
     pub fn frame(&self) {
+        self.borrow();
         unsafe { slot_cheevos_frame(self.raw) }
     }
 
     /// While paused or in menus, so pings and retries go on.
     pub fn idle(&self) {
+        self.borrow();
         unsafe { slot_cheevos_idle(self.raw) }
+    }
+
+    /// Hardcore on, before `load_game`, or off at any time. With it on the host lets no
+    /// rewind or loaded state touch the game.
+    pub fn set_hardcore(&self, on: bool) {
+        unsafe { slot_cheevos_set_hardcore(self.raw, on as c_int) }
+    }
+
+    /// Before the host pauses play: the frames hardcore still wants played first, or 0 if it may
+    /// pause now, which counts as a pause. Always 0 in softcore.
+    pub fn pause_wait(&self) -> u32 {
+        unsafe { slot_cheevos_pause_wait(self.raw) }
     }
 
     /// After loading a save state, rewinding or resetting.
@@ -402,6 +544,7 @@ impl Cheevos {
     }
 
     pub fn unload(&self) {
+        self.state().borrow = None;
         unsafe { slot_cheevos_unload(self.raw) }
     }
 

@@ -42,8 +42,11 @@ fn write_png(path: &std::path::Path, w: u32, h: u32, clear: (u32, u32, u32, u32)
         for x in 0..w {
             let (cx, cy, cw, ch) = clear;
             let inside = x >= cx && x < cx + cw && y >= cy && y < cy + ch;
-            rgba[((y * w + x) * 4) as usize..][..4]
-                .copy_from_slice(if inside { &[0, 0, 0, 0] } else { &[200, 10, 10, 255] });
+            rgba[((y * w + x) * 4) as usize..][..4].copy_from_slice(if inside {
+                &[0, 0, 0, 0]
+            } else {
+                &[200, 10, 10, 255]
+            });
         }
     }
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -67,7 +70,10 @@ fn an_info_gives_the_games_window_from_its_borders() {
     );
     assert_eq!(info_window("{\"top\":0}", (720, 480)), None);
     assert_eq!(
-        info_window("{\"top\":0,\"left\":400,\"right\":400,\"bottom\":0}", (720, 480)),
+        info_window(
+            "{\"top\":0,\"left\":400,\"right\":400,\"bottom\":0}",
+            (720, 480)
+        ),
         None
     );
 }
@@ -90,7 +96,37 @@ fn a_bezel_without_an_info_shows_the_game_through_its_clear_middle() {
 
     let solid = d.path().join("Bezels/NES/Solid.png");
     write_png(&solid, 8, 8, (0, 0, 0, 0));
-    assert!(load(&solid).is_none(), "a bezel with no window would hide the game");
+    assert!(
+        load(&solid).is_none(),
+        "a bezel with no window would hide the game"
+    );
+}
+
+#[test]
+fn a_retroarch_overlay_cfg_is_a_bezel_with_its_picture_and_viewport() {
+    let d = tempfile::tempdir().unwrap();
+    let dir = d.path().join("Bezels/NES");
+    write_png(&dir.join("art/frame.png"), 72, 48, (12, 2, 48, 44));
+    let cfg = dir.join("Frame.cfg");
+    std::fs::write(&cfg, "overlays = 1\noverlay0_overlay = \"art/frame.png\"\n").unwrap();
+    let overlay = load(&cfg).unwrap();
+    assert_eq!((overlay.w, overlay.h), (72, 48));
+    assert_eq!(
+        overlay.window,
+        [12.0, 2.0, 48.0, 44.0],
+        "no viewport: the clear middle"
+    );
+
+    std::fs::write(
+        &cfg,
+        "overlay0_overlay = \"art/frame.png\"\ncustom_viewport_x = \"8\"\n\
+         custom_viewport_y = \"0\"\ncustom_viewport_width = \"56\"\ncustom_viewport_height = \"48\"\n",
+    )
+    .unwrap();
+    assert_eq!(load(&cfg).unwrap().window, [8.0, 0.0, 56.0, 48.0]);
+    assert!(choices(d.path(), Platform::Nes, (72, 48))
+        .iter()
+        .any(|c| c == "Frame.cfg"));
 }
 
 #[test]

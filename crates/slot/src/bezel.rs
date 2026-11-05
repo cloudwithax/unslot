@@ -12,6 +12,7 @@ pub fn list(root: &Path, platform: Platform) -> Vec<String> {
     files
 }
 
+/// The bezels in a folder: PNGs, and RetroArch overlays, each a `.cfg` naming its picture.
 fn pngs(dir: &Path) -> Vec<String> {
     std::fs::read_dir(dir)
         .ok()
@@ -20,7 +21,10 @@ fn pngs(dir: &Path) -> Vec<String> {
         .flatten()
         .map(|e| e.path())
         .filter(|p| !slot_store::is_hidden(p))
-        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")))
+        .filter(|p| {
+            p.extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("png") || e.eq_ignore_ascii_case("cfg"))
+        })
         .filter_map(|p| Some(p.file_name()?.to_str()?.to_owned()))
         .collect()
 }
@@ -89,7 +93,8 @@ pub fn overlays(root: &Path, panel: (u32, u32)) -> Option<PathBuf> {
             Some(((w.parse().ok()?, h.parse().ok()?), p))
         })
         .collect();
-    let shaped = |(w, h): (u32, u32)| u64::from(w) * u64::from(panel.1) == u64::from(h) * u64::from(panel.0);
+    let shaped =
+        |(w, h): (u32, u32)| u64::from(w) * u64::from(panel.1) == u64::from(h) * u64::from(panel.0);
     sizes
         .iter()
         .filter(|(size, _)| shaped(*size))
@@ -121,14 +126,46 @@ pub fn find(root: &Path, platform: Platform, name: &str, panel: (u32, u32)) -> O
 }
 
 /// A bezel and its window: from the `.info` beside it, as Batocera and KNULLI write them, else
-/// the clear run through the picture's middle.
+/// the clear run through the picture's middle. A RetroArch overlay's `.cfg` is read for its
+/// picture, and for its window where it sets a custom viewport.
 pub fn load(path: &Path) -> Option<Overlay> {
-    let (rgba, w, h) = decode(&std::fs::read(path).ok()?)?;
-    let window = std::fs::read_to_string(path.with_extension("info"))
-        .ok()
-        .and_then(|text| info_window(&text, (w, h)))
+    let (picture, viewport) = match path.extension()?.eq_ignore_ascii_case("cfg") {
+        true => {
+            let text = std::fs::read_to_string(path).ok()?;
+            let png = cfg_value(&text, "overlay0_overlay")?;
+            (path.parent()?.join(png), cfg_viewport(&text))
+        }
+        false => (path.to_path_buf(), None),
+    };
+    let (rgba, w, h) = decode(&std::fs::read(&picture).ok()?)?;
+    let window = viewport
+        .or_else(|| {
+            std::fs::read_to_string(picture.with_extension("info"))
+                .ok()
+                .and_then(|text| info_window(&text, (w, h)))
+        })
         .or_else(|| clear_window(&rgba, w, h))?;
     Some(Overlay { w, h, rgba, window })
+}
+
+/// A setting in a RetroArch config, `key = "value"`, without its quotes.
+pub fn cfg_value<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    text.lines().find_map(|line| {
+        let (k, v) = line.split_once('=')?;
+        (k.trim() == key).then(|| v.trim().trim_matches('"'))
+    })
+}
+
+/// The game's window a RetroArch config gives as a custom viewport, on the overlay's pixels.
+fn cfg_viewport(text: &str) -> Option<[f32; 4]> {
+    let n = |key: &str| cfg_value(text, key)?.parse::<f32>().ok();
+    let window = [
+        n("custom_viewport_x")?,
+        n("custom_viewport_y")?,
+        n("custom_viewport_width")?,
+        n("custom_viewport_height")?,
+    ];
+    (window[2] > 0.0 && window[3] > 0.0).then_some(window)
 }
 
 /// The game's window from a `.info`: its borders, on a picture `width` by `height`, scaled to
@@ -180,8 +217,14 @@ fn decode(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     let src = &buf[..info.buffer_size()];
     let rgba = match info.color_type {
         png::ColorType::Rgba => src.to_vec(),
-        png::ColorType::Rgb => src.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
-        png::ColorType::GrayscaleAlpha => src.chunks_exact(2).flat_map(|p| [p[0], p[0], p[0], p[1]]).collect(),
+        png::ColorType::Rgb => src
+            .chunks_exact(3)
+            .flat_map(|p| [p[0], p[1], p[2], 255])
+            .collect(),
+        png::ColorType::GrayscaleAlpha => src
+            .chunks_exact(2)
+            .flat_map(|p| [p[0], p[0], p[0], p[1]])
+            .collect(),
         png::ColorType::Grayscale => src.iter().flat_map(|&l| [l, l, l, 255]).collect(),
         png::ColorType::Indexed => return None,
     };

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
@@ -93,6 +93,8 @@ enum Cmd {
     SetDisk(u32),
     Refresh,
     Cheevos(Start),
+    Softcore,
+    PauseWait(Sender<u32>),
 }
 
 impl Cmd {
@@ -111,6 +113,8 @@ impl Cmd {
             Cmd::SetDisk(_) => 9,
             Cmd::Refresh => 10,
             Cmd::Cheevos(_) => 11,
+            Cmd::Softcore => 12,
+            Cmd::PauseWait(_) => 13,
         }
     }
 }
@@ -285,6 +289,11 @@ impl EmuHandle {
     /// Follows the game's achievements from now on.
     pub fn start_cheevos(&self, start: Start) {
         let _ = self.cmds.send(Cmd::Cheevos(start));
+    }
+
+    /// Hardcore off for the rest of the game.
+    pub fn cheevos_softcore(&self) {
+        let _ = self.cmds.send(Cmd::Softcore);
     }
 
     /// What the game's achievements have said since last asked.
@@ -526,6 +535,14 @@ impl Snapshot for EmuSnapshot {
     fn save_ram_trusted(&self) -> bool {
         !self.shared.sav_refused.load(Ordering::Acquire)
     }
+
+    fn pause_wait(&self) -> u32 {
+        let (tx, rx) = channel();
+        if !request(&self.cmds, &self.shared, Cmd::PauseWait(tx)) {
+            return 0;
+        }
+        rx.recv().unwrap_or(0)
+    }
 }
 
 fn request(cmds: &Sender<Cmd>, shared: &Shared, cmd: Cmd) -> bool {
@@ -678,21 +695,17 @@ impl Worker {
                 break;
             }
             for cmd in self.cmds.try_iter() {
-                match cmd {
-                    Cmd::Cheevos(start) => {
-                        let _s = ft::span(ev::EMU_CHEEVOS_START, 0);
-                        tracker = Tracker::start(start, &rom)
-                    }
-                    Cmd::Load(_) => {
-                        self.apply(cmd, core.as_mut(), &mut transport, &mut cable, &link);
-                        if let Some(t) = &tracker {
-                            t.reset();
-                        }
-                    }
-                    cmd => self.apply(cmd, core.as_mut(), &mut transport, &mut cable, &link),
-                }
+                self.command(
+                    cmd,
+                    core.as_mut(),
+                    &mut tracker,
+                    &rom,
+                    &mut transport,
+                    &mut cable,
+                    &link,
+                );
             }
-            if let Some(t) = &tracker {
+            if let Some(t) = &mut tracker {
                 let _s = ft::span(ev::EMU_TRACKER_TAKE, 0);
                 let notices = t.take();
                 if !notices.is_empty() {
@@ -798,8 +811,8 @@ impl Worker {
                     if let Err(e) = core.unserialize(&state) {
                         eprintln!("slot: rewind: {e}");
                     }
-                    if let Some(t) = &tracker {
-                        t.reset();
+                    if let Some(t) = &mut tracker {
+                        t.reset(core.as_mut());
                     }
                     core.set_frame_skip(false);
                     core.run_frame(ButtonMask(0));
@@ -1066,9 +1079,9 @@ impl Worker {
             }
 
             if ceiling == 0 || rewinding || cable.is_some() {
-                if let Some(t) = &tracker {
+                if let Some(t) = &mut tracker {
                     let _s = ft::span(ev::EMU_TRACKER_IDLE, 0);
-                    t.idle();
+                    t.idle(core.as_mut());
                 }
             }
             if let Some((began, core_time)) = fast_span.take() {
@@ -1103,7 +1116,15 @@ impl Worker {
                         Wait::Request => {
                             ft::instant(ev::EMU_WAIT_REQUEST, served as i64);
                             for cmd in self.cmds.try_iter() {
-                                self.apply(cmd, core.as_mut(), &mut transport, &mut cable, &link);
+                                self.command(
+                                    cmd,
+                                    core.as_mut(),
+                                    &mut tracker,
+                                    &rom,
+                                    &mut transport,
+                                    &mut cable,
+                                    &link,
+                                );
                             }
                             continue;
                         }
@@ -1143,6 +1164,42 @@ impl Worker {
         let (dropped, starved) = (ring.overruns(), ring.underruns());
         if dropped > 0 || starved > 0 || crate::session::trace() {
             eprintln!("slot: audio: {dropped} samples dropped, {starved} starved");
+        }
+    }
+
+    /// A command as the loop takes it, with the tracker for those that are its.
+    #[allow(clippy::too_many_arguments)]
+    fn command(
+        &self,
+        cmd: Cmd,
+        core: &mut dyn RetroCore,
+        tracker: &mut Option<Tracker>,
+        rom: &Path,
+        transport: &mut Option<Box<dyn LinkChannel>>,
+        cable: &mut Option<Cable>,
+        link: &Link,
+    ) {
+        match cmd {
+            Cmd::Cheevos(start) => {
+                let _s = ft::span(ev::EMU_CHEEVOS_START, 0);
+                *tracker = Tracker::start(start, rom, core)
+            }
+            Cmd::Softcore => {
+                if let Some(t) = tracker {
+                    t.softcore(core);
+                }
+            }
+            Cmd::PauseWait(reply) => {
+                let wait = tracker.as_mut().map_or(0, |t| t.pause_wait(core));
+                let _ = reply.send(wait);
+            }
+            Cmd::Load(_) => {
+                self.apply(cmd, core, transport, cable, link);
+                if let Some(t) = tracker {
+                    t.reset(core);
+                }
+            }
+            cmd => self.apply(cmd, core, transport, cable, link),
         }
     }
 
@@ -1223,8 +1280,8 @@ impl Worker {
             Cmd::Options(reply) => {
                 let _ = reply.send(core.core_options());
             }
-            // Taken by the loop, which keeps the tracker.
-            Cmd::Cheevos(_) => {}
+            // Taken by `command`, which has the tracker.
+            Cmd::Cheevos(_) | Cmd::Softcore | Cmd::PauseWait(_) => {}
             Cmd::SetDisk(index) => match core.set_disk(index) {
                 Ok(()) => eprintln!("slot: emu: disc {} is in", index + 1),
                 Err(e) => eprintln!("slot: emu: disc {}: {e}", index + 1),

@@ -223,11 +223,11 @@ pub fn has_bit(mask: &str, bit: u16) -> bool {
 }
 
 pub fn rumble_node(sysfs: &Path) -> Option<String> {
-    let dir = first_dir(&sysfs.join("class/input"), |node| {
-        match fs::read_to_string(node.join("device/capabilities/ff")) {
-            Ok(ff) => has_bit(&ff, FF_RUMBLE),
-            Err(_) => false,
-        }
+    let dir = first_dir(&sysfs.join("class/input"), |node| match fs::read_to_string(
+        node.join("device/capabilities/ff"),
+    ) {
+        Ok(ff) => has_bit(&ff, FF_RUMBLE),
+        Err(_) => false,
     })?;
     Some(dir.file_name()?.to_string_lossy().into_owned())
 }
@@ -273,7 +273,10 @@ impl PadMotor {
         }
         if self.level == 0 {
             self.node = xbox_hidraw(&self.sysfs).and_then(|name| {
-                fs::OpenOptions::new().write(true).open(Path::new(DEV).join(name)).ok()
+                fs::OpenOptions::new()
+                    .write(true)
+                    .open(Path::new(DEV).join(name))
+                    .ok()
             });
         }
         let Some(node) = &mut self.node else {
@@ -376,7 +379,11 @@ fn upload(node: &fs::File, id: i16) -> Option<i16> {
                 &mut effect as *mut FfEffect as *mut c_void,
             )
         };
-        if rc >= 0 { Some(effect.id) } else { None }
+        if rc >= 0 {
+            Some(effect.id)
+        } else {
+            None
+        }
     }
 }
 
@@ -669,7 +676,11 @@ pub fn read_only_in(mounts: &str, path: &Path) -> bool {
             let mut f = l.split_whitespace();
             let point = Path::new(f.nth(1)?);
             let options = f.nth(1)?;
-            if path.starts_with(point) { Some((point, options)) } else { None }
+            if path.starts_with(point) {
+                Some((point, options))
+            } else {
+                None
+            }
         })
         .max_by_key(|(point, _)| point.as_os_str().len())
         .is_some_and(|(_, options)| options.split(',').any(|o| o == "ro"))

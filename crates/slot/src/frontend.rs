@@ -10,13 +10,13 @@ use slot_power::{Platform, Power};
 use slot_store::{format_stamp, Appearance, BezelPick, Platform as Console};
 use slot_ui::{
     badge_face, bezel_face, chip_face, chip_shadow_face, core_button_legends, date_time,
-    default_game_bezel_face, footer_ink, hint_face, icon_face,
-    link_button_legends, menu_face, mould_shadow, photo_face, quick_caret_face, quick_label_face,
-    quick_legend_faces, quick_pointer_face, rebuild_count_face, rebuild_title_face,
-    set_clock_hint_face, slot_back, slot_back_light, slot_front, slot_front_light, socket_face,
-    sticker_face, time_text, title_face, toast_face, value_face, wallpaper_face, word_ink,
-    CartFace, GbShell, Icon, LinkBadge, Mould, PowerChoice, QuickMenuFaces, QuickRow, QuickValue,
-    RebuildScreen, StickerFields, Toast, UndoFace, ALERT_PX, BOLT_PX, HUD_ICON_PX, HUD_INK, LEGEND,
+    default_game_bezel_face, footer_ink, hint_face, icon_face, link_button_legends, menu_face,
+    mould_shadow, photo_face, quick_caret_face, quick_label_face, quick_legend_faces,
+    quick_pointer_face, rebuild_count_face, rebuild_title_face, set_clock_hint_face, slot_back,
+    slot_back_light, slot_front, slot_front_light, socket_face, sticker_face, time_text,
+    title_face, toast_face, value_face, wallpaper_face, word_ink, CartFace, GbShell, Icon,
+    LinkBadge, Mould, PowerChoice, QuickMenuFaces, QuickRow, QuickValue, RebuildScreen,
+    StickerFields, Toast, UndoFace, ALERT_PX, BOLT_PX, HUD_ICON_PX, HUD_INK, LEGEND,
 };
 
 use crate::app::{App, LinkRow, Phase};
@@ -99,6 +99,7 @@ pub struct Frontend {
     wallpaper: WallpaperSync,
     page: PageSync,
     game_bezel: BezelSync,
+    shader: ShaderSync,
     look: Option<ShelfLook>,
     link_shot: Option<TexId>,
     link_shot_size: (u32, u32),
@@ -152,6 +153,23 @@ impl Default for BezelSync {
             tex: None,
             image: None,
             labels: std::array::from_fn(|_| String::new()),
+            faces: [(None, None); Console::COUNT],
+        }
+    }
+}
+
+struct ShaderSync {
+    /// The shader file the compositor draws the game with, for its platform.
+    shown: Option<(Console, Option<String>)>,
+    labels: [Option<String>; Console::COUNT],
+    faces: [(Option<TexId>, Option<TexId>); Console::COUNT],
+}
+
+impl Default for ShaderSync {
+    fn default() -> Self {
+        ShaderSync {
+            shown: None,
+            labels: std::array::from_fn(|_| None),
             faces: [(None, None); Console::COUNT],
         }
     }
@@ -330,6 +348,7 @@ impl Frontend {
             wallpaper: WallpaperSync::default(),
             page: PageSync::default(),
             game_bezel: BezelSync::default(),
+            shader: ShaderSync::default(),
             look: None,
             link_shot: None,
             link_shot_size: (0, 0),
@@ -759,6 +778,7 @@ impl Frontend {
         sync_wallpaper(self.session.app_mut(), compositor, &mut self.wallpaper);
         sync_page(self.session.app_mut(), compositor, &mut self.page);
         sync_game_bezel(self.session.app_mut(), compositor, &mut self.game_bezel);
+        sync_shader(self.session.app_mut(), compositor, &mut self.shader);
         compositor.set_game_bezel(self.session.app().shown_game_bezel());
         compositor.set_sp_frame(self.session.app().sp_frame());
         sync_core_picker(
@@ -1278,6 +1298,49 @@ fn sync_game_bezel(app: &mut App, compositor: &mut Compositor, state: &mut Bezel
             (dim, dim_size.0, dim_size.1),
             (lit, lit_size.0, lit_size.1),
         );
+        state.labels[at] = label;
+    }
+}
+
+fn sync_shader(app: &mut App, compositor: &mut Compositor, state: &mut ShaderSync) {
+    let platform = app.playing_platform();
+    let shown = (platform, app.custom_shader(platform).map(str::to_owned));
+    if state.shown.as_ref() != Some(&shown) {
+        let loaded = shown.1.as_deref().and_then(|name| {
+            let loaded = crate::shader::load(app.root()?, name);
+            loaded.map_err(|e| eprintln!("slot: shader {e}")).ok()
+        });
+        let built = compositor.set_custom_shader(
+            loaded.as_ref().map(|l| l.source.as_str()),
+            loaded.as_ref().is_some_and(|l| l.linear),
+        );
+        if let (Err(e), Some(name)) = (built, &shown.1) {
+            eprintln!("slot: shader {name}: {e}");
+        }
+        state.shown = Some(shown);
+    }
+    if app.quick_menu().is_none() && app.in_game_menu().is_none() {
+        return;
+    }
+    for (at, platform) in Console::ALL.into_iter().enumerate() {
+        let label = app.custom_shader(platform).map(|name| {
+            Path::new(name)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(name)
+                .to_owned()
+        });
+        if state.labels[at] == label {
+            continue;
+        }
+        let faces = label.as_deref().map(|label| {
+            let (dim, lit) = (value_face(label, false), value_face(label, true));
+            let (dim_size, lit_size) = ((dim.w, dim.h), (lit.w, lit.h));
+            let dim = upload(compositor, &mut state.faces[at].0, dim);
+            let lit = upload(compositor, &mut state.faces[at].1, lit);
+            [(dim, dim_size.0, dim_size.1), (lit, lit_size.0, lit_size.1)]
+        });
+        app.set_quick_shader_faces(platform, faces);
         state.labels[at] = label;
     }
 }

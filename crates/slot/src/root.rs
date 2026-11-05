@@ -12,6 +12,7 @@ pub fn dirs() -> Vec<String> {
         "Music",
         "Pictures",
         "Ports",
+        "Shaders",
         "System",
         "Wallpapers",
     ]

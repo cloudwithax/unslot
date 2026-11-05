@@ -15,6 +15,11 @@ pub trait Snapshot {
     fn save_ram_trusted(&self) -> bool {
         true
     }
+
+    /// Before play pauses: the frames hardcore wants played first, or 0 if it may pause now.
+    fn pause_wait(&self) -> u32 {
+        0
+    }
 }
 
 pub fn flush(

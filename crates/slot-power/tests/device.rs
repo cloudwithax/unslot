@@ -266,11 +266,18 @@ fn a_tree_with_no_force_feedback_has_no_motor() {
 #[test]
 fn a_paired_xbox_pad_is_found_by_its_hidraw_node() {
     let d = tempfile::tempdir().unwrap();
-    let ids = [("hidraw0", "0003:0000046D:0000C52B"), ("hidraw1", "0005:0000045E:00000B13")];
+    let ids = [
+        ("hidraw0", "0003:0000046D:0000C52B"),
+        ("hidraw1", "0005:0000045E:00000B13"),
+    ];
     for (node, id) in ids {
         let dir = d.path().join("class/hidraw").join(node).join("device");
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("uevent"), format!("DRIVER=hid-generic\nHID_ID={id}\n")).unwrap();
+        fs::write(
+            dir.join("uevent"),
+            format!("DRIVER=hid-generic\nHID_ID={id}\n"),
+        )
+        .unwrap();
     }
     assert_eq!(xbox_hidraw(d.path()).as_deref(), Some("hidraw1"));
     fs::remove_dir_all(d.path().join("class/hidraw/hidraw1")).unwrap();
@@ -279,7 +286,10 @@ fn a_paired_xbox_pad_is_found_by_its_hidraw_node() {
 
 #[test]
 fn the_xbox_pads_rumble_report_holds_both_motors_until_the_next() {
-    assert_eq!(xbox_rumble(u16::MAX), [0x03, 0x03, 0, 0, 100, 100, 0xff, 0, 0xff]);
+    assert_eq!(
+        xbox_rumble(u16::MAX),
+        [0x03, 0x03, 0, 0, 100, 100, 0xff, 0, 0xff]
+    );
     assert_eq!(xbox_rumble(0)[4..6], [0, 0]);
 }
 

@@ -1956,9 +1956,10 @@ fn a_shoulder_held_across_the_insert_does_not_stick_on_the_pad() {
     let d = common::tmp_root_with_gb_carts(&["Tetris", "Zzz"]);
     common::clocked(d.path());
     let mut s = Session::boot(d.path().to_path_buf());
-    s.feed([RawEvent::Down(Btn::L1)], 16);
-    s.feed([RawEvent::Down(Btn::A)], 32);
-    s.feed([RawEvent::Up(Btn::A)], 48);
+    // L1 goes down once the cart is going in: on the shelf it would turn to the apps.
+    s.feed([RawEvent::Down(Btn::A)], 16);
+    s.feed([RawEvent::Up(Btn::A)], 32);
+    s.feed([RawEvent::Down(Btn::L1)], 48);
     let deadline = Instant::now() + Duration::from_secs(10);
     while !matches!(s.app().phase(), Phase::Playing { .. }) {
         assert!(Instant::now() < deadline, "the cart never seated");
@@ -1989,9 +1990,10 @@ fn a_shoulder_still_held_when_the_cart_seats_never_reaches_a_game_boy_core() {
     ] {
         common::clocked(root.path());
         let mut s = Session::boot(root.path().to_path_buf());
-        s.feed([RawEvent::Down(Btn::L1)], 16);
-        s.feed([RawEvent::Down(Btn::A)], 32);
-        s.feed([RawEvent::Up(Btn::A)], 48);
+        // L1 goes down once the cart is going in: on the shelf it would turn to the apps.
+        s.feed([RawEvent::Down(Btn::A)], 16);
+        s.feed([RawEvent::Up(Btn::A)], 32);
+        s.feed([RawEvent::Down(Btn::L1)], 48);
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut now = 48;
         while !matches!(s.app().phase(), Phase::Playing { .. }) {

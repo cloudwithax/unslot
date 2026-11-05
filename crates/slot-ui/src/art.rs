@@ -19,10 +19,10 @@ const CLEAR_BELOW: u8 = 16;
 pub fn contain(path: &Path, w: u32, h: u32) -> Option<Vec<u8>> {
     let (src, sw, sh) = decode(path)?;
     let seen = |x: u32, y: u32| src[((y * sw + x) * 4 + 3) as usize] >= CLEAR_BELOW;
-    let xs = (0..sw).filter(|&x| (0..sh).any(|y| seen(x, y)));
-    let (x0, x1) = (xs.clone().next()?, xs.last()? + 1);
-    let ys = (0..sh).filter(|&y| (x0..x1).any(|x| seen(x, y)));
-    let (y0, y1) = (ys.clone().next()?, ys.last()? + 1);
+    let mut xs = (0..sw).filter(|&x| (0..sh).any(|y| seen(x, y)));
+    let (x0, x1) = (xs.clone().next()?, xs.next_back()? + 1);
+    let mut ys = (0..sh).filter(|&y| (x0..x1).any(|x| seen(x, y)));
+    let (y0, y1) = (ys.clone().next()?, ys.next_back()? + 1);
     let (cw, ch) = (x1 - x0, y1 - y0);
     let mut cut = Vec::with_capacity((cw * ch * 4) as usize);
     for y in y0..y1 {
@@ -42,10 +42,11 @@ pub fn contain(path: &Path, w: u32, h: u32) -> Option<Vec<u8>> {
         let (x, y) = (i as u32 % fw, i as u32 / fw);
         let a = u32::from(px[3]);
         let at = (((oy + y) * w + ox + x) * 4) as usize;
-        if a > 0 {
-            for c in 0..3 {
-                out[at + c] = ((u32::from(px[c]) * 255 + a / 2) / a).min(255) as u8;
-            }
+        for c in 0..3 {
+            out[at + c] = (u32::from(px[c]) * 255 + a / 2)
+                .checked_div(a)
+                .unwrap_or(0)
+                .min(255) as u8;
         }
         out[at + 3] = px[3];
     }
@@ -174,7 +175,11 @@ fn decode_jpeg_bytes(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
             })
             .collect(),
     };
-    if rgba.len() == (w * h * 4) as usize { Some((rgba, w, h)) } else { None }
+    if rgba.len() == (w * h * 4) as usize {
+        Some((rgba, w, h))
+    } else {
+        None
+    }
 }
 
 pub(crate) fn decode_png(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {

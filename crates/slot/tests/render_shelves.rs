@@ -266,6 +266,9 @@ fn the_shoulders_ring_over_a_shelf_for_each_system() {
         seen.push((cart, label));
     }
 
+    // Past the apps, which are always on the card, and round to the start.
+    tap(&mut f, &mut input, Btn::R1);
+    let_the_name_in(&mut f, &mut c, &mut input);
     tap(&mut f, &mut input, Btn::R1);
     let_the_name_in(&mut f, &mut c, &mut input);
     let back = composed(&mut f, &mut c, "gba-again");

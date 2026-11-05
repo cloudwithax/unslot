@@ -294,6 +294,7 @@ pub fn has_real_media(platform: Platform) -> bool {
             | Platform::ScummVm
             | Platform::Pico8
             | Platform::Tic80
+            | Platform::Apps
     )
 }
 
@@ -388,7 +389,11 @@ pub fn clean_label(stem: &str) -> String {
         }
         out.push_str(word);
     }
-    if out.is_empty() { stem.to_string() } else { out }
+    if out.is_empty() {
+        stem.to_string()
+    } else {
+        out
+    }
 }
 
 pub fn label_tags(stem: &str) -> Vec<String> {
@@ -711,7 +716,11 @@ fn generated_label(s: &Spec, title: &str) -> Vec<u8> {
 
 fn ink(bg: [u8; 3]) -> [u8; 3] {
     let luma = 0.2126 * bg[0] as f32 + 0.7152 * bg[1] as f32 + 0.0722 * bg[2] as f32;
-    if luma > 140.0 { [0x1a, 0x18, 0x16] } else { [0xf4, 0xf1, 0xea] }
+    if luma > 140.0 {
+        [0x1a, 0x18, 0x16]
+    } else {
+        [0xf4, 0xf1, 0xea]
+    }
 }
 
 fn paste_label(s: &Spec, face: &mut CartFace, label: &[u8]) {

@@ -204,15 +204,18 @@ impl IonFrames {
     /// found through libEGL and libGLESv2 themselves, as the compositor keeps neither.
     pub(crate) fn for_current() -> Result<Self, String> {
         let open = |names: [&str; 2]| {
-            unsafe { libloading::Library::new(names[0]).or_else(|_| libloading::Library::new(names[1])) }
-                .map_err(|e| e.to_string())
+            unsafe {
+                libloading::Library::new(names[0]).or_else(|_| libloading::Library::new(names[1]))
+            }
+            .map_err(|e| e.to_string())
         };
         let egl = open(["libEGL.so.1", "libEGL.so"])?;
         let gles = open(["libGLESv2.so.2", "libGLESv2.so"])?;
         // SAFETY: each is named for the function it is typed as.
         let made = unsafe {
-            let display: unsafe extern "C" fn() -> Ptr =
-                *egl.get(b"eglGetCurrentDisplay").map_err(|e| e.to_string())?;
+            let display: unsafe extern "C" fn() -> Ptr = *egl
+                .get(b"eglGetCurrentDisplay")
+                .map_err(|e| e.to_string())?;
             let get_proc: unsafe extern "C" fn(*const std::ffi::c_char) -> *const c_void =
                 *egl.get(b"eglGetProcAddress").map_err(|e| e.to_string())?;
             let display = display();
@@ -265,7 +268,11 @@ impl IonFrames {
         if !self.ready_for(w, h) {
             return Err(());
         }
-        let Some(i) = self.buffers.iter().position(|b| Arc::strong_count(&b.mem) == 1) else {
+        let Some(i) = self
+            .buffers
+            .iter()
+            .position(|b| Arc::strong_count(&b.mem) == 1)
+        else {
             return Ok(None);
         };
         self.copy_in(from, i, w, h, flip);

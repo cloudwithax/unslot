@@ -209,8 +209,11 @@ fn the_picker_boards_two_sockets_are_the_gbas_own_cores() {
 
 #[test]
 fn every_systems_default_core_comes_with_unslot() {
-    for p in Platform::ALL {
-        assert!(!Core::default_for(p).download_only(), "{p:?}'s default is downloaded");
+    for p in Platform::ALL.into_iter().filter(|p| *p != Platform::Apps) {
+        assert!(
+            !Core::default_for(p).download_only(),
+            "{p:?}'s default is downloaded"
+        );
     }
 }
 
@@ -219,19 +222,29 @@ fn a_core_not_downloaded_yet_gives_way_to_the_default() {
     let d = root_with(Some("Mario = nestopia\n"));
     std::fs::write(d.path().join("Config/system_core.txt"), "nes = quicknes\n").unwrap();
     assert_eq!(core_for_system(d.path(), Platform::Nes), Core::Fceumm);
-    assert_eq!(core_for_platform(d.path(), "Mario", Platform::Nes), Core::Fceumm);
+    assert_eq!(
+        core_for_platform(d.path(), "Mario", Platform::Nes),
+        Core::Fceumm
+    );
 
     std::fs::create_dir(d.path().join(CORES_DIR)).unwrap();
-    std::fs::write(d.path().join(CORES_DIR).join(Core::Nestopia.file_name()), "").unwrap();
+    std::fs::write(
+        d.path().join(CORES_DIR).join(Core::Nestopia.file_name()),
+        "",
+    )
+    .unwrap();
     assert!(Core::Nestopia.installed(d.path()));
     assert!(!Core::Quicknes.installed(d.path()));
-    assert_eq!(core_for_platform(d.path(), "Mario", Platform::Nes), Core::Nestopia);
+    assert_eq!(
+        core_for_platform(d.path(), "Mario", Platform::Nes),
+        Core::Nestopia
+    );
     assert_eq!(core_for_system(d.path(), Platform::Nes), Core::Fceumm);
 }
 
 #[test]
 fn every_system_has_a_core_and_no_core_twice() {
-    for p in Platform::ALL {
+    for p in Platform::ALL.into_iter().filter(|p| *p != Platform::Apps) {
         let cores = p.spec().cores;
         assert!(!cores.is_empty(), "{p:?} has no core");
         for (i, c) in cores.iter().enumerate() {
@@ -298,6 +311,9 @@ fn nodosumi_comes_with_unslot_and_runs_dreamcast_games_unless_told_otherwise() {
     assert!(!Core::Nodosumi.download_only());
     assert!(Core::Nodosumi.file_name().starts_with("nodosumi_libretro."));
     let d = root_with(None);
-    assert_eq!(core_for_platform(d.path(), "Crazy Taxi 2", Platform::Dreamcast), Core::Nodosumi);
+    assert_eq!(
+        core_for_platform(d.path(), "Crazy Taxi 2", Platform::Dreamcast),
+        Core::Nodosumi
+    );
     assert!(Core::Flycast.runs(Platform::Dreamcast));
 }

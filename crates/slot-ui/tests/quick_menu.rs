@@ -94,7 +94,7 @@ fn the_run_ahead_row_offers_off_and_one_frame() {
 fn the_rows_run_in_the_order_the_user_chose() {
     assert_eq!(
         QuickRow::MAIN.map(QuickRow::label),
-        ["General", "Screen", "Gameplay", "Apps", "Network", "Power", "About"]
+        ["General", "Screen", "Gameplay", "Network", "Online", "Power", "About"]
     );
     assert_eq!(
         QuickRow::GENERAL.map(QuickRow::label),
@@ -116,7 +116,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
         .map(QuickRow::label)
         .collect();
     // The Game Boy family first, then every other system in the order of the shelves.
-    assert_eq!(screens.len(), Platform::COUNT);
+    // Every system but the apps, which draw no game.
+    assert_eq!(screens.len(), Platform::COUNT - 1);
     assert_eq!(
         screens[..13],
         [
@@ -168,7 +169,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Rumble",
             "D-Pad as Stick",
             "Controls",
-            "Auto Save on Eject"
+            "Auto Save on Eject",
+            "Hardcore Achievements"
         ]
     );
     let opens: Vec<QuickRow> = QuickRow::ALL.into_iter().filter(|r| r.opens()).collect();
@@ -197,6 +199,12 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::Restart,
             QuickRow::ShutDown,
             QuickRow::Reload,
+            QuickRow::Achievements,
+            QuickRow::Cast,
+            QuickRow::PlayCast,
+            QuickRow::Controls,
+            QuickRow::Upload,
+            QuickRow::Online,
         ]
         .into_iter()
         .chain(Platform::ALL.map(QuickRow::ScreenOf))
@@ -207,6 +215,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
         &QuickRow::screen_page()[..],
         &QuickRow::GAME[..],
         &QuickRow::GENERAL[..],
+        &QuickRow::NETWORK[..],
+        &QuickRow::ONLINE[..],
         &QuickRow::PLAY[..],
         &QuickRow::SETTINGS[..],
         &QuickRow::PLAY_SCREEN[..],
@@ -225,7 +235,7 @@ fn a_hidden_row_is_stepped_over_and_takes_no_place() {
     let hidden = [QuickRow::WallpaperTint];
     assert_eq!(QuickRow::Wallpaper.down(&hidden), QuickRow::Theme);
     assert_eq!(QuickRow::Theme.up(&hidden), QuickRow::Wallpaper);
-    assert_eq!(QuickRow::Wallpaper.up(&hidden), QuickRow::Haptics);
+    assert_eq!(QuickRow::Wallpaper.up(&hidden), QuickRow::TvSound);
     assert_eq!(QuickRow::Theme.position(&hidden), 1);
     assert_eq!(QuickRow::Wallpaper.down(&[]), QuickRow::WallpaperTint);
     assert_eq!(QuickRow::Theme.position(&[]), 2);

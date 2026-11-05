@@ -103,6 +103,8 @@ pub fn source(platform: Platform, rom: &Path) -> (Vec<&'static str>, u32) {
         Platform::Pico8 => (vec!["PICO-8"], 234),
         Platform::Tic80 => (vec!["TIC-80"], 222),
         Platform::Psp => (vec!["Sony - PlayStation Portable"], 61),
+        // Not games: nothing to look up.
+        Platform::Apps => (vec![], 0),
     }
 }
 
@@ -494,7 +496,18 @@ impl Scraper {
 
     /// Finds labels for `carts`.
     pub fn fetch(&self, carts: Vec<Cart>) {
-        let _ = self.jobs.send(carts);
+        let mut view = self.view.lock().unwrap_or_else(|e| e.into_inner());
+        if view.running || carts.is_empty() {
+            return;
+        }
+        // Reserve the job before returning so standby cannot expire before the worker starts.
+        view.running = true;
+        view.total = carts.len();
+        view.done = 0;
+        view.error = None;
+        if self.jobs.send(carts).is_err() {
+            view.running = false;
+        }
     }
 
     pub fn view(&self) -> ScrapeView {

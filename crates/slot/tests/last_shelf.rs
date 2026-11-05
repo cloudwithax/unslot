@@ -30,6 +30,7 @@ fn settle(a: &mut App) {
     for _ in 0..120 {
         a.update(1.0 / 60.0);
     }
+    a.join_writes();
 }
 
 fn press(a: &mut App, btn: Btn) {

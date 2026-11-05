@@ -49,6 +49,7 @@ pub mod scrape;
 pub mod search;
 pub mod services;
 pub mod session;
+pub mod shader;
 pub mod slot_skin;
 pub mod state_writer;
 pub mod thumb;

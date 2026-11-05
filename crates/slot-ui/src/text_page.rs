@@ -42,7 +42,8 @@ fn line_into(rgba: &mut [u8], y: u32, line: &str) {
         return;
     };
     let layout = text::fit_as_written(font, line, f32::MAX, TEXT_PX, TEXT_PX);
-    let w = (text::line_width(font, line, layout.px, layout.tracking).ceil() as u32 + 2).min(TEXT_W);
+    let w =
+        (text::line_width(font, line, layout.px, layout.tracking).ceil() as u32 + 2).min(TEXT_W);
     let mut band = vec![0u8; (w * LINE_H * 4) as usize];
     for (i, a) in text::coverage(w, LINE_H, &layout).into_iter().enumerate() {
         band[i * 4..i * 4 + 4].copy_from_slice(&[INK[0], INK[1], INK[2], a]);

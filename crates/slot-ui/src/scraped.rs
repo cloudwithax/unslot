@@ -158,7 +158,11 @@ fn luma(px: &[u8]) -> f32 {
         sum += 0.2126 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.0722 * p[2] as f32;
         n += 1;
     }
-    if n == 0 { 255.0 } else { sum / n as f32 }
+    if n == 0 {
+        255.0
+    } else {
+        sum / n as f32
+    }
 }
 
 /// The box art's dominant saturated hue, edges cropped and dull or dark pixels ignored, so a
@@ -188,7 +192,11 @@ pub fn box_hue(png: &[u8]) -> Option<u16> {
             weight = *w;
         }
     }
-    if weight > 0.0 { Some(best as u16 * 10 + 5) } else { None }
+    if weight > 0.0 {
+        Some(best as u16 * 10 + 5)
+    } else {
+        None
+    }
 }
 
 fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [u8; 3] {

@@ -823,3 +823,87 @@ fn a_picture_turned_counter_clockwise_brings_each_corner_round_with_it() {
         assert_eq!(got, want, "{turns} quarter turns");
     }
 }
+
+/// A RetroArch shader as the libretro repository writes them, for either GLSL it is built as,
+/// keeping only the green of the game.
+const GREEN_ONLY: &str = r#"#version 130
+#pragma parameter green "Green strength" 0.5 0.0 1.0 0.1
+#if defined(VERTEX)
+#if __VERSION__ >= 130
+#define COMPAT_VARYING out
+#define COMPAT_ATTRIBUTE in
+#else
+#define COMPAT_VARYING varying
+#define COMPAT_ATTRIBUTE attribute
+#endif
+#ifdef GL_ES
+#define COMPAT_PRECISION mediump
+#else
+#define COMPAT_PRECISION
+#endif
+COMPAT_ATTRIBUTE vec4 VertexCoord;
+COMPAT_ATTRIBUTE vec4 COLOR;
+COMPAT_ATTRIBUTE vec4 TexCoord;
+COMPAT_VARYING vec4 TEX0;
+uniform mat4 MVPMatrix;
+uniform COMPAT_PRECISION vec2 OutputSize;
+uniform COMPAT_PRECISION vec2 TextureSize;
+uniform COMPAT_PRECISION vec2 InputSize;
+void main() {
+    gl_Position = MVPMatrix * VertexCoord;
+    TEX0.xy = TexCoord.xy;
+}
+#elif defined(FRAGMENT)
+#if __VERSION__ >= 130
+#define COMPAT_VARYING in
+#define COMPAT_TEXTURE texture
+out vec4 FragColor;
+#else
+#define COMPAT_VARYING varying
+#define FragColor gl_FragColor
+#define COMPAT_TEXTURE texture2D
+#endif
+#ifdef GL_ES
+precision mediump float;
+#endif
+uniform sampler2D Texture;
+uniform int FrameCount;
+uniform float green;
+COMPAT_VARYING vec4 TEX0;
+void main() {
+    FragColor = vec4(0.0, COMPAT_TEXTURE(Texture, TEX0.xy).g * green, 0.0, 1.0);
+}
+#endif
+"#;
+
+#[test]
+fn a_retroarch_shader_draws_the_game_the_right_way_up() {
+    let Some((_g, _s, mut c)) = compositor() else {
+        return;
+    };
+    c.set_custom_shader(Some(GREEN_ONLY), false).unwrap();
+    let mut src = vec![0u8; (SRC_W * SRC_H * 4) as usize];
+    src[0..3].copy_from_slice(&[255, 255, 255]);
+    c.begin_frame(slot_gfx::Layout::Framed);
+    c.upload_game(&src, (SRC_W, SRC_H));
+    c.draw_game();
+    let frame = c.read_frame();
+    assert_eq!(px(&frame, 1, 1), [0, 128, 0]);
+    assert_eq!(px(&frame, 3, 0), [0, 0, 0], "bled one cell right");
+    assert_eq!(px(&frame, 0, OUT_H as usize - 1), [0, 0, 0], "upside down");
+    assert_eq!(px(&frame, OUT_W as usize - 1, 0), [0, 0, 0], "mirrored");
+}
+
+#[test]
+fn a_shader_that_will_not_build_leaves_the_built_in_effect() {
+    let Some((_g, _s, mut c)) = compositor() else {
+        return;
+    };
+    assert!(c.set_custom_shader(Some("not glsl"), false).is_err());
+    c.set_screen_effect(ScreenEffect::None);
+    let white = vec![0xffu8; (SRC_W * SRC_H * 4) as usize];
+    c.begin_frame(slot_gfx::Layout::Framed);
+    c.upload_game(&white, (SRC_W, SRC_H));
+    c.draw_game();
+    assert_eq!(px(&c.read_frame(), 10, 10), [255, 255, 255]);
+}

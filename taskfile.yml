@@ -554,6 +554,7 @@ tasks:
           CMD: >-
             cargo build --profile device --target-dir target-device
             -p slot --no-default-features --features device
+      - tools/target-cap/target-cap.sh
       - file target-device/device/slot | grep -q aarch64
       - 'echo "built target-device/device/slot"'
 

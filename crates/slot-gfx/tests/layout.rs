@@ -55,7 +55,12 @@ fn framed_frame(c: &mut Compositor) -> Vec<u8> {
     c.read_frame()
 }
 
+// Desktop GL and Mesa GLES round this LCD effect differently. Both baselines were
+// verified on the unchanged renderer; keep a strict golden for each backend.
+#[cfg(target_os = "macos")]
 const FRAMED_HASH: u64 = 0xe3b9_652d_e7d2_eb8c;
+#[cfg(target_os = "linux")]
+const FRAMED_HASH: u64 = 0x3bd5_ed1b_8187_fa60;
 
 #[test]
 fn a_framed_frame_on_a_4_by_3_panel_is_todays_frame() {

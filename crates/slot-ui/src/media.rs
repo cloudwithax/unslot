@@ -412,7 +412,7 @@ impl Media {
             Platform::ZxSpectrum => Media::Tape,
             Platform::AmstradCpc => Media::AmstradDisk,
             Platform::Psp => Media::Umd,
-            Platform::Pico8 | Platform::Tic80 => Media::Fantasy,
+            Platform::Pico8 | Platform::Tic80 | Platform::Apps => Media::Fantasy,
         })
     }
 

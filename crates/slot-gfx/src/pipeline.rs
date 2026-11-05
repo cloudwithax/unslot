@@ -1,3 +1,4 @@
+use crate::custom::{CustomPass, Placed};
 use crate::lcd3x::ScreenEffect;
 use crate::power::{screen_brightness, screen_rect_above};
 use crate::quad::Quad;
@@ -36,6 +37,8 @@ pub struct GamePass {
     paper: gl::types::GLuint,
     paper_size: f32,
     effect: ScreenEffect,
+    /// A shader from the card drawn in place of `effect`.
+    custom: Option<CustomPass>,
     power: f32,
     fills: bool,
     /// Pixels kept for the carousel footer. The picture scales in the space above them.
@@ -100,6 +103,7 @@ impl GamePass {
             paper,
             paper_size: 1.0,
             effect: ScreenEffect::Lcd3x,
+            custom: None,
             power: 1.0,
             fills: false,
             bottom: 0.0,
@@ -165,6 +169,16 @@ impl GamePass {
 
     pub fn set_effect(&mut self, effect: ScreenEffect) {
         self.effect = effect;
+    }
+
+    /// Draws the game with a RetroArch shader's source, or the built-in effect for None. A
+    /// shader that does not build leaves the built-in effect.
+    pub fn set_custom_shader(&mut self, src: Option<&str>, linear: bool) -> Result<(), GfxError> {
+        self.custom = None;
+        if let Some(src) = src {
+            self.custom = Some(CustomPass::new(src, linear)?);
+        }
+        Ok(())
     }
 
     pub fn set_paper(&mut self, size: u32, gray: &[u8]) {
@@ -240,6 +254,17 @@ impl GamePass {
         let mut src = src;
         if self.bottom > 0.0 && !self.whole {
             src[3] *= (OUT_H as f32 - self.bottom) / OUT_H as f32;
+        }
+        if let Some(custom) = &self.custom {
+            let placed = Placed {
+                rect: (x, y, w, h),
+                src,
+                texels: self.texels,
+                rotation: self.rotation,
+                fbo_scale: self.fbo_scale,
+            };
+            custom.draw(tex, &placed);
+            return;
         }
         unsafe {
             gl::UseProgram(self.prog);

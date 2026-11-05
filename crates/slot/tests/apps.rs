@@ -4,9 +4,10 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use common::{boot, tmp_root_with_carts};
-use slot::app::{App, PageModel};
+use slot::app::{App, PageModel, Phase};
 use slot_input::{Action, Btn};
-use slot_ui::{ListPage, QuickRow};
+use slot_store::Platform;
+use slot_ui::ListPage;
 
 fn press(a: &mut App, btn: Btn) {
     a.apply(Action::GbaDown(btn));
@@ -31,19 +32,24 @@ fn list(a: &App) -> ListPage {
     }
 }
 
-/// Opens Apps from the menu.
-fn open_apps(root: &Path) -> App {
+/// Takes the app called `name` off the Apps shelf.
+fn open_app(root: &Path, name: &str) -> App {
     let mut a = boot(root);
-    a.apply(Action::QuickMenu);
-    for _ in 0..12 {
-        if a.quick_menu() == Some(QuickRow::Apps) {
+    for _ in 0..Platform::COUNT {
+        if a.shelf_platform_name() == Some("Apps") {
             break;
         }
-        press(&mut a, Btn::Down);
+        press(&mut a, Btn::R1);
     }
-    assert_eq!(a.quick_menu(), Some(QuickRow::Apps));
+    assert_eq!(a.shelf_platform_name(), Some("Apps"));
+    for _ in 0..30 {
+        if a.selected_stem() == Some(name) {
+            break;
+        }
+        press(&mut a, Btn::Right);
+    }
+    assert_eq!(a.selected_stem(), Some(name));
     press(&mut a, Btn::A);
-    assert_eq!(list(&a).title, "Apps");
     a
 }
 
@@ -61,20 +67,23 @@ fn open(a: &mut App, label: &str) {
 }
 
 #[test]
-fn the_launcher_lists_the_apps_then_the_ports_and_b_goes_back_to_the_menu() {
+fn the_apps_shelf_holds_the_apps_then_the_ports_and_b_goes_back_to_it() {
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
     std::fs::create_dir_all(d.path().join("Ports")).unwrap();
     std::fs::write(d.path().join("Ports/Cave Story.sh"), "#!/bin/sh\n").unwrap();
     std::fs::write(d.path().join("Ports/readme.txt"), "not a port").unwrap();
-    let mut a = open_apps(d.path());
-    let rows: Vec<(String, String)> = list(&a)
-        .rows
-        .into_iter()
-        .map(|r| (r.label, r.detail))
-        .collect();
-    let labels: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
+    let mut a = open_app(d.path(), "Files");
+    assert_eq!(list(&a).title, "Files");
+    press(&mut a, Btn::B);
+    assert!(matches!(a.phase(), Phase::Shelf), "{:?}", a.phase());
+    assert_eq!(a.shelf_platform_name(), Some("Apps"));
+    let mut stems = Vec::new();
+    for _ in 0..6 {
+        stems.push(a.selected_stem().unwrap().to_string());
+        press(&mut a, Btn::Right);
+    }
     assert_eq!(
-        labels,
+        stems,
         [
             "Files",
             "Books",
@@ -84,10 +93,6 @@ fn the_launcher_lists_the_apps_then_the_ports_and_b_goes_back_to_the_menu() {
             "Cave Story"
         ]
     );
-    assert_eq!(rows[5].1, "Port");
-    press(&mut a, Btn::B);
-    assert_eq!(a.quick_menu(), Some(QuickRow::Apps));
-    assert!(a.page_model().is_none());
 }
 
 #[test]
@@ -96,8 +101,7 @@ fn a_port_is_left_for_the_launcher_and_slot_quits_for_it() {
     std::fs::create_dir_all(d.path().join("Ports")).unwrap();
     let script = d.path().join("Ports/Cave Story.sh");
     std::fs::write(&script, "#!/bin/sh\n").unwrap();
-    let mut a = open_apps(d.path());
-    open(&mut a, "Cave Story");
+    let mut a = open_app(d.path(), "Cave Story");
     let queued = std::fs::read_to_string(d.path().join(".unslot-port")).unwrap();
     assert_eq!(Path::new(&queued), script);
     until(&mut a, App::ready_to_reload);
@@ -112,8 +116,7 @@ fn files_walks_the_card_and_a_picture_steps_through_its_folder() {
         std::fs::write(shots.join(name), "picture").unwrap();
     }
     std::fs::write(shots.join("notes.bin"), "?").unwrap();
-    let mut a = open_apps(d.path());
-    open(&mut a, "Gallery");
+    let mut a = open_app(d.path(), "Gallery");
     assert_eq!(list(&a).rows[0].label, "Trip");
     press(&mut a, Btn::A);
     let names: Vec<String> = list(&a).rows.into_iter().map(|r| r.label).collect();
@@ -152,8 +155,7 @@ fn a_book_turns_its_pages_and_opens_again_where_it_was_left() {
     std::fs::create_dir_all(d.path().join("Books")).unwrap();
     let text: String = (1..=200).map(|n| format!("Line {n}\n")).collect();
     std::fs::write(d.path().join("Books/Long.txt"), text).unwrap();
-    let mut a = open_apps(d.path());
-    open(&mut a, "Books");
+    let mut a = open_app(d.path(), "Books");
     open(&mut a, "Long.txt");
     let first = text_page(&a);
     assert_eq!(first.title, "Long");
@@ -233,8 +235,7 @@ fn an_epub_reads_its_chapters_in_spine_order_under_its_own_title() {
         ),
     ]);
     std::fs::write(d.path().join("Books/tale.epub"), book).unwrap();
-    let mut a = open_apps(d.path());
-    open(&mut a, "Books");
+    let mut a = open_app(d.path(), "Books");
     open(&mut a, "tale.epub");
     let page = text_page(&a);
     assert_eq!(page.title, "The Tale");
@@ -279,8 +280,7 @@ fn music_plays_into_the_output_and_keeps_playing_once_the_page_is_closed() {
     std::fs::create_dir_all(d.path().join("Music/Album")).unwrap();
     tone(&d.path().join("Music/Album/01 Tone.wav"));
     tone(&d.path().join("Music/Album/02 Tone.wav"));
-    let mut a = open_apps(d.path());
-    open(&mut a, "Music");
+    let mut a = open_app(d.path(), "Music");
     let names: Vec<String> = list(&a).rows.into_iter().map(|r| r.label).collect();
     assert_eq!(names, ["01 Tone", "02 Tone"]);
     press(&mut a, Btn::A);
@@ -302,24 +302,18 @@ fn music_plays_into_the_output_and_keeps_playing_once_the_page_is_closed() {
     assert!(heard(&ring), "nothing reached the output");
 
     press(&mut a, Btn::B);
-    assert_eq!(list(&a).title, "Apps");
+    assert!(matches!(a.phase(), Phase::Shelf), "{:?}", a.phase());
+    assert_eq!(a.selected_stem(), Some("Music"));
+    assert!(heard(&ring), "the music stopped with the page");
+
+    press(&mut a, Btn::A);
     assert!(
         list(&a).status.starts_with("Playing "),
         "{}",
         list(&a).status
     );
-    press(&mut a, Btn::B);
-    assert!(heard(&ring), "the music stopped with the page");
-
-    open_music_again(&mut a);
     press(&mut a, Btn::Y);
     until(&mut a, |a| !list(a).status.starts_with("Playing"));
-}
-
-fn open_music_again(a: &mut App) {
-    press(a, Btn::A);
-    assert_eq!(list(a).title, "Apps");
-    open(a, "Music");
 }
 
 /// A clip `secs` long in the card's Pictures, made by the ffmpeg here, if there is one.
@@ -359,8 +353,7 @@ fn a_video_shows_its_pictures_through_ffmpeg_and_a_pauses_it() {
     if !clip(d.path(), "3") {
         return;
     }
-    let mut a = open_apps(d.path());
-    open(&mut a, "Gallery");
+    let mut a = open_app(d.path(), "Gallery");
     open(&mut a, "clip.mp4");
     let serial = |a: &App| match a.page_model() {
         Some(PageModel::Video(v)) => {
@@ -386,14 +379,17 @@ fn a_video_that_plays_to_its_end_goes_back_to_the_list_and_one_that_will_not_pla
         return;
     }
     std::fs::write(d.path().join("Pictures/broken.mp4"), b"not a video").unwrap();
-    let mut a = open_apps(d.path());
-    open(&mut a, "Gallery");
+    let mut a = open_app(d.path(), "Gallery");
     open(&mut a, "clip.mp4");
     assert!(matches!(a.page_model(), Some(PageModel::Video(_))));
-    until(&mut a, |a| matches!(a.page_model(), Some(PageModel::List(_))));
+    until(&mut a, |a| {
+        matches!(a.page_model(), Some(PageModel::List(_)))
+    });
     assert_eq!(list(&a).title, "Gallery");
     open(&mut a, "broken.mp4");
-    until(&mut a, |a| matches!(a.page_model(), Some(PageModel::Text(_))));
+    until(&mut a, |a| {
+        matches!(a.page_model(), Some(PageModel::Text(_)))
+    });
     assert_eq!(text_page(&a).lines, ["Could not play that video"]);
     press(&mut a, Btn::B);
     assert_eq!(list(&a).title, "Gallery");

@@ -110,7 +110,16 @@ impl Track {
         let mut entries = Vec::new();
         for r in refs {
             let tag = r.metatag();
-            if tag == KnownMetadata::CdRomTrack2 as u32 || tag == KnownMetadata::CdRomTrack as u32 {
+            // A Dreamcast GD-ROM lists its tracks as CHGD (or the older CHGT) instead.
+            if [
+                KnownMetadata::CdRomTrack2,
+                KnownMetadata::CdRomTrack,
+                KnownMetadata::GdRomTrack,
+                KnownMetadata::GdRomOld,
+            ]
+            .iter()
+            .any(|k| *k as u32 == tag)
+            {
                 let m = r.read(chd.inner()).ok()?;
                 let text = String::from_utf8_lossy(&m.value);
                 entries.push(text.trim_end_matches('\0').to_string());
@@ -257,5 +266,18 @@ mod tests {
         assert_eq!(t[1].lba, 1001 + 150);
         assert_eq!(pick(&t, FIRST_DATA).unwrap().number, 1);
         assert_eq!(pick(&t, LAST).unwrap().number, 2);
+    }
+
+    #[test]
+    fn a_gd_rom_high_density_track_starts_at_45000() {
+        // Crazy Taxi 2 (USA): the gap before track 2 is inside its frames.
+        let t = tracks(&[
+            "TRACK:1 TYPE:MODE1_RAW SUBTYPE:NONE FRAMES:450 PAD:0 PREGAP:0 PGTYPE:MODE1 PGSUB:NONE POSTGAP:0".into(),
+            "TRACK:2 TYPE:AUDIO SUBTYPE:NONE FRAMES:44550 PAD:44024 PREGAP:0 PGTYPE:MODE1 PGSUB:NONE POSTGAP:0".into(),
+            "TRACK:3 TYPE:MODE1_RAW SUBTYPE:NONE FRAMES:504150 PAD:0 PREGAP:0 PGTYPE:MODE1 PGSUB:NONE POSTGAP:0".into(),
+        ]);
+        let three = pick(&t, 3).unwrap();
+        assert_eq!(three.lba, 45000);
+        assert_eq!(three.first_frame, 452 + 44552);
     }
 }

@@ -1,8 +1,8 @@
 use slot_gfx::{Canvas, Draw, TexId, OUT_H};
 use slot_store::Cart;
 
-use crate::draw::shift_down;
 use crate::cart::{label_colour, label_text, seated_size, SEATED_W};
+use crate::draw::shift_down;
 use crate::footer::Printed;
 use crate::icon::icon_box;
 use crate::plate::HINT_H;
@@ -284,7 +284,9 @@ fn draw_slot_front(canvas: Canvas, slot: Option<(TexId, TexId)>, alpha: f32, out
         return;
     }
     let dy = canvas.extra();
-    front_bands(canvas, |x, y, w, h, c| out.push(band(x, y + dy, w, h, c, alpha)));
+    front_bands(canvas, |x, y, w, h, c| {
+        out.push(band(x, y + dy, w, h, c, alpha))
+    });
 }
 
 fn front_bands(canvas: Canvas, mut band: impl FnMut(f32, f32, f32, f32, [f32; 4])) {

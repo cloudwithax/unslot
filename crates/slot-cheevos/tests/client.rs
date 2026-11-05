@@ -350,3 +350,160 @@ fn a_sega_cd_chd_is_hashed_by_its_disc_header() {
         "f449ada9ab4280081643362f4760286e"
     );
 }
+
+/// Knows no hash but the USA Crazy Taxi's, which it lists under the console's games, or with
+/// `every_hash` takes any hash for it.
+#[derive(Default)]
+struct OneRelease {
+    seen: Mutex<Vec<String>>,
+    every_hash: bool,
+}
+
+const USA: &str = "e0dc1587750ef747cc873230b96a50bb";
+
+impl Http for OneRelease {
+    fn send(&self, request: &HttpRequest) -> Result<(u16, Vec<u8>), String> {
+        let post = request.post.clone().unwrap_or_default();
+        self.seen.lock().unwrap().push(post.clone());
+        let r = post
+            .split('&')
+            .find_map(|kv| kv.strip_prefix("r="))
+            .unwrap_or("");
+        let body = match r {
+            "login2" => {
+                r#"{"Success":true,"User":"Benni","Token":"t0k3n","Score":10,"SoftcoreScore":2,"Messages":0,"Permissions":1,"AccountType":"Registered"}"#
+            }
+            "systemgames" => {
+                r#"{"Success":true,"Response":[{"ID":3400,"Title":"Crazy Taxi 2","NumAchievements":72,"SupportedHashes":["6861beeda49ace256e3af64cfbdce859"]},{"ID":100,"Title":"Crazy Taxi","NumAchievements":2,"SupportedHashes":["e0dc1587750ef747cc873230b96a50bb"]}]}"#
+            }
+            "achievementsets" if self.every_hash || post.contains(USA) => {
+                r#"{"Success":true,"GameId":100,"Title":"Crazy Taxi","ConsoleId":5,"ImageIconUrl":"https://media.retroachievements.org/Images/000001.png","RichPresenceGameId":100,"RichPresencePatch":"","Sets":[{"AchievementSetId":1,"GameId":100,"Title":"Crazy Taxi","Type":"core","ImageIconUrl":"https://media.retroachievements.org/Images/000001.png","Achievements":[{"ID":5001,"Title":"First","Description":"Set the byte","Flags":3,"Points":10,"MemAddr":"0xH0000=1","Author":"me","BadgeName":"00001","Created":1700000000,"Modified":1700000000}],"Leaderboards":[]}]}"#
+            }
+            "startsession" => {
+                r#"{"Success":true,"Unlocks":[],"HardcoreUnlocks":[],"ServerNow":1700000000}"#
+            }
+            _ => {
+                return Ok((
+                    404,
+                    br#"{"Success":false,"Error":"Unknown game","Code":"not_found","Status":404}"#
+                        .to_vec(),
+                ))
+            }
+        };
+        Ok((200, body.as_bytes().to_vec()))
+    }
+}
+
+#[test]
+fn an_unknown_release_gets_the_achievements_of_the_game_with_its_title_in_softcore() {
+    let fake = Arc::new(OneRelease::default());
+    let c = Cheevos::new(fake.clone()).unwrap();
+    c.set_hardcore(true);
+    c.login("Benni", "t0k3n");
+    wait(&c, |n| matches!(n, Notice::LoggedIn(_)));
+    let d = tempfile::tempdir().unwrap();
+    let rom = d.path().join("Crazy Taxi (Europe) (2000) [!].gba");
+    std::fs::write(&rom, (0..=255u8).cycle().take(1024).collect::<Vec<_>>()).unwrap();
+    c.load_game(&rom, Console::GBA);
+    let mut softcore = false;
+    let loaded = wait(&c, |n| {
+        softcore |= *n == Notice::Softcore;
+        matches!(n, Notice::GameLoaded(_))
+    });
+    assert!(softcore, "{loaded:?}");
+    let Notice::GameLoaded(Ok((summary, _))) = loaded else {
+        panic!("{loaded:?}");
+    };
+    assert!(
+        summary.starts_with("Crazy Taxi: 0 of 1 achievements"),
+        "{summary}"
+    );
+    let seen = fake.seen.lock().unwrap();
+    assert!(
+        seen.iter().any(|p| p.contains("r=systemgames&s=5")),
+        "{seen:?}"
+    );
+    // The session is softcore: hardcore's flag is off.
+    assert!(
+        seen.iter()
+            .any(|p| p.starts_with("r=startsession") && p.contains("h=0")),
+        "{seen:?}"
+    );
+}
+
+#[test]
+fn a_release_with_no_title_match_is_still_unknown_and_looked_up_once() {
+    let fake = Arc::new(OneRelease::default());
+    let c = Cheevos::new(fake.clone()).unwrap();
+    c.login("Benni", "t0k3n");
+    wait(&c, |n| matches!(n, Notice::LoggedIn(_)));
+    let d = tempfile::tempdir().unwrap();
+    let rom = d.path().join("Crazy Taxi 3 (Europe).gba");
+    std::fs::write(&rom, (0..=255u8).cycle().take(1024).collect::<Vec<_>>()).unwrap();
+    c.load_game(&rom, Console::GBA);
+    assert!(matches!(
+        wait(&c, |n| matches!(n, Notice::GameLoaded(_))),
+        Notice::GameLoaded(Err(_))
+    ));
+    let seen = fake.seen.lock().unwrap();
+    assert_eq!(
+        seen.iter().filter(|p| p.contains("r=systemgames")).count(),
+        1
+    );
+}
+
+#[test]
+fn titles_match_without_their_tags_case_or_punctuation() {
+    use slot_cheevos::{plain_title, same_title};
+    assert_eq!(
+        plain_title("Crazy Taxi (Europe) (2000) (Racing) (Dreamcast)"),
+        "crazy taxi"
+    );
+    assert_eq!(
+        plain_title("Legend of Zelda, The - A Link to the Past (USA) [!]"),
+        plain_title("Legend of Zelda, The: A Link to the Past")
+    );
+    let games: serde_json::Value = serde_json::from_str(
+        r#"{"Response":[
+            {"Title":"Crazy Taxi","NumAchievements":0,"SupportedHashes":["empty"]},
+            {"Title":"Crazy Taxi","NumAchievements":82,"SupportedHashes":["usa"]},
+            {"Title":"~Hack~ Crazy Taxi","NumAchievements":9,"SupportedHashes":["hack"]}]}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        same_title(&games, "Crazy Taxi (Europe)"),
+        Some("usa".into())
+    );
+    assert_eq!(same_title(&games, "Crazy Taxi 2 (Europe)"), None);
+}
+
+#[test]
+fn hardcore_wants_play_between_pauses() {
+    let fake = Arc::new(OneRelease {
+        every_hash: true,
+        ..Default::default()
+    });
+    let c = Cheevos::new(fake).unwrap();
+    c.set_hardcore(true);
+    c.login("Benni", "t0k3n");
+    wait(&c, |n| matches!(n, Notice::LoggedIn(_)));
+    let d = tempfile::tempdir().unwrap();
+    let rom = d.path().join("Crazy Taxi (USA).gba");
+    std::fs::write(&rom, (0..=255u8).cycle().take(1024).collect::<Vec<_>>()).unwrap();
+    c.load_game(&rom, Console::GBA);
+    assert!(matches!(
+        wait(&c, |n| matches!(n, Notice::GameLoaded(_))),
+        Notice::GameLoaded(Ok(_))
+    ));
+    assert_eq!(c.pause_wait(), 0);
+    for _ in 0..5 {
+        c.frame();
+    }
+    assert_eq!(c.pause_wait(), 15);
+    for _ in 0..15 {
+        c.frame();
+    }
+    assert_eq!(c.pause_wait(), 0);
+    c.set_hardcore(false);
+    assert_eq!(c.pause_wait(), 0);
+}

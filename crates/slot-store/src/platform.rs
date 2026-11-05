@@ -61,6 +61,8 @@ pub enum Platform {
     Pico8,
     Tic80,
     Psp,
+    /// The built-in apps and the ports in `Ports`, which slot opens itself rather than a core.
+    Apps,
 }
 
 /// How the scanner finds a game's title, and for the GBA its four-letter code, in the ROM.
@@ -695,10 +697,17 @@ const SPECS: [Spec; Platform::COUNT] = [
         rewind: false,
         ..HANDHELD
     },
+    Spec {
+        name: "Apps",
+        dir: "APPS",
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
 ];
 
 impl Platform {
-    pub const COUNT: usize = 55;
+    pub const COUNT: usize = 56;
     pub const ALL: [Platform; Platform::COUNT] = [
         Platform::Gba,
         Platform::Gb,
@@ -755,6 +764,7 @@ impl Platform {
         Platform::Pico8,
         Platform::Tic80,
         Platform::Psp,
+        Platform::Apps,
     ];
 
     pub fn spec(self) -> &'static Spec {
@@ -806,7 +816,9 @@ impl Platform {
             Some(ext) => ext,
             None => return false,
         };
-        self.extensions().iter().any(|k| ext.eq_ignore_ascii_case(k))
+        self.extensions()
+            .iter()
+            .any(|k| ext.eq_ignore_ascii_case(k))
     }
 }
 
@@ -823,7 +835,8 @@ mod tests {
 
     #[test]
     fn every_spec_is_complete() {
-        for p in Platform::ALL {
+        // The apps are opened by slot itself: no core, no files.
+        for p in Platform::ALL.into_iter().filter(|p| *p != Platform::Apps) {
             let s = p.spec();
             assert!(!s.name.is_empty() && !s.dir.is_empty(), "{p:?} has no name");
             assert!(!s.cores.is_empty(), "{p:?} has no core");

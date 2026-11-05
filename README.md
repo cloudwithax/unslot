@@ -36,13 +36,42 @@ thirteen systems, Wi-Fi and Bluetooth, analog sticks, network services and updat
 
 Everything slot does is still here: the carts, the shelves, the link cable, the in-game menu and the save handling.
 
+## Apps, artwork and screen effects
+
+The **Apps** shelf contains Files, Books, Manuals, Gallery and Music, plus scripts in `Ports/`.
+Each opens directly from its cart and returns to the shelf with B. PDF reading and video playback
+use the bundled `System/bin/mutool` and `System/bin/ffmpeg`.
+
+**Settings → Online** groups Upload from Phone, Game Art, Art While Asleep, RetroAchievements,
+Updates and core downloads. Network settings keep Wi-Fi, Bluetooth, casting and services.
+Turn on **Art While Asleep** to find missing labels during standby with Wi-Fi connected. The
+search postpones shutdown while charging or above 20% battery. The normal idle
+timeout starts again after scraping finishes.
+
+**Custom shaders:** put single-pass RetroArch `.glsl` files in `Shaders/`, or a `.glslp` preset
+with `shaders = 1`, its `shader0` file and optional `filter_linear0 = true`. Choose the file after
+the built-in effects under Settings → Screen → the system → Shader, or the in-game Screen page.
+Shader parameters use their declared defaults. Multi-pass presets and Slang shaders are not supported.
+If a shader cannot compile, the built-in effect remains available and `Logs/slot.log` records why.
+
+**Custom bezels:** place PNGs and optional `.info` files in `Bezels/<system>/`. A RetroArch `.cfg`
+can name its picture with `overlay0_overlay`; a custom viewport is used when present. This imports
+the artwork, not touch controls or multiple overlay layers. Settings → Online → Upload from Phone
+accepts bezels as well as games and wallpapers; send the PNG and any accompanying `.info` or `.cfg`.
+
+**Offline achievements:** sign in under Settings → Online → RetroAchievements and launch a game
+online once to cache its achievement definitions. Supported cores can then earn softcore achievements
+offline, including after a restart. Unsent awards remain in `Config/retroachievements/` until the
+service confirms them; reconnecting retries them. Keep that folder with your saves. Passwords are
+not saved. Games whose definitions have never been cached still need an initial connection.
+
 ## Install
 
 unslot runs on BaseOS, so it needs BaseOS on the card in TF1 first.
 
 **New card.** Flash the release's `unslot-<version>-<model>.img.zip` for your model to TF1: it is BaseOS with unslot already on it. Boot it once and it grows to fill the card. Its unslot space is ext4, which a reset mid-write cannot corrupt but Windows and macOS cannot open, so add games over File sharing or Syncthing. Or flash your model's BaseOS image yourself, boot it once, and copy the contents of a release's `unslot-<version>` folder onto its `BASEOS` volume (or onto a card in TF2), add games and restart.
 
-**Already running unslot?** Settings → Network → Updates downloads the new release's `unslot-<version>.pak` and installs it when you restart. Or copy the `.pak` to the root of the card yourself and restart with the power connected. `System/` is replaced, and your games, saves, labels and settings stay.
+**Already running unslot?** Settings → Online → Updates downloads the new release's `unslot-<version>.pak` and installs it when you restart. Or copy the `.pak` to the root of the card yourself and restart with the power connected. `System/` is replaced, and your games, saves, labels and settings stay.
 
 A `.pak` is the release's `MinUI.zip`, untouched, with its version and checksum signed by unslot's release key. unslot installs one only if the signature, version and zip all check out. Anything else is renamed `.bad`, logged in `Logs/update.log`, and never installed.
 

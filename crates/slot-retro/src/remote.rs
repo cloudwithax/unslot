@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use slot_ftrace::{self as ft, ev};
 
-use crate::core::{AvInfo, ButtonMask, CoreError, CoreOption, RetroCore, Sticks};
+use crate::core::{AvInfo, ButtonMask, CoreError, CoreOption, RetroCore, Sidecar, Sticks};
 use crate::ffi::RUMBLE_STRONG;
 use crate::rumble::Rumble;
 
@@ -36,6 +36,7 @@ const UNSERIALIZE: u8 = 5;
 const SAVE_RAM: u8 = 6;
 const LOAD_SAVE_RAM: u8 = 7;
 const OPTIONS: u8 = 8;
+const SIDECAR: u8 = 9;
 
 /// Sent by the host once its core is open, before anything else.
 const READY: u8 = 0x5a;
@@ -152,7 +153,11 @@ impl Shm {
             if grow && libc::ftruncate(fd, len as libc::off_t) != 0 {
                 return false;
             }
-            let prot = if grow { libc::PROT_WRITE } else { libc::PROT_READ };
+            let prot = if grow {
+                libc::PROT_WRITE
+            } else {
+                libc::PROT_READ
+            };
             let p = libc::mmap(std::ptr::null_mut(), len, prot, libc::MAP_SHARED, fd, 0);
             if p == libc::MAP_FAILED {
                 return false;
@@ -301,7 +306,11 @@ fn receive(from: &mut UnixStream, buf: &mut Vec<u8>) -> io::Result<()> {
 }
 
 /// As `receive`, keeping any fds sent along with the message in `fds`.
-fn receive_with(from: &mut UnixStream, buf: &mut Vec<u8>, fds: &mut Vec<OwnedFd>) -> io::Result<()> {
+fn receive_with(
+    from: &mut UnixStream,
+    buf: &mut Vec<u8>,
+    fds: &mut Vec<OwnedFd>,
+) -> io::Result<()> {
     let mut len = [0u8; 4];
     let got = receive_fds(from, &mut len, fds)?;
     from.read_exact(&mut len[got..])?;
@@ -338,8 +347,9 @@ fn get_result(i: &mut In) -> io::Result<Result<Vec<u8>, CoreError>> {
     })
 }
 
-/// Runs `core` for the `RemoteCore` at the other end of `stream` until it goes away.
-pub fn serve(mut core: Box<dyn RetroCore>, mut stream: UnixStream) {
+/// Runs `core` for the `RemoteCore` at the other end of `stream` until it goes away, with
+/// `side` answering its `sidecar` calls.
+pub fn serve(mut core: Box<dyn RetroCore>, mut stream: UnixStream, side: &mut dyn Sidecar) {
     // Without memory to share, the picture goes on the socket as before.
     let mut shm = Shm::create(c"slot-video");
     // Sent after the picture's, so there is none without it.
@@ -369,7 +379,14 @@ pub fn serve(mut core: Box<dyn RetroCore>, mut stream: UnixStream) {
         let mut video = false;
         let call = buf.first().map_or(-1, |&t| i64::from(t));
         ft::begin(ev::HOST_ANSWER, call);
-        let answered = answer(core.as_mut(), &buf, &mut out, &mut video, state.as_mut());
+        let answered = answer(
+            core.as_mut(),
+            &buf,
+            &mut out,
+            &mut video,
+            state.as_mut(),
+            side,
+        );
         ft::end(ev::HOST_ANSWER, call);
         if let Err(e) = answered {
             eprintln!("slot: core host: {e}");
@@ -393,6 +410,7 @@ fn answer(
     out: &mut Out,
     video: &mut bool,
     state: Option<&mut Shm>,
+    side: &mut dyn Sidecar,
 ) -> io::Result<()> {
     let mut i = In(msg);
     let r = match i.u8()? {
@@ -447,6 +465,7 @@ fn answer(
             }
             Ok(list.0)
         }
+        SIDECAR => Ok(side.call(core, i.bytes()?)),
         t => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -522,7 +541,11 @@ fn put_picture(core: &mut dyn RetroCore, out: &mut Out, video: bool, shm: Option
     let shared = shm.and_then(|s| video.then(|| s.put(picture).map(|at| (at, s.len)))?);
     match shared {
         _ if !video => out.u8(0),
-        Some((at, len)) => out.u8(2).u32(picture.len() as u32).u32(len as u32).u32(at as u32),
+        Some((at, len)) => out
+            .u8(2)
+            .u32(picture.len() as u32)
+            .u32(len as u32)
+            .u32(at as u32),
         None => out.u8(1).bytes(picture),
     };
 }
@@ -790,6 +813,10 @@ impl RetroCore for RemoteCore {
         );
     }
 
+    fn sidecar(&mut self, msg: &[u8]) -> Option<Vec<u8>> {
+        self.call_mut(Out::default().u8(SIDECAR).bytes(msg)).ok()
+    }
+
     fn core_options(&self) -> Vec<CoreOption> {
         let Ok(reply) = self.call_ref(Out::default().u8(OPTIONS)) else {
             return Vec::new();
@@ -946,9 +973,18 @@ mod tests {
         pair_with(Box::new(MockCore::new()))
     }
 
+    /// Answers a sidecar call with the call backwards.
+    struct Echo;
+
+    impl Sidecar for Echo {
+        fn call(&mut self, _core: &mut dyn RetroCore, msg: &[u8]) -> Vec<u8> {
+            msg.iter().rev().copied().collect()
+        }
+    }
+
     fn pair_with(core: Box<dyn RetroCore>) -> RemoteCore {
         let (ours, theirs) = UnixStream::pair().unwrap();
-        std::thread::spawn(move || serve(core, theirs));
+        std::thread::spawn(move || serve(core, theirs, &mut Echo));
         let child = std::process::Command::new("true").spawn().unwrap();
         RemoteCore::new(child, ours).unwrap()
     }
@@ -1029,6 +1065,15 @@ mod tests {
     }
 
     #[test]
+    fn a_sidecar_call_reaches_the_host_and_a_local_core_has_none() {
+        let mut remote = pair();
+        remote.run_frame(ButtonMask::default());
+        assert_eq!(remote.sidecar(&[1, 2, 3]), Some(vec![3, 2, 1]));
+        assert_eq!(remote.sidecar(&[]), Some(vec![]));
+        assert_eq!(MockCore::new().sidecar(&[1]), None);
+    }
+
+    #[test]
     fn a_remote_core_gives_what_the_core_does() {
         let mut local = MockCore::new();
         let mut remote = pair();
@@ -1038,7 +1083,10 @@ mod tests {
         }
         assert_eq!(remote.video_size(), local.video_size());
         assert_eq!(remote.video_xrgb8888(), local.video_xrgb8888());
-        assert!(remote.shm_video.is_some(), "the picture came through shared memory");
+        assert!(
+            remote.shm_video.is_some(),
+            "the picture came through shared memory"
+        );
         assert_eq!(remote.take_audio(), local.take_audio());
         assert_eq!(remote.av_info(), local.av_info());
         let state = remote.serialize().unwrap();
@@ -1061,12 +1109,20 @@ mod tests {
             local.run_frame(ButtonMask::default());
             remote.run_frame_overlapped(ButtonMask::default());
         }
-        assert_eq!(remote.video_xrgb8888(), shown[2], "the frame before's picture");
+        assert_eq!(
+            remote.video_xrgb8888(),
+            shown[2],
+            "the frame before's picture"
+        );
         assert_ne!(shown[1], shown[2]);
         // A call that can't take up the state reads the answer owed and keeps it for the next.
         assert_eq!(remote.save_ram(), local.save_ram());
         let state = remote.serialize().unwrap();
-        assert_eq!(state, local.serialize().unwrap(), "every frame ran before the call");
+        assert_eq!(
+            state,
+            local.serialize().unwrap(),
+            "every frame ran before the call"
+        );
         assert_eq!(remote.video_xrgb8888(), local.video_xrgb8888());
         assert_eq!(remote.take_audio(), local.take_audio());
     }

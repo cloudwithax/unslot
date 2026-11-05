@@ -68,14 +68,18 @@ pub enum QuickRow {
     Cores,
     /// Whether the downloaded cores update themselves once the Wi-Fi is up.
     AutoCores,
+    /// What goes over the internet: uploads, updates, cores, art and achievements.
+    Online,
+    /// Whether missing labels are looked for while the lid is shut and the Wi-Fi is up.
+    ArtAsleep,
     /// A page a phone opens to send a wallpaper or a game.
     Upload,
-    /// The built-in apps and the ports.
-    Apps,
     /// Labels for the card's games, found online.
     GameArt,
     /// Signing in to RetroAchievements, or out.
     Achievements,
+    /// Whether RetroAchievements runs in hardcore.
+    Hardcore,
     /// Restart, Shut Down and Reload unslot.
     Power,
     Restart,
@@ -90,7 +94,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 54] = [
+const GENERIC: [QuickRow; 56] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -144,7 +148,9 @@ const GENERIC: [QuickRow; 54] = [
     QuickRow::Controls,
     QuickRow::AutoCores,
     QuickRow::Upload,
-    QuickRow::Apps,
+    QuickRow::Online,
+    QuickRow::ArtAsleep,
+    QuickRow::Hardcore,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -207,6 +213,7 @@ const SCREEN_ORDER: [Platform; Platform::COUNT] = [
     Platform::Pico8,
     Platform::Tic80,
     Platform::Psp,
+    Platform::Apps,
 ];
 
 impl QuickRow {
@@ -237,27 +244,31 @@ impl QuickRow {
         QuickRow::General,
         QuickRow::Screen,
         QuickRow::Game,
-        QuickRow::Apps,
         QuickRow::Network,
+        QuickRow::Online,
         QuickRow::Power,
         QuickRow::About,
     ];
 
     pub const POWER: [QuickRow; 3] = [QuickRow::Restart, QuickRow::ShutDown, QuickRow::Reload];
 
-    pub const NETWORK: [QuickRow; 12] = [
+    pub const NETWORK: [QuickRow; 6] = [
         QuickRow::Wifi,
         QuickRow::WifiNetworks,
         QuickRow::Bluetooth,
         QuickRow::BtDevices,
         QuickRow::Cast,
-        QuickRow::Upload,
         QuickRow::Services,
+    ];
+
+    pub const ONLINE: [QuickRow; 7] = [
+        QuickRow::Upload,
+        QuickRow::GameArt,
+        QuickRow::ArtAsleep,
+        QuickRow::Achievements,
         QuickRow::Updates,
         QuickRow::Cores,
         QuickRow::AutoCores,
-        QuickRow::GameArt,
-        QuickRow::Achievements,
     ];
 
     pub const GENERAL: [QuickRow; 10] = [
@@ -273,7 +284,7 @@ impl QuickRow {
         QuickRow::TvSound,
     ];
 
-    pub const GAME: [QuickRow; 10] = [
+    pub const GAME: [QuickRow; 11] = [
         QuickRow::Disc,
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
@@ -284,6 +295,7 @@ impl QuickRow {
         QuickRow::DpadStick,
         QuickRow::Controls,
         QuickRow::EjectSave,
+        QuickRow::Hardcore,
     ];
 
     pub const PLAY: [QuickRow; 5] = [
@@ -303,9 +315,13 @@ impl QuickRow {
         QuickRow::Bezel,
     ];
 
-    /// The Screen page: one row for each platform.
+    /// The Screen page: one row for each platform a core runs, which leaves out Apps.
     pub fn screen_page() -> Vec<QuickRow> {
-        SCREEN_ORDER.map(QuickRow::ScreenOf).to_vec()
+        SCREEN_ORDER
+            .into_iter()
+            .filter(|p| *p != Platform::Apps)
+            .map(QuickRow::ScreenOf)
+            .collect()
     }
 
     /// A platform's page under Screen.
@@ -366,7 +382,8 @@ impl QuickRow {
             | QuickRow::Rumble
             | QuickRow::DpadStick
             | QuickRow::Controls
-            | QuickRow::EjectSave => QuickRow::GAME.to_vec(),
+            | QuickRow::EjectSave
+            | QuickRow::Hardcore => QuickRow::GAME.to_vec(),
             QuickRow::Wallpaper
             | QuickRow::WallpaperTint
             | QuickRow::DateTime
@@ -388,13 +405,14 @@ impl QuickRow {
             | QuickRow::Bluetooth
             | QuickRow::BtDevices
             | QuickRow::Cast
-            | QuickRow::Upload
-            | QuickRow::Services
+            | QuickRow::Services => QuickRow::NETWORK.to_vec(),
+            QuickRow::Upload
+            | QuickRow::GameArt
+            | QuickRow::ArtAsleep
+            | QuickRow::Achievements
             | QuickRow::Updates
             | QuickRow::Cores
-            | QuickRow::AutoCores
-            | QuickRow::GameArt
-            | QuickRow::Achievements => QuickRow::NETWORK.to_vec(),
+            | QuickRow::AutoCores => QuickRow::ONLINE.to_vec(),
             QuickRow::Restart | QuickRow::ShutDown | QuickRow::Reload => QuickRow::POWER.to_vec(),
             QuickRow::Shader | QuickRow::ColourCorrection | QuickRow::Palette | QuickRow::Bezel => {
                 QuickRow::PLAY_SCREEN.to_vec()
@@ -409,6 +427,7 @@ impl QuickRow {
             QuickRow::ShaderOf(p) => Some(QuickRow::ScreenOf(p)),
             QuickRow::Disc => Some(QuickRow::Game),
             QuickRow::Wifi => Some(QuickRow::Network),
+            QuickRow::Upload => Some(QuickRow::Online),
             QuickRow::Restart => Some(QuickRow::Power),
             QuickRow::Wallpaper => Some(QuickRow::General),
             QuickRow::PlayScreen => Some(QuickRow::Settings),
@@ -442,6 +461,7 @@ impl QuickRow {
             QuickRow::PlayScreen => Some(QuickRow::PLAY_SCREEN[0]),
             QuickRow::PlayGameplay => Some(QuickRow::GAME[0]),
             QuickRow::Network => Some(QuickRow::NETWORK[0]),
+            QuickRow::Online => Some(QuickRow::ONLINE[0]),
             QuickRow::Power => Some(QuickRow::POWER[0]),
             QuickRow::ScreenOf(p) => Some(QuickRow::screen_of(p)[0]),
             _ => None,
@@ -510,10 +530,12 @@ impl QuickRow {
             QuickRow::Updates => "Updates",
             QuickRow::Cores => "Cores",
             QuickRow::AutoCores => "Auto-Update Cores",
+            QuickRow::Online => "Online",
+            QuickRow::ArtAsleep => "Art While Asleep",
             QuickRow::Upload => "Upload from Phone",
-            QuickRow::Apps => "Apps",
             QuickRow::GameArt => "Game Art",
             QuickRow::Achievements => "RetroAchievements",
+            QuickRow::Hardcore => "Hardcore Achievements",
             QuickRow::Power => "Power",
             QuickRow::Restart => "Restart",
             QuickRow::ShutDown => "Shut Down",
@@ -538,11 +560,11 @@ impl QuickRow {
                 | QuickRow::PlayGameplay
                 | QuickRow::ScreenOf(_)
                 | QuickRow::Network
+                | QuickRow::Online
                 | QuickRow::WifiNetworks
                 | QuickRow::BtDevices
                 | QuickRow::Cast
                 | QuickRow::Upload
-                | QuickRow::Apps
                 | QuickRow::PlayCast
                 | QuickRow::Services
                 | QuickRow::Updates
@@ -691,7 +713,11 @@ impl QuickValue {
     }
 
     pub fn flag(on: bool) -> QuickValue {
-        if on { QuickValue::On } else { QuickValue::Off }
+        if on {
+            QuickValue::On
+        } else {
+            QuickValue::Off
+        }
     }
 }
 
@@ -923,6 +949,9 @@ pub struct QuickMenu<'a> {
     /// Each platform's bezel name, for its page under Screen.
     pub bezels: [Option<[(TexId, u32, u32); 2]>; Platform::COUNT],
     pub bezel: Option<[(TexId, u32, u32); 2]>,
+    /// Each platform's shader file name, for its page under Screen, while it has one.
+    pub shaders: [Option<[(TexId, u32, u32); 2]>; Platform::COUNT],
+    pub shader: Option<[(TexId, u32, u32); 2]>,
     pub over_game: bool,
     /// The carousel footer carries the legends, so the centred pair is not drawn.
     pub footer_legends: bool,
@@ -991,6 +1020,10 @@ impl QuickMenu<'_> {
                 QuickRow::Palette => self.palette.map(|c| c[lit as usize]),
                 QuickRow::BezelOf(p) => self.bezels[p.index()].map(|c| c[lit as usize]),
                 QuickRow::Bezel => self.bezel.map(|c| c[lit as usize]),
+                QuickRow::ShaderOf(p) if self.shaders[p.index()].is_some() => {
+                    self.shaders[p.index()].map(|c| c[lit as usize])
+                }
+                QuickRow::Shader if self.shader.is_some() => self.shader.map(|c| c[lit as usize]),
                 _ => self.values[row.index()]
                     .and_then(|v| faces.values.get(v.index()))
                     .map(|v| v[lit as usize]),

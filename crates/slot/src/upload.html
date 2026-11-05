@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#141417">
+<title>Send to unslot.</title>
+<style>
+:root{color-scheme:dark;--ground:#141417;--housing:#1d1d22;--recess:#0d0d10;--edge:#34343d;--edge-hi:#4d4d57;--ink:#f4f5f8;--muted:#b3b4c1;--faint:#8a8b99;--red:#e8473f;--red-hi:#ff5f56;--red-ink:#fff4f2;--plastic:#c2c6cc;--plastic-hi:#e9ecf0;--ok:#5fcf7a;--ease:cubic-bezier(.16,1,.3,1);--gutter:clamp(16px,4vw,40px)}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(120% 60% at 50% 0%,#e8473f14,transparent 60%),var(--ground);color:var(--ink);font:400 17px/1.65 "Open Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+::selection{background:var(--red);color:var(--red-ink)}
+.mast{position:sticky;top:0;z-index:5;height:60px;display:flex;align-items:center;padding:0 var(--gutter);background:color-mix(in srgb,var(--ground) 72%,transparent);-webkit-backdrop-filter:blur(14px) saturate(1.3);backdrop-filter:blur(14px) saturate(1.3);border-bottom:1px solid color-mix(in srgb,var(--edge) 60%,transparent)}
+.mast svg{height:22px;width:auto;display:block}
+main{max-width:620px;margin:0 auto;padding:clamp(28px,6vh,56px) var(--gutter) 64px}
+.eyebrow{font:800 .72rem/1 "Open Sans",sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--red);margin:0 0 12px}
+h1{margin:0;font-size:clamp(2rem,8vw,2.8rem);line-height:1.02;letter-spacing:-.04em}
+.lede{color:var(--muted);margin:12px 0 28px}
+.label{display:block;font:800 .7rem/1 "Open Sans",sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin:22px 0 10px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{appearance:none;cursor:pointer;height:38px;padding:0 16px;border-radius:999px;border:1px solid var(--edge);background:none;color:var(--muted);font:800 .72rem/1 "Open Sans",sans-serif;letter-spacing:.13em;text-transform:uppercase;transition:background-color .2s,color .2s,border-color .2s}
+.chip:hover{color:var(--ink);border-color:var(--edge-hi)}
+.chip[aria-pressed=true]{background:var(--ink);color:var(--ground);border-color:var(--ink)}
+.chip:focus-visible,.btn:focus-visible,select:focus-visible,.drop:focus-within{outline:2px solid var(--red);outline-offset:3px}
+.select{position:relative}
+.select::after{content:"";position:absolute;right:18px;top:50%;width:8px;height:8px;border:solid var(--muted);border-width:0 2px 2px 0;transform:translateY(-70%) rotate(45deg);pointer-events:none}
+select{appearance:none;-webkit-appearance:none;width:100%;height:50px;padding:0 44px 0 18px;border-radius:12px;border:1px solid var(--edge);background:var(--recess);color:var(--ink);font:600 1rem/1 "Open Sans",sans-serif}
+.drop{position:relative;display:grid;place-content:center;justify-items:center;text-align:center;gap:6px;min-height:150px;padding:24px;border-radius:16px;border:1.5px dashed var(--edge-hi);background:var(--housing);box-shadow:inset 0 2px 10px #0006;transition:border-color .2s,background-color .2s;cursor:pointer}
+.drop.over{border-color:var(--red);background:#e8473f10}
+.drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.drop b{font-size:1.05rem}
+.drop small{color:var(--faint);font-size:.88rem}
+.hint{color:var(--faint);font-size:.88rem;margin:10px 2px 0}
+.btn{appearance:none;border:0;cursor:pointer;width:100%;margin-top:24px;min-height:52px;border-radius:999px;background:var(--red);color:var(--red-ink);font:800 .92rem/1 "Open Sans",sans-serif;letter-spacing:.09em;text-transform:uppercase;box-shadow:inset 0 1px #ffffff47,inset 0 -2px #00000038,0 6px 18px -6px #e8473f99,0 2px 4px #0006;transition:transform .35s var(--ease),background-color .2s}
+.btn:hover{background:var(--red-hi);transform:translateY(-1px)}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.45;cursor:default;transform:none}
+#log{list-style:none;margin:28px 0 0;padding:0;border-top:1px solid var(--edge)}
+#log li{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:12px 2px;border-bottom:1px solid color-mix(in srgb,var(--edge) 55%,transparent);font-size:.94rem}
+#log .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#log .state{color:var(--muted);font-variant-numeric:tabular-nums}
+#log .ok .state{color:var(--ok)}
+#log .bad .state{color:var(--red-hi)}
+#log .bar{grid-column:1/-1;height:4px;border-radius:2px;background:var(--recess);overflow:hidden}
+#log .bar i{display:block;height:100%;width:0;background:var(--red);transition:width .2s}
+#log .ok .bar i{background:var(--ok)}
+</style></head>
+<body>
+<header class="mast" aria-label="unslot.">{BRAND}</header>
+<main>
+<p class="eyebrow">Upload from Phone</p>
+<h1>Send it to your handheld.</h1>
+<p class="lede">Games go on their system's shelf, bezels go on the system's Bezel list and the wallpaper changes as soon as it lands.</p>
+
+<span class="label" id="kind-label">What are you sending?</span>
+<div class="chips" role="group" aria-labelledby="kind-label">
+<button class="chip" type="button" data-kind="game" aria-pressed="true">Game</button>
+<button class="chip" type="button" data-kind="bezel" aria-pressed="false">Bezel</button>
+<button class="chip" type="button" data-kind="wallpaper" aria-pressed="false">Wallpaper</button>
+</div>
+
+<div id="system-field">
+<label class="label" for="system">System</label>
+<div class="select"><select id="system">{SYSTEMS}</select></div>
+</div>
+
+<span class="label">Files</span>
+<label class="drop" id="drop">
+<input id="files" type="file" multiple>
+<b id="drop-title">Choose files</b>
+<small id="drop-note">or drop them here</small>
+</label>
+<p class="hint" id="hint"></p>
+
+<button class="btn" id="go" type="button" disabled>Send</button>
+<ul id="log" aria-live="polite"></ul>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const hints={
+ game:"Unzip games first, except arcade, Neo Geo and CPS sets, and DOS and Amiga games packed that way.",
+ bezel:"A PNG the size of the screen, with a clear window for the game. Send its .info too if it has one, or a RetroArch overlay's .cfg with its PNG.",
+ wallpaper:"A PNG or a JPEG. It becomes the wallpaper as soon as it arrives."
+};
+const accept={game:"",bezel:".png,.info,.cfg",wallpaper:".png,.jpg,.jpeg"};
+let kind="game";
+function pick(k){
+ kind=k;
+ document.querySelectorAll(".chip").forEach(c=>c.setAttribute("aria-pressed",c.dataset.kind===k));
+ $("system-field").hidden=k==="wallpaper";
+ $("files").accept=accept[k];
+ $("hint").textContent=hints[k];
+}
+document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>pick(c.dataset.kind));
+pick("game");
+function chosen(){
+ const n=$("files").files.length;
+ $("drop-title").textContent=n?n+(n===1?" file chosen":" files chosen"):"Choose files";
+ $("drop-note").textContent=n?[...$("files").files].map(f=>f.name).join(", "):"or drop them here";
+ $("go").disabled=!n;
+}
+$("files").onchange=chosen;
+const drop=$("drop");
+["dragenter","dragover"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add("over")}));
+["dragleave","drop"].forEach(e=>drop.addEventListener(e,()=>drop.classList.remove("over")));
+drop.addEventListener("drop",ev=>{ev.preventDefault();$("files").files=ev.dataTransfer.files;chosen()});
+function row(name){
+ const li=document.createElement("li");
+ li.innerHTML='<span class="name"></span><span class="state">Waiting</span><span class="bar"><i></i></span>';
+ li.querySelector(".name").textContent=name;
+ $("log").prepend(li);
+ return li;
+}
+function send(file,to,li){
+ return new Promise(done=>{
+  const x=new XMLHttpRequest();
+  x.open("PUT","/upload?to="+encodeURIComponent(to)+"&name="+encodeURIComponent(file.name));
+  x.upload.onprogress=e=>{if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);li.querySelector("i").style.width=p+"%";li.querySelector(".state").textContent=p+"%"}};
+  x.onload=()=>{const ok=x.status===200;li.classList.add(ok?"ok":"bad");li.querySelector("i").style.width="100%";li.querySelector(".state").textContent=x.responseText||x.status;done()};
+  x.onerror=()=>{li.classList.add("bad");li.querySelector(".state").textContent="Could not reach the handheld";done()};
+  x.send(file);
+ });
+}
+$("go").onclick=async()=>{
+ const sys=$("system").value;
+ const to=kind==="wallpaper"?"{WALLPAPER}":kind==="bezel"?"{BEZEL}"+sys:sys;
+ const files=[...$("files").files];
+ $("go").disabled=true;
+ const rows=files.map(f=>row(f.name));
+ for(let i=0;i<files.length;i++)await send(files[i],to,rows[i]);
+ $("files").value="";chosen();
+};
+</script>
+</body></html>

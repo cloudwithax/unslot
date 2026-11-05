@@ -20,6 +20,8 @@ const MARGIN: f32 = 16.0;
 
 pub const LEGEND: [(&str, &str); 3] = [("B", "Back"), ("Y", "Delete"), ("A", "Load")];
 const WAYS_OUT: usize = 2;
+/// Where "A Load" is in LEGEND.
+const LOAD: usize = 2;
 const UNDO_KEY: &str = "X";
 
 pub struct PhotoFace {
@@ -51,6 +53,7 @@ pub struct Polaroids {
     title: Option<TexId>,
     hint_faces: Vec<TexId>,
     undo: Option<String>,
+    loads: bool,
 }
 
 impl Polaroids {
@@ -62,6 +65,7 @@ impl Polaroids {
             title: None,
             hint_faces: Vec::new(),
             undo: None,
+            loads: true,
         }
     }
 
@@ -81,8 +85,16 @@ impl Polaroids {
         self.undo = label.map(str::to_string);
     }
 
+    /// Whether a state may be loaded, so the legend offers it; not in hardcore.
+    pub fn set_loads(&mut self, loads: bool) {
+        self.loads = loads;
+    }
+
     pub fn hints(&self) -> Vec<Hint> {
         let mut out = hint_row(&LEGEND);
+        if !self.loads {
+            out.remove(LOAD);
+        }
         if let Some(label) = &self.undo {
             out.push(Hint {
                 key: UNDO_KEY,
@@ -202,13 +214,15 @@ impl Polaroids {
             .map(|h| hint_width(h.key, &h.label) as f32)
             .collect();
         let tail = &widths[WAYS_OUT..];
-        let tail_w = tail.iter().sum::<f32>() + HINT_GAP * (tail.len() - 1) as f32;
+        let tail_w = tail.iter().sum::<f32>() + HINT_GAP * tail.len().saturating_sub(1) as f32;
         let mut x = MARGIN;
         for (i, w) in widths.iter().enumerate() {
             if i == WAYS_OUT {
                 x = OUT_W as f32 - MARGIN - tail_w;
             }
-            out.push(hint_quad(x, y, *w, self.hint_faces.get(i).copied()));
+            // The faces are LEGEND's and the undo's, in order, Load's among them.
+            let face = if !self.loads && i >= LOAD { i + 1 } else { i };
+            out.push(hint_quad(x, y, *w, self.hint_faces.get(face).copied()));
             x += w + HINT_GAP;
         }
         self.draw_dots(top, out);

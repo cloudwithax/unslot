@@ -213,6 +213,10 @@ impl Compositor {
         self.game.set_effect(effect);
     }
 
+    pub fn set_custom_shader(&mut self, src: Option<&str>, linear: bool) -> Result<(), GfxError> {
+        self.game.set_custom_shader(src, linear)
+    }
+
     pub fn set_picture(&mut self, rect: [f32; 4]) {
         self.game.set_picture(rect);
     }
@@ -715,21 +719,33 @@ fn bottom_up_texture(w: u32, h: u32, rgba: &[u8]) -> gl::types::GLuint {
     )
 }
 
+pub type PixelRect = (i32, i32, i32, i32);
+
 /// An overlay `size` big fitted whole in `canvas` and centred, and the game's `window` in it, as
 /// x, y, w, h in GL's pixels, which count up from the bottom.
 pub fn overlay_rects(
     canvas: (u32, u32),
     size: (u32, u32),
     window: [f32; 4],
-) -> ((i32, i32, i32, i32), (i32, i32, i32, i32)) {
+) -> (PixelRect, PixelRect) {
     let scale = (canvas.0 as f32 / size.0 as f32).min(canvas.1 as f32 / size.1 as f32);
     let (w, h) = (size.0 as f32 * scale, size.1 as f32 * scale);
     let (x, top) = ((canvas.0 as f32 - w) / 2.0, (canvas.1 as f32 - h) / 2.0);
     let up = |top: f32, h: f32| (canvas.1 as f32 - top - h).round() as i32;
-    let whole = (x.round() as i32, up(top, h), w.round() as i32, h.round() as i32);
+    let whole = (
+        x.round() as i32,
+        up(top, h),
+        w.round() as i32,
+        h.round() as i32,
+    );
     let (gx, gtop) = (x + window[0] * scale, top + window[1] * scale);
     let (gw, gh) = (window[2] * scale, window[3] * scale);
-    let game = (gx.round() as i32, up(gtop, gh), gw.round() as i32, gh.round() as i32);
+    let game = (
+        gx.round() as i32,
+        up(gtop, gh),
+        gw.round() as i32,
+        gh.round() as i32,
+    );
     (whole, game)
 }
 

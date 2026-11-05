@@ -1,5 +1,6 @@
 mod bezel;
 pub mod cast_tap;
+mod custom;
 mod draw;
 mod fbdev;
 mod fbo;

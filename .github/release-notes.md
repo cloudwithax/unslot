@@ -1,3 +1,11 @@
+## Changes
+
+- Hardcore achievements: no save states, no rewind, no cheats. Toggle it in Settings → Gameplay.
+- Region fallback: a disc or ROM whose hash RA doesn't know loads the achievement set of the same game from another region, in softcore.
+- Hardcore pause limiting, same rule as RetroArch: rapid re-pauses are refused until enough frames have played.
+- The states page hides Load in hardcore.
+- RetroAchievements now accepts hardcore unlocks from unslot (identified as a libretro frontend).
+
 ## New card: flash the image
 
 The `.img.zip` files are images of a whole card: BaseOS, the small Linux these handhelds start from, with unslot already set up on it. **Flashing one erases everything on the card.**
@@ -24,7 +32,7 @@ The `.img.zip` files are images of a whole card: BaseOS, the small Linux these h
 
 ## Already running unslot
 
-Settings → Network → Updates downloads `unslot-$TAG.pak` and installs it when you restart. Or copy `unslot-$TAG.pak` to the root of the card yourself and restart with the power connected. unslot installs it only if it is a signed unslot release; your games, saves and settings stay.
+Settings → Online → Updates downloads `unslot-$TAG.pak` and installs it when you restart. Or copy `unslot-$TAG.pak` to the root of the card yourself and restart with the power connected. unslot installs it only if it is a signed unslot release; your games, saves and settings stay.
 
 ## Already running BaseOS, or slot
 

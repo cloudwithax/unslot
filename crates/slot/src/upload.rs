@@ -1,5 +1,5 @@
 //! A page a phone on the same Wi-Fi opens, from the code on the Upload page, to send the card a
-//! wallpaper or a game. Up only while the Upload page is open.
+//! game, a bezel or a wallpaper. Up only while the Upload page is open.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
@@ -15,6 +15,9 @@ use slot_store::Platform;
 pub const PORT: u16 = 8080;
 const WALLPAPER: &str = "wallpaper";
 const WALLPAPER_MAX: u64 = 64 << 20;
+/// `to` for a bezel: this, then the system's folder, as `bezel:GBA`.
+const BEZEL: &str = "bezel:";
+const BEZEL_MAX: u64 = 32 << 20;
 
 /// A file that has come in whole.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -23,6 +26,9 @@ pub enum Landed {
     Wallpaper(String),
     /// In the system's games folder, by its name.
     Game(Platform, String),
+    /// In the system's folder in `bezel::GAME_BEZELS`, by its name: a PNG, or the `.info`
+    /// beside one that says where its window is.
+    Bezel(Platform, String),
 }
 
 pub struct Upload {
@@ -153,6 +159,23 @@ pub fn place(
         let dest = root.join(crate::wallpaper::OWN).join(name);
         return Ok((dest, Landed::Wallpaper(name.to_string())));
     }
+    if let Some(system) = to.strip_prefix(BEZEL) {
+        let platform = Platform::from_key(system).ok_or("No such system")?;
+        if !["png", "info", "cfg"]
+            .iter()
+            .any(|x| ext.eq_ignore_ascii_case(x))
+        {
+            return Err("A bezel is a PNG, with its .info, or a RetroArch overlay's .cfg");
+        }
+        if length > BEZEL_MAX {
+            return Err("That bezel is too big");
+        }
+        let dest = root
+            .join(crate::bezel::GAME_BEZELS)
+            .join(platform.dir_name())
+            .join(name);
+        return Ok((dest, Landed::Bezel(platform, name.to_string())));
+    }
     let platform = Platform::from_key(to).ok_or("No such system")?;
     if !platform.accepts(Path::new(name)) {
         return Err("That system does not take that kind of file");
@@ -236,29 +259,95 @@ pub fn decode(text: &str) -> String {
 fn page() -> String {
     let systems: String = Platform::ALL
         .iter()
+        .filter(|p| **p != Platform::Apps)
         .map(|p| format!("<option value=\"{}\">{}</option>", p.dir_name(), p.name()))
         .collect();
-    format!(
-        r#"<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>unslot</title><style>
-body{{font:17px system-ui,sans-serif;max-width:32em;margin:2em auto;padding:0 1em;background:#111;color:#eee}}
-select,input,button{{font:inherit;width:100%;margin:.4em 0;padding:.6em;box-sizing:border-box}}
-#log div{{margin:.3em 0}}</style></head><body>
-<h2>Send to unslot</h2>
-<label>As<select id="to"><option value="{WALLPAPER}">Wallpaper</option>
-<optgroup label="Game for">{systems}</optgroup></select></label>
-<input id="files" type="file" multiple>
-<button id="go">Send</button><div id="log"></div>
-<script>
-const log=t=>{{const d=document.createElement('div');d.textContent=t;document.getElementById('log').prepend(d);return d}};
-document.getElementById('go').onclick=async()=>{{
- const to=document.getElementById('to').value;
- for(const f of document.getElementById('files').files){{
-  const line=log(f.name+': sending…');
-  try{{const r=await fetch('/upload?to='+encodeURIComponent(to)+'&name='+encodeURIComponent(f.name),{{method:'PUT',body:f}});
-   line.textContent=f.name+': '+await r.text()}}catch(e){{line.textContent=f.name+': '+e}}
- }}
-}};
-</script></body></html>"#
-    )
+    PAGE.replace("{BRAND}", BRAND)
+        .replace("{SYSTEMS}", &systems)
+        .replace("{WALLPAPER}", WALLPAPER)
+        .replace("{BEZEL}", BEZEL)
+}
+
+/// The page, in the look of unslot.clxud.dev: its colours, its type and its rounded tabs.
+/// Everything is inline, as the phone may have no way out to the internet.
+const PAGE: &str = include_str!("upload.html");
+const BRAND: &str = include_str!("../../../assets/brand/unslot-dark.svg");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bezel_goes_in_its_systems_folder() {
+        let root = Path::new("/card");
+        let (dest, landed) = place(root, "bezel:GBA", "Frame.png", 1000).unwrap();
+        assert_eq!(dest, root.join("Bezels/GBA/Frame.png"));
+        assert_eq!(landed, Landed::Bezel(Platform::Gba, "Frame.png".into()));
+        let (dest, _) = place(root, "bezel:GBA", "Frame.info", 100).unwrap();
+        assert_eq!(dest, root.join("Bezels/GBA/Frame.info"));
+        let (dest, _) = place(root, "bezel:GBA", "Overlay.cfg", 100).unwrap();
+        assert_eq!(dest, root.join("Bezels/GBA/Overlay.cfg"));
+    }
+
+    #[test]
+    fn a_bezel_must_be_a_png_for_a_real_system_and_not_too_big() {
+        let root = Path::new("/card");
+        assert!(place(root, "bezel:GBA", "frame.jpg", 10).is_err());
+        assert!(place(root, "bezel:NOPE", "frame.png", 10).is_err());
+        assert!(place(root, "bezel:GBA", "frame.png", BEZEL_MAX + 1).is_err());
+        assert!(place(root, "bezel:GBA", "../frame.png", 10).is_err());
+        assert!(place(root, "bezel:GBA", ".frame.png", 10).is_err());
+    }
+
+    #[test]
+    fn wallpapers_and_games_still_land_where_they_did() {
+        let root = Path::new("/card");
+        let (dest, _) = place(root, WALLPAPER, "sky.jpg", 10).unwrap();
+        assert_eq!(dest, root.join(crate::wallpaper::OWN).join("sky.jpg"));
+        let (dest, landed) = place(root, "GBA", "game.gba", 10).unwrap();
+        assert_eq!(dest, root.join("Games/GBA/game.gba"));
+        assert_eq!(landed, Landed::Game(Platform::Gba, "game.gba".into()));
+    }
+
+    #[test]
+    fn the_page_offers_every_system_and_every_kind() {
+        let page = page();
+        assert!(!page.contains("{SYSTEMS}") && !page.contains("{BEZEL}"));
+        assert!(page.contains("value=\"GBA\""));
+        assert!(page.contains(BEZEL) && page.contains(WALLPAPER));
+        // Nothing is fetched from elsewhere.
+        assert!(!page.contains("https://"));
+    }
+
+    #[test]
+    fn a_bezel_sent_over_http_lands_whole() {
+        let d = tempfile::tempdir().unwrap();
+        let up = Upload::start(d.path()).unwrap();
+        let png = b"\x89PNG fake bezel bytes";
+        let mut s = TcpStream::connect((Ipv4Addr::LOCALHOST, up.port)).unwrap();
+        write!(
+            s,
+            "PUT /upload?to=bezel%3AGBA&name=My%20Frame.png HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+            png.len()
+        )
+        .unwrap();
+        s.write_all(png).unwrap();
+        let mut answer = String::new();
+        s.read_to_string(&mut answer).unwrap();
+        assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
+        let got = std::fs::read(d.path().join("Bezels/GBA/My Frame.png")).unwrap();
+        assert_eq!(got, png);
+        let mut landed = Vec::new();
+        for _ in 0..50 {
+            landed.extend(up.landed());
+            if !landed.is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            landed,
+            [Landed::Bezel(Platform::Gba, "My Frame.png".into())]
+        );
+    }
 }

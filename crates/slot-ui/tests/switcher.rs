@@ -160,6 +160,15 @@ fn the_undo_hint_names_its_button_and_only_shows_when_offered() {
 }
 
 #[test]
+fn with_loading_refused_the_legend_offers_no_load() {
+    let mut p = switcher_with(2);
+    p.set_loads(false);
+    let out = draw(&p);
+    assert!(!has_hint(&p, &out, "A"), "load offered in hardcore");
+    assert!(has_hint(&p, &out, "Y"), "delete went with load");
+}
+
+#[test]
 fn the_legend_runs_left_to_right_along_the_bottom_plate() {
     let mut p = switcher_with(2);
     p.set_undo(Some("Undo save"));

@@ -346,7 +346,11 @@ impl Gestures {
         let held = self.power_hold_fired;
         self.power_down_at = None;
         self.power_hold_fired = false;
-        vec![if held { Action::PowerOff } else { Action::PowerTap }]
+        vec![if held {
+            Action::PowerOff
+        } else {
+            Action::PowerTap
+        }]
     }
 
     fn volume_press(&mut self, b: Btn, now: Millis) -> Vec<Action> {

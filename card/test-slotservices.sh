@@ -99,10 +99,21 @@ echo 'new' | run samba on /mnt/card || fail "samba on with a new password failed
 run samba off
 grep -q smbd "$TMP/killall.log" || fail "samba off left the connections' smbds"
 
+# The service is launched in the background; wait for the fake to record its startup.
+wait_syncthing() {
+    attempts=0
+    while [ "$(grep -c '^serve' "$TMP/syncthing.log" || true)" -lt "$1" ]; do
+        attempts=$((attempts + 1))
+        [ "$attempts" -lt 40 ] || return 1
+        sleep 0.05
+    done
+}
+
 # Syncthing.
 reset
 mkdir -p "$TMP/card"
 echo 'pw' | run syncthing on "$TMP/card" > "$TMP/st.out" || fail "syncthing on failed"
+wait_syncthing 1 || fail "syncthing did not start"
 [ "$(cat "$TMP/st.out")" = ABCDEFG-1234567 ] || fail "syncthing on did not print the device ID"
 grep -q -- "generate --home=$TMP/card/Config/syncthing --gui-user=root --gui-password=-" "$TMP/syncthing.log" ||
 	fail "syncthing was not set up on the card with root's login"
@@ -118,6 +129,7 @@ echo 'pw' | run syncthing on "$TMP/card" > "$TMP/st.out" || fail "syncthing on a
 [ "$(cat "$TMP/st.out")" = ABCDEFG-1234567 ] || fail "syncthing on again did not print the device ID"
 [ "$(grep -c '^serve' "$TMP/syncthing.log")" = 1 ] || fail "a running syncthing was started again for the same card"
 echo 'new' | run syncthing on "$TMP/card" > /dev/null || fail "syncthing on with a new password failed"
+wait_syncthing 2 || fail "syncthing did not restart"
 [ "$(grep -c '^serve' "$TMP/syncthing.log")" = 2 ] || fail "a new password did not start syncthing again"
 run syncthing off
 [ -f "$TMP/run/slot-syncthing.pid" ] && fail "syncthing off left syncthing running"

@@ -630,7 +630,11 @@ fn a_shipped_bezel_for_the_panel_gives_any_system_a_bezel_to_pick() {
     a.set_game_overlay(true);
     assert!(a.overlay_shown());
     let [x, y, w, h] = a.source_rect();
-    assert_eq!((x, y, w, h), (0.0, 0.0, 1.0, 1.0), "the Advance's picture is all its canvas");
+    assert_eq!(
+        (x, y, w, h),
+        (0.0, 0.0, 1.0, 1.0),
+        "the Advance's picture is all its canvas"
+    );
 
     // Another panel has none of its size for the Advance, so the pick falls back to none.
     a.set_panel((720, 480));

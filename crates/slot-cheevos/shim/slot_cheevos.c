@@ -22,7 +22,8 @@ typedef void (*slot_done_fn)(void* host, int op, int ok, const char* message, co
 typedef void (*slot_each_fn)(void* ctx, const char* url);
 typedef void (*slot_memory_fn)(void* host, unsigned id, unsigned char** data, size_t* size);
 
-enum { SLOT_OP_LOGIN = 1, SLOT_OP_GAME = 2 };
+/* SLOT_OP_UNKNOWN: a game failed because RetroAchievements does not know its hash. */
+enum { SLOT_OP_LOGIN = 1, SLOT_OP_GAME = 2, SLOT_OP_UNKNOWN = 3 };
 enum {
   SLOT_EVENT_UNLOCK = 1,
   SLOT_EVENT_GAME_COMPLETED = 2,
@@ -247,7 +248,7 @@ slot_cheevos* slot_cheevos_new(void* host, slot_http_fn http, slot_event_fn even
   rc_client_set_userdata(s->client, s);
   rc_client_enable_logging(s->client, RC_CLIENT_LOG_LEVEL_INFO, log_message);
   rc_client_set_event_handler(s->client, event_handler);
-  /* Softcore: slot is not an approved hardcore emulator. */
+  /* Softcore until the host asks for hardcore, before the game loads. */
   rc_client_set_hardcore_enabled(s->client, 0);
   return s;
 }
@@ -292,7 +293,8 @@ static void game_done(int result, const char* error_message, rc_client_t* client
   const char* badge = "";
   (void)client;
   if (result != RC_OK) {
-    s->done(s->host, SLOT_OP_GAME, 0, error_message ? error_message : rc_error_str(result), "");
+    s->done(s->host, result == RC_NO_GAME_LOADED ? SLOT_OP_UNKNOWN : SLOT_OP_GAME, 0,
+            error_message ? error_message : rc_error_str(result), "");
     return;
   }
   {
@@ -335,9 +337,25 @@ void slot_cheevos_load_game(slot_cheevos* s, const char* path, unsigned console)
   rc_client_begin_identify_and_load_game(s->client, console, path, NULL, 0, game_done, s);
 }
 
+/* Loads the achievements of the game with this hash, whatever the hash of the file played. */
+void slot_cheevos_load_hash(slot_cheevos* s, const char* hash) {
+  rc_client_unload_game(s->client);
+  rc_client_begin_load_game(s->client, hash, game_done, s);
+}
+
+/* Frames of play hardcore still wants before it allows a pause, as RetroArch asks; 0 allows one
+ * now, and counts it. */
+unsigned slot_cheevos_pause_wait(slot_cheevos* s) {
+  uint32_t frames = 0;
+  if (rc_client_can_pause(s->client, &frames))
+    return 0;
+  return frames ? frames : 1;
+}
+
 void slot_cheevos_frame(slot_cheevos* s) { rc_client_do_frame(s->client); }
 void slot_cheevos_idle(slot_cheevos* s) { rc_client_idle(s->client); }
 /* After a save state, a rewind or a reset: start every achievement's tracking afresh. */
 void slot_cheevos_reset(slot_cheevos* s) { rc_client_reset(s->client); }
+void slot_cheevos_set_hardcore(slot_cheevos* s, int on) { rc_client_set_hardcore_enabled(s->client, on); }
 void slot_cheevos_unload(slot_cheevos* s) { rc_client_unload_game(s->client); }
 const char* slot_cheevos_version(void) { return RCHEEVOS_VERSION_STRING; }

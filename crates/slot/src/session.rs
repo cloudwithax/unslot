@@ -323,6 +323,9 @@ impl Session {
             if let Some(disc) = self.app.take_disc() {
                 emu.set_disk(disc);
             }
+            if self.app.take_softcore() {
+                emu.cheevos_softcore();
+            }
             self.app.set_disks(emu.disk_count(), emu.disk_index());
         }
         if let Some((stem, serial)) = self.app.take_link_reload() {
@@ -556,11 +559,16 @@ impl Session {
         self.app.set_link_loaded(serial);
         // An eject's state may still be on its way to the card.
         self.app.settle_saves();
-        let resume = (!self.app.starting_clean())
+        let player = self.app.link_player();
+        let account = self.app.cheevos_account();
+        let console = crate::cheevos::console_for(platform).filter(|_| player.is_none());
+        // A hardcore game starts from power on: no state may be put under it.
+        let hardcore = self.app.wants_hardcore() && account.is_some() && console.is_some();
+        self.app.set_hardcore_game(hardcore);
+        let resume = (!self.app.starting_clean() && !hardcore)
             .then(|| persist::read_resume(&self.root, platform, core, stem))
             .flatten();
         launch("resume state read");
-        let player = self.app.link_player();
         let palette = crate::core::palette_for(self.app.gb_palette(), platform, &rom, player);
         self.app.set_palette_live(palette.is_some());
         let opened = open_core(
@@ -583,15 +591,12 @@ impl Session {
         };
         emu.set_volume(self.app.output_volume());
         emu.set_driven(self.driven);
-        if let (None, Some(console), Some(account)) = (
-            player,
-            crate::cheevos::console_for(platform, core),
-            self.app.cheevos_account(),
-        ) {
+        if let (Some(console), Some(account)) = (console, account) {
             emu.start_cheevos(crate::cheevos::Start {
                 account,
                 console,
-                http: std::sync::Arc::new(crate::cheevos::Curl),
+                http: crate::cheevos::http(&self.root),
+                hardcore,
             });
         }
         self.app.set_snapshot(Box::new(emu.snapshot()));

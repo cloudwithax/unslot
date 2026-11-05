@@ -2,8 +2,8 @@ mod art;
 pub use art::{contain, cover, is_cutout};
 mod bitmaps;
 pub use bitmaps::{
-    link_port, link_port_light, slot_back, slot_back_light, slot_front, slot_front_light, slot_skin,
-    sp_slot, strip_is_light, Mould, SlotSkin, SLOT_H, SLOT_W,
+    link_port, link_port_light, slot_back, slot_back_light, slot_front, slot_front_light,
+    slot_skin, sp_slot, strip_is_light, Mould, SlotSkin, SLOT_H, SLOT_W,
 };
 mod backdrop;
 mod barcode;
@@ -61,8 +61,8 @@ pub use cart::{
     LABEL_W, LABEL_WELL, LABEL_X, LABEL_Y, RENDERS,
 };
 pub use clock::{
-    clock_label, date_time, date_time_text, hhmm, set_clock_hint_face, time_text,
-    ClockPicker, Field,
+    clock_label, date_time, date_time_text, hhmm, set_clock_hint_face, time_text, ClockPicker,
+    Field,
 };
 pub use draw::{shift_down, Canvas, Draw, Layout, TexId, OUT_H, OUT_W};
 pub use footer::{draw_corners, draw_footer, Printed, FOOTER_Y};
@@ -80,6 +80,7 @@ pub use link_art::{
 pub use list_page::{ListIcon, ListPage, ListRow, LIST_H, LIST_ROWS, LIST_W};
 pub use media::Media;
 pub use page::Legend;
+pub use picture_page::{PicturePage, PICTURE_H, PICTURE_W};
 pub use plate::{
     arrows_hint_coloured, arrows_hint_face, arrows_hint_width, cap_width, centred_hints,
     hint_coloured, hint_face, hint_quad, hint_row, hint_width, title_face, title_line_face,
@@ -89,13 +90,10 @@ pub use plate::{
 pub use polaroids::{photo_face, PhotoFace, Polaroids, DOT, LEGEND, PHOTO_H, PHOTO_W};
 pub use power_menu::{menu_face, PowerChoice, MENU_PAD};
 pub use qr_page::QrPage;
-pub use picture_page::{PicturePage, PICTURE_H, PICTURE_W};
-pub use text_page::{wrap as wrap_text, TextPage, TEXT_LINES, TEXT_PX, TEXT_W};
 pub use quick_menu::{
     core_button_legends, draw_menu_ground, link_button_legends, quick_caret_face, quick_label_face,
-    quick_legend_faces, quick_pointer_face, quick_row_top, quick_row_top_at, value_face,
-    QuickMenu, QuickMenuFaces, QuickRow, QuickValue, QUICK_EDGE, QUICK_LABEL_X, QUICK_PITCH,
-    QUICK_ROWS_MAX,
+    quick_legend_faces, quick_pointer_face, quick_row_top, quick_row_top_at, value_face, QuickMenu,
+    QuickMenuFaces, QuickRow, QuickValue, QUICK_EDGE, QUICK_LABEL_X, QUICK_PITCH, QUICK_ROWS_MAX,
 };
 pub use rebuild::{rebuild_count_face, rebuild_title_face, RebuildScreen};
 pub use refusal::Refusal;
@@ -115,4 +113,5 @@ pub use sticker::{
     draw_sticker, head_rows, sticker_face, sticker_lines, sticker_rect, StickerFields, COPYRIGHT,
     CREDITS, DC, FORK, HOME, ORIGIN, STICKER_H, STICKER_W,
 };
+pub use text_page::{wrap as wrap_text, TextPage, TEXT_LINES, TEXT_PX, TEXT_W};
 pub use toast::{line_toast_face, toast_box, toast_face, toast_rect, Toast};

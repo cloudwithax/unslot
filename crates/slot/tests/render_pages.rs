@@ -127,6 +127,8 @@ fn the_network_pages_draw_their_own_rows() {
         f.app().phase()
     );
     tap(&mut f, &mut input, Btn::B);
+    tap(&mut f, &mut input, Btn::B);
+    open_page(&mut f, &mut input, &mut c, QuickRow::Online, "online");
 
     open_page(&mut f, &mut input, &mut c, QuickRow::Updates, "updates");
     assert!(

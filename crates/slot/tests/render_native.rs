@@ -122,6 +122,12 @@ fn a_title_shows_under_the_cart_when_titles_are_on() {
     for _ in 0..10 {
         f.advance(&mut input);
     }
+    // The apps make it a card of two shelves, so the shelf's name comes up first: let it go.
+    c.fit((640, 480));
+    f.compose(&mut c);
+    f.advance(&mut input);
+    std::thread::sleep(std::time::Duration::from_millis(2300));
+    f.advance(&mut input);
     assert_eq!(
         f.app().title_text().as_deref(),
         Some("Pokemon Emerald Version")
