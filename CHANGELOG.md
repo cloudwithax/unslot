@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.11.0
+
+- Hardcore achievements, under Settings → Gameplay. Turning it on takes effect from the next game; turning it off counts at once. In hardcore nothing may rewind or load a state, so the States page hides Load, and, as in RetroArch, a little play is wanted between pauses, so that pausing cannot step through a game a few frames at a time. RetroAchievements now accepts hardcore unlocks from unslot, which identifies itself as a libretro frontend.
+- A ROM or disc whose hash RetroAchievements does not know, often another region's release, falls back to the set of the game of the same title there, in softcore, as another release's memory may not line up for every achievement.
+
 ## v2.10.0
 
 - Bezels for every system. Each system's Screen settings, and the Screen page in the menu over a game, have a Bezel row, with the overlays from R. Savant's Anbernic H700 Overlays pack built in at 640 by 480, 720 by 480 and 720 by 720 for the NES, SNES, Genesis and Mega Drive, Master System, Game Gear, PC Engine, Game Boy family, Neo Geo, WonderSwan and more. The game is drawn in the bezel's window, as RetroArch does, and the bezel over the whole screen. A PNG of your own in `Bezels/<system>` is listed with them; with a KNULLI or Batocera `.info` beside it the game goes where that says, else in the PNG's clear middle. Stretch shows the game without the bezel.

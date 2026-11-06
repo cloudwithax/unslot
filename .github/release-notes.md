@@ -1,6 +1,6 @@
 ## Changes
 
-- Hardcore achievements: no save states, no rewind, no cheats. Toggle it in Settings → Gameplay.
+- Hardcore achievements: no save states and no rewind. Toggle it in Settings → Gameplay.
 - Region fallback: a disc or ROM whose hash RA doesn't know loads the achievement set of the same game from another region, in softcore.
 - Hardcore pause limiting, same rule as RetroArch: rapid re-pauses are refused until enough frames have played.
 - The states page hides Load in hardcore.

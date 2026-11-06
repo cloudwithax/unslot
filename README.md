@@ -7,8 +7,10 @@
 
 **A skeuomorphic, multi-system frontend for Anbernic's H700 handhelds, running on [BaseOS](https://github.com/pvaibhav/BaseOS).**
 
-A fork of [slot](https://github.com/BrandonKowalski/slot) that takes its cart shelves past the Game Boy:
-thirteen systems, Wi-Fi and Bluetooth, analog sticks, network services and updates over the air.
+A fork of [slot](https://github.com/BrandonKowalski/slot) that takes its cart shelves far past the
+Game Boy: **fifty-five systems**, from arcade boards to the PSP, with Wi-Fi and Bluetooth, analog
+sticks, search across every shelf, RetroAchievements, bezels, casting to a TV, network services and
+signed updates over the air.
 
 <a href="LICENSE"><img src="https://img.shields.io/github/license/cloudwithax/unslot?style=for-the-badge&labelColor=242429&color=4d4d57" height="32" alt="License"></a>
 <a href="https://github.com/cloudwithax/unslot/releases"><img src="https://img.shields.io/github/v/release/cloudwithax/unslot?style=for-the-badge&labelColor=242429&color=e8473f" height="32" alt="Release"></a>
@@ -32,21 +34,50 @@ thirteen systems, Wi-Fi and Bluetooth, analog sticks, network services and updat
 - **Game Art** finds a label for each game online, matched by CRC and file name. It keeps going while you play, and each label shows on the shelf as soon as it is found.
 - **Menu sounds and haptics:** recorded clicks of real buttons and switches, and a nudge of the rumble motor when a cart goes home or a setting changes. Both can be turned off in Settings → General.
 - **Search:** X on the shelf finds a game by name on every system's shelf, with each result's cart, card or disc beside it, and A takes the slot to it.
+- **RetroAchievements**, softcore or hardcore, and they keep working offline once a game's set is cached.
+- **Bezels** for every system, with R. Savant's H700 overlay pack built in, and **custom shaders** from RetroArch `.glsl` files.
+- **Apps:** Files, Books, Manuals, Gallery and Music on their own shelf, plus PortMaster-style ports in `Ports`.
+- **Cast to a TV** over Wi-Fi, to a Chromecast or Google TV, or to a Miracast TV over Wi-Fi Direct.
+- **Controls:** remap the game's buttons for every game, for one system or for one game, and use the D-pad as the left stick on handhelds without one.
+- **Upload from Phone:** scan a code to send the card a game, a wallpaper or a bezel from a phone on the same Wi-Fi.
 - **Wallpapers:** a bundled set, or any PNG or JPG of your own.
 
 Everything slot does is still here: the carts, the shelves, the link cable, the in-game menu and the save handling.
 
 ## Apps, artwork and screen effects
 
-The **Apps** shelf contains Files, Books, Manuals, Gallery and Music, plus scripts in `Ports/`.
-Each opens directly from its cart and returns to the shelf with B. PDF reading and video playback
-use the bundled `System/bin/mutool` and `System/bin/ffmpeg`.
+The **Apps** shelf contains Files, Books, Manuals, Gallery and Music, plus ports in `Ports`. Each
+opens directly from its cart and returns to the shelf with B. Books reads text, EPUBs and PDFs and
+keeps your page; Gallery shows the pictures in `Pictures`, and videos play there with L1 and R1
+skipping ten seconds; Music plays on with its page closed and holds while a game runs. Ports are
+laid out as PortMaster does and run with unslot closed, which comes back when they end. PDF reading
+and video playback use the bundled `System/bin/mutool` and `System/bin/ffmpeg`.
 
-**Settings → Online** groups Upload from Phone, Game Art, Art While Asleep, RetroAchievements,
-Updates and core downloads. Network settings keep Wi-Fi, Bluetooth, casting and services.
+**Settings → Online** holds Upload from Phone, Game Art, Art While Asleep, RetroAchievements,
+Updates, Cores and **Auto-Update Cores**, which fetches new builds of the cores on the card once a
+start has the Wi-Fi up. Game Art's **Clear All Art** takes every label off the card, on a second
+press. Settings → Network keeps Wi-Fi, Bluetooth, Cast and services.
+
 Turn on **Art While Asleep** to find missing labels during standby with Wi-Fi connected. The
 search postpones shutdown while charging or above 20% battery. The normal idle
 timeout starts again after scraping finishes.
+
+**Controls:** remap which of the handheld's buttons presses each of the game's sixteen, under
+Settings → Gameplay → Controls. Maps live in `Config/Remaps`, which an update leaves alone, as
+`All.txt` for every game, `<SYSTEM>.txt` for a system and `<SYSTEM>/<game>.txt` for one game.
+**D-Pad as Stick**, beside it, moves the left stick with the D-pad on a handheld that has no
+analog stick.
+
+**Cast to a TV**, under Settings → Network → Cast, or from the menu over a game. Chromecasts and
+Google TVs are listed with TVs and projectors that take Miracast over Wi-Fi Direct, which are
+marked Miracast; the handheld's screen goes over at 640 by 480 and up to 60 fps, less in the
+heaviest games, with the sound as AAC to a TV that takes it and LPCM to the rest. Wi-Fi Direct uses
+the second radio, so the home Wi-Fi stays connected. A TV that insists on the handheld leading the
+Wi-Fi Direct group is not cast to. The footer shows a cast icon while the screen is on a TV, and
+**Sound on TV** under Settings → General decides whether the sound follows the picture.
+
+**The SP's slot** comes in Graphite, Platinum, Pearl Pink, Pearl Blue and Pearl Blue Dark, and
+slots of your own can be added to the card.
 
 **Custom shaders:** put single-pass RetroArch `.glsl` files in `Shaders/`, or a `.glslp` preset
 with `shaders = 1`, its `shader0` file and optional `filter_linear0 = true`. Choose the file after
@@ -54,16 +85,34 @@ the built-in effects under Settings → Screen → the system → Shader, or the
 Shader parameters use their declared defaults. Multi-pass presets and Slang shaders are not supported.
 If a shader cannot compile, the built-in effect remains available and `Logs/slot.log` records why.
 
-**Custom bezels:** place PNGs and optional `.info` files in `Bezels/<system>/`. A RetroArch `.cfg`
+**Bezels:** each system's Screen settings, and the Screen page in the menu over a game, have a
+Bezel row. R. Savant's Anbernic H700 Overlays pack is built in at 640 by 480, 720 by 480 and 720 by
+720 for the NES, SNES, Genesis and Mega Drive, Master System, Game Gear, PC Engine, the Game Boy
+family, Neo Geo, WonderSwan and more. The game is drawn in the bezel's window, as RetroArch does,
+with the bezel over the whole screen; Stretch shows the game without it.
+
+**Custom bezels:** place PNGs and optional `.info` files in `Bezels/<system>/`. With a KNULLI or
+Batocera `.info` beside it the game goes where that says, else in the PNG's clear middle. A
+RetroArch `.cfg`
 can name its picture with `overlay0_overlay`; a custom viewport is used when present. This imports
 the artwork, not touch controls or multiple overlay layers. Settings → Online → Upload from Phone
 accepts bezels as well as games and wallpapers; send the PNG and any accompanying `.info` or `.cfg`.
 
-**Offline achievements:** sign in under Settings → Online → RetroAchievements and launch a game
-online once to cache its achievement definitions. Supported cores can then earn softcore achievements
-offline, including after a restart. Unsent awards remain in `Config/retroachievements/` until the
-service confirms them; reconnecting retries them. Keep that folder with your saves. Passwords are
-not saved. Games whose definitions have never been cached still need an initial connection.
+**Achievements:** sign in under Settings → Online → RetroAchievements. Play is softcore unless you
+turn on **Hardcore Achievements** under Settings → Gameplay; turning it on takes effect from the
+next game, and turning it off counts at once. In hardcore nothing may rewind or load a state, so
+the States page hides Load, and, as in RetroArch, a little play is wanted between pauses, so that
+pausing cannot step through a game a few frames at a time.
+
+A ROM or disc whose hash RetroAchievements does not know, often another region's release, falls back
+to the set of the game of the same title there, in softcore, as another release's memory may not
+line up for every achievement.
+
+**Offline achievements:** launch a game online once to cache its achievement definitions. Supported
+cores can then earn achievements offline, including after a restart. Unsent awards remain in
+`Config/retroachievements/` until the service confirms them; reconnecting retries them. Keep that
+folder with your saves. Passwords are not saved. Games whose definitions have never been cached
+still need an initial connection.
 
 ## Install
 
@@ -145,9 +194,16 @@ A `.pak` is the release's `MinUI.zip`, untouched, with its version and checksum 
 | Folder | What goes there |
 |---|---|
 | `Games/<Folder>` | Your games, by the folder in the table above. A multi-disc game goes in once, as an `.m3u` playlist; swap discs from Gameplay in the game menu. |
-| `Labels/<Folder>` | A label for a game, as `<game>.png`. Game Art fills these in for you. |
+| `Labels/<Folder>` | A label for a game, as `<game>.png`. Game Art fills these in for you. Real carts and discs it fetches go in `Renders` beside them. |
+| `Saves/<Folder>`, `States/<Folder>` | Saves and save states, by system. |
 | `BIOS` | BIOS files, by the names in the table above, some in a folder of the core's. |
 | `Wallpapers` | Your own wallpapers, PNG or JPG. |
+| `Bezels/<Folder>` | Your own bezels, as PNGs with an optional `.info` or RetroArch `.cfg`. |
+| `Shaders` | Single-pass RetroArch `.glsl` files, or a `.glslp` preset with its shader. |
+| `Books`, `Manuals/<Folder>`, `Pictures`, `Music` | What the Books, Manuals, Gallery and Music apps read. Gallery plays videos from `Pictures` too. |
+| `Ports` | Ports, laid out as PortMaster does. |
+| `Config/Remaps` | Button maps: `All.txt`, `<SYSTEM>.txt` and `<SYSTEM>/<game>.txt`. |
+| `Config/retroachievements` | Achievements earned offline, until the service confirms them. Keep it with your saves. |
 | `Config/wireguard` | WireGuard tunnels, as wg-quick `.conf` files. |
 | `Config/screenscraper.conf` | Your ScreenScraper login (`ssid=`, `sspassword=`), which you can also enter from Game Art's ScreenScraper row, and optionally a developer ID (`devid=`, `devpassword=`) to use in place of the one built into the release. With both, Game Art asks ScreenScraper first. |
 | `System` | unslot itself. Updates replace it whole. |
@@ -167,7 +223,19 @@ These are screenshots from an RG34XX SP.
 
 ## Devices
 
-unslot targets every H700 model BaseOS supports. It has been run on the **RG34XX SP**. slot itself supports the RG SP, RG34XX, RG34XX SP, RG35XX SP, RG35XX Plus and RG28XX. If you try unslot on another model, [open an issue](https://github.com/cloudwithax/unslot/issues) and say how it went.
+Every release ships a flashable card image for each of these eleven H700 models:
+
+| | | |
+|---|---|---|
+| RG28XX | RG35XX Plus / 2024 | RG40XX H |
+| RG34XX | RG35XX Pro | RG40XX V |
+| RG34XX SP | RG35XX SP | RG CubeXX |
+| RG35XX H | RG SP | |
+
+One build runs on all of them: unslot reads the model from BaseOS at boot and lays itself out for
+its panel, including the **RG CubeXX**'s square screen, where the shelf, menus and settings are laid
+out at 720 by 720. It has been run on hardware on the **RG34XX SP**. If you try unslot on another
+model, [open an issue](https://github.com/cloudwithax/unslot/issues) and say how it went.
 
 ## Building
 
@@ -187,7 +255,10 @@ unslot is a fork of **[slot](https://github.com/BrandonKowalski/slot)** by Brand
 | Area | Credit |
 |---|---|
 | Operating system | [BaseOS](https://github.com/pvaibhav/BaseOS) by pvaibhav |
-| Emulation | [mGBA](https://mgba.io), [gpSP](https://github.com/libretro/gpsp), and the libretro cores in the systems table |
+| Emulation | [mGBA](https://mgba.io), [gpSP](https://github.com/libretro/gpsp), and the libretro cores in the systems table. The Dreamcast's [Nodosumi](https://github.com/cloudwithax/nodosumi) ships with each release, with Flycast as the other choice. |
+| Achievements | [rcheevos](https://github.com/RetroAchievements/rcheevos) (MIT), by way of machomano's slot fork (GPL-3.0) |
+| Bezels | [R. Savant's Anbernic H700 Overlays](https://github.com/RighteousSavant/Anbernic-H700-Overlays), free for any H700 handheld. The default bezel is "Perfect GBA SP" by mugwomp93, by way of chrizzo-hb's knulli-bezels (CC BY-SA 4.0). |
+| Apps | [MuPDF](https://mupdf.com)'s `mutool` (AGPL-3.0) reads PDFs and [FFmpeg](https://ffmpeg.org) (GPL) plays video; ports follow [PortMaster](https://portmaster.games)'s layout |
 | Labels | Game Art's style follows [Cart Studio](https://github.com/BrandonKowalski/slot-cart-studio). Names come from [libretro-database](https://github.com/libretro/libretro-database) and art from libretro-thumbnails and [ScreenScraper](https://www.screenscraper.fr). |
 | Services | [Syncthing](https://syncthing.net), [Tailscale](https://github.com/tailscale/tailscale), [wireguard-go](https://git.zx2c4.com/wireguard-go) and [spruceOS](https://github.com/spruceUI/spruceOS)'s Samba build, with glibc's libnsl from Ubuntu |
 | Wallpapers | NASA, ESA, CSA and STScI; Poly Haven; ambientCG; and Luis Zuno. Each is credited in `System/licenses/wallpapers.txt`. |
