@@ -426,6 +426,7 @@ fn every_shortcut_row_keeps_its_label_clear_of_its_binding_on_a_4_by_3_panel() {
     };
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
     clocked(d.path());
+    common::plain_wallpaper(d.path());
     let mut f = Frontend::boot(Box::new(SimPlatform::at(d.path().to_path_buf())));
     f.upload_faces(&mut c);
     f.upload_bezel(&mut c, (640, 480));
@@ -442,9 +443,12 @@ fn every_shortcut_row_keeps_its_label_clear_of_its_binding_on_a_4_by_3_panel() {
         tap(&mut f, Btn::Down);
     }
     tap(&mut f, Btn::A);
-    while f.app().quick_menu() != Some(QuickRow::Shortcuts) {
-        tap(&mut f, Btn::Down);
-    }
+    common::reach(
+        &mut f,
+        QuickRow::Shortcuts,
+        |f| f.app().quick_menu(),
+        |f| tap(f, Btn::Down),
+    );
     tap(&mut f, Btn::A);
     for row in QuickRow::SHORTCUTS {
         assert_eq!(f.app().quick_menu(), Some(row));
@@ -777,6 +781,7 @@ fn the_change_legend_clears_the_cart_slot_on_a_4_by_3_panel() {
     };
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
     clocked(d.path());
+    common::plain_wallpaper(d.path());
     let mut f = Frontend::boot(Box::new(SimPlatform::at(d.path().to_path_buf())));
     f.upload_faces(&mut c);
     f.upload_bezel(&mut c, (640, 480));
@@ -863,6 +868,7 @@ fn long_menu_values_keep_clear_of_their_labels_on_a_4_by_3_panel() {
     };
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
     clocked(d.path());
+    common::plain_wallpaper(d.path());
     let mut s = slot_store::read_slot_state(d.path());
     s.blending_gba = slot_store::Blending::Ghosting;
     slot_store::write_slot_state(d.path(), &s).unwrap();
@@ -883,7 +889,7 @@ fn long_menu_values_keep_clear_of_their_labels_on_a_4_by_3_panel() {
     tap(&mut f, &mut input, Btn::Menu);
     down_to(&mut f, &mut input, QuickRow::Screen);
     tap(&mut f, &mut input, Btn::A);
-    tap(&mut f, &mut input, Btn::Down);
+    down_to(&mut f, &mut input, QuickRow::ScreenGba);
     tap(&mut f, &mut input, Btn::A);
     check(&mut f, &mut c, &mut input, QuickRow::GbaBlending);
     let mut f = open(&mut c);

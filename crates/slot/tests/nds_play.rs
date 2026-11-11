@@ -61,8 +61,12 @@ fn a_ds_game_hides_fast_forward_and_rewind_and_gameplay_opens_on_turbo() {
     }
     assert_eq!(a.in_game_menu(), Some(QuickRow::Settings));
     press(&mut a, Btn::A);
-    press(&mut a, Btn::Down);
-    assert_eq!(a.in_game_menu(), Some(QuickRow::PlayGameplay));
+    common::reach(
+        &mut a,
+        QuickRow::PlayGameplay,
+        |a| a.in_game_menu(),
+        |a| press(a, Btn::Down),
+    );
     press(&mut a, Btn::A);
     assert_eq!(a.in_game_menu(), Some(QuickRow::Turbo));
 }

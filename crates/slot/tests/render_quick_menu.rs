@@ -764,8 +764,12 @@ fn the_wifi_page_renders() {
     f.upload_faces(&mut c);
     let mut input = Script(VecDeque::new());
     open_wifi(&mut f, &mut input);
-    tap(&mut f, &mut input, Btn::Down);
-    assert_eq!(f.app().quick_menu(), Some(QuickRow::Networks));
+    common::reach(
+        &mut f,
+        QuickRow::Networks,
+        |f| f.app().quick_menu(),
+        |f| tap(f, &mut input, Btn::Down),
+    );
     let px = composed(&mut f, &mut c, "network-page");
     let right = OUT_W as usize - 32;
     for row in QuickRow::WIFI {

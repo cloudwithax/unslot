@@ -360,8 +360,12 @@ fn shortcuts_are_set_from_the_main_menu_and_saved_for_every_game_at_once() {
     step(&mut s, &mut now, &[RawEvent::Up(Btn::X)]);
     step(&mut s, &mut now, &[RawEvent::Up(Btn::Select)]);
     assert!(!s.app().capturing());
-    assert_eq!(s.app().quick_menu(), Some(QuickRow::ScSave));
-    tap(&mut s, &mut now, Btn::Down);
+    common::reach(
+        &mut s,
+        QuickRow::ScLoad,
+        |s| s.app().quick_menu(),
+        |s| tap(s, &mut now, Btn::Down),
+    );
     tap(&mut s, &mut now, Btn::A);
     step(&mut s, &mut now, &[RawEvent::Down(Btn::Select)]);
     step(&mut s, &mut now, &[RawEvent::Up(Btn::Select)]);
@@ -663,8 +667,12 @@ fn a_shelf_key_is_only_checked_against_shelf_keys() {
     }
     tap(&mut s, &mut now, Btn::A);
     tap(&mut s, &mut now, Btn::A);
-    tap(&mut s, &mut now, Btn::Down);
-    assert_eq!(s.app().quick_menu(), Some(QuickRow::ShelfNext));
+    common::reach(
+        &mut s,
+        QuickRow::ShelfNext,
+        |s| s.app().quick_menu(),
+        |s| tap(s, &mut now, Btn::Down),
+    );
     tap(&mut s, &mut now, Btn::A);
     step(&mut s, &mut now, &[RawEvent::Down(Btn::B)]);
     step(&mut s, &mut now, &[RawEvent::Up(Btn::B)]);
@@ -905,7 +913,12 @@ fn reset_all_on_the_collections_page_leaves_the_shelf_page_alone() {
         tap(&mut s, &mut now, Btn::Down);
     }
     tap(&mut s, &mut now, Btn::A);
-    tap(&mut s, &mut now, Btn::Down);
+    common::reach(
+        &mut s,
+        QuickRow::ControlsCollections,
+        |s| s.app().quick_menu(),
+        |s| tap(s, &mut now, Btn::Down),
+    );
     tap(&mut s, &mut now, Btn::A);
     assert_eq!(s.app().quick_menu(), Some(QuickRow::CollPrev));
     tap(&mut s, &mut now, Btn::Y);

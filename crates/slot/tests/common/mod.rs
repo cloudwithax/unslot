@@ -720,3 +720,24 @@ pub fn connect(a: &mut App) {
     }
     assert!(a.wifi_up(), "the fake network did not connect");
 }
+
+pub fn reach<T>(
+    t: &mut T,
+    row: slot_ui::QuickRow,
+    at: impl Fn(&T) -> Option<slot_ui::QuickRow>,
+    mut down: impl FnMut(&mut T),
+) {
+    for _ in 0..slot_ui::QuickRow::ALL.len() {
+        if at(t) == Some(row) {
+            return;
+        }
+        down(t);
+    }
+    panic!("never reached {row:?}, stuck on {:?}", at(t));
+}
+
+pub fn plain_wallpaper(root: &Path) {
+    let mut s = slot_store::read_slot_state(root);
+    s.wallpaper = slot_store::WallpaperPick::None;
+    write_slot_state(root, &s).unwrap();
+}
