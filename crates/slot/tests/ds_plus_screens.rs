@@ -441,6 +441,25 @@ mod rendered {
         white_in(px, 300, 140, 700, 560)
     }
 
+    pub fn dimmed(list: &[slot_gfx::Draw]) -> bool {
+        list.windows(2).any(|pair| {
+            matches!(pair[0], slot_gfx::Draw::Game)
+                && matches!(
+                    pair[1],
+                    slot_gfx::Draw::Rect { x, y, colour: [r, g, b, a], .. }
+                        if x == 0.0 && y == 0.0 && r == 0.0 && g == 0.0 && b == 0.0 && a > 0.0 && a < 1.0
+                )
+        })
+    }
+
+    fn brightness(px: &[u8]) -> u64 {
+        let w = PANEL.0 as usize;
+        (80..680)
+            .flat_map(|y| (40..980).map(move |x| (y * w + x) * 4))
+            .map(|o| px[o] as u64 + px[o + 1] as u64 + px[o + 2] as u64)
+            .sum()
+    }
+
     #[test]
     fn a_gba_games_menu_draws_on_the_bottom_screen() {
         let mut r = Rig::gba();
@@ -577,12 +596,8 @@ mod rendered {
         assert_eq!(lit, 0, "the bottom screen is lit in game");
     }
 
-    fn title_band(px: &[u8]) -> usize {
-        white_in(px, 470, 120, 1000, 640)
-    }
-
     #[test]
-    fn the_top_screen_shows_the_box_screen_while_the_menu_is_open() {
+    fn the_top_screen_dims_the_game_while_the_menu_is_open() {
         let mut r = Rig::gba();
         r.play();
         let before = r.shot(Screen::Top, "box-before");
@@ -590,17 +605,14 @@ mod rendered {
         r.run_for(0.3);
         let top = r.shot(Screen::Top, "box-top");
         assert!(
-            title_band(&top) > 300,
-            "no title ink on the top screen: {}",
-            title_band(&top)
+            brightness(&top) * 3 < brightness(&before),
+            "the game is not dimmed under the menu: {} against {}",
+            brightness(&top),
+            brightness(&before)
         );
-        assert_ne!(before, top);
         let mut list = Vec::new();
         r.f.app().draw_screen(Screen::Top, &mut list);
-        assert!(
-            !list.iter().any(|d| matches!(d, slot_gfx::Draw::Game)),
-            "the game still shows under the menu"
-        );
+        assert!(dimmed(&list), "the game is not dimmed under the menu");
     }
 
     #[test]
@@ -617,7 +629,7 @@ mod rendered {
         let mut list = Vec::new();
         r.f.app().draw_screen(Screen::Top, &mut list);
         assert!(
-            list.iter().any(|d| matches!(d, slot_gfx::Draw::Game)),
+            list.iter().any(|d| matches!(d, slot_gfx::Draw::Game)) && !dimmed(&list),
             "no game preview on the Screen row"
         );
         r.tap(Btn::A);
@@ -629,7 +641,7 @@ mod rendered {
         let mut list = Vec::new();
         r.f.app().draw_screen(Screen::Top, &mut list);
         assert!(
-            list.iter().any(|d| matches!(d, slot_gfx::Draw::Game)),
+            list.iter().any(|d| matches!(d, slot_gfx::Draw::Game)) && !dimmed(&list),
             "no game preview on a screen setting"
         );
         r.tap(Btn::B);
@@ -637,7 +649,7 @@ mod rendered {
         let mut list = Vec::new();
         r.f.app().draw_screen(Screen::Top, &mut list);
         assert!(
-            !list.iter().any(|d| matches!(d, slot_gfx::Draw::Game)),
+            dimmed(&list),
             "the preview stayed after leaving the screen rows"
         );
     }
@@ -740,7 +752,7 @@ mod rendered {
     }
 
     #[test]
-    fn a_corrupt_box_file_draws_title_only() {
+    fn a_corrupt_box_file_draws_no_box() {
         let mut r = with_box(b"not a png at all".to_vec());
         let top = menu_with_art(&mut r);
         assert!(
@@ -749,11 +761,10 @@ mod rendered {
             r.f.app().box_art()
         );
         assert_eq!(red_left(&top), 0);
-        assert!(title_band(&top) > 300, "no title on the top screen");
     }
 
     #[test]
-    fn a_cart_without_box_art_draws_title_only() {
+    fn a_cart_without_box_art_draws_no_box() {
         let mut r = Rig::gba();
         let top = menu_with_art(&mut r);
         assert!(r
@@ -761,7 +772,7 @@ mod rendered {
             .app()
             .box_art()
             .is_none_or(|a| a.boxed.is_none() && a.logo.is_none()));
-        assert!(title_band(&top) > 300, "no title on the top screen");
+        assert_eq!(red_left(&top), 0);
     }
 
     #[test]
@@ -954,10 +965,8 @@ fn a_ds_card_sits_deeper_than_flush_between_its_two_clicks() {
                 deep.push(foot - flush);
             }
         }
-        if !matches!(a.phase(), slot::app::Phase::Inserting { .. }) || a.seat() >= 1.0 {
-            if a.seat() >= 1.0 {
-                break;
-            }
+        if a.seat() >= 1.0 {
+            break;
         }
     }
     assert!(sound_at.is_some(), "no insert sound");
@@ -1074,7 +1083,7 @@ fn both_screens_power_off_together_when_a_ds_card_ejects() {
 
 #[cfg(target_os = "macos")]
 mod menu_step {
-    use super::rendered::Rig;
+    use super::rendered::{dimmed, Rig};
     use slot::app::BottomSource;
     use slot::screen::Screen;
     use slot_input::{Btn, Millis, RawEvent};
@@ -1105,7 +1114,7 @@ mod menu_step {
                     .unwrap_or(0);
                 assert!(green < 140, "the top screen showed the DS bottom screen on frame {frame} (green {green})");
             }
-            if top_at.is_none() && !game_on_top {
+            if top_at.is_none() && dimmed(&top) {
                 top_at = Some(frame);
             }
             if bottom_at.is_none() && r.f.bottom_source() == BottomSource::Compositor {
