@@ -32,7 +32,10 @@ fn rows_for_a_gba_cart() {
 #[test]
 fn shape_only_on_game_boy() {
     let s = Studio::new(cart(Platform::Gb, true), true);
-    assert_eq!(s.rows(), vec![Row::Label, Row::Color, Row::Finish, Row::Shape]);
+    assert_eq!(
+        s.rows(),
+        vec![Row::Label, Row::Color, Row::Finish, Row::Shape]
+    );
 }
 
 #[test]
@@ -101,13 +104,17 @@ fn a_preset_sets_the_finish() {
     let mut s = gba();
     to_row(&mut s, Row::Color);
     s.press(Btn::A);
-    assert!(matches!(s.screen, Screen::Chips { target: Target::Shell, .. }));
+    assert!(matches!(
+        s.screen,
+        Screen::Chips {
+            target: Target::Shell,
+            ..
+        }
+    ));
     let clear = slot_ui::palette::chip_grid(0.0, 0.0)
         .iter()
         .position(|p| match p.chip {
-            slot_ui::palette::Chip::Preset(i) => {
-                slot_ui::shell_presets()[i].0 == "Kirby pink"
-            }
+            slot_ui::palette::Chip::Preset(i) => slot_ui::shell_presets()[i].0 == "Kirby pink",
             _ => false,
         })
         .unwrap();
@@ -152,11 +159,15 @@ fn custom_keeps_the_finish() {
 fn reset_returns_to_start() {
     let mut s = gba();
     custom(&mut s);
-    let Screen::Custom { start, .. } = s.screen else { panic!() };
+    let Screen::Custom { start, .. } = s.screen else {
+        panic!()
+    };
     s.press(Btn::Right);
     s.press(Btn::Right);
     s.press(Btn::X);
-    let Screen::Custom { rgb, .. } = s.screen else { panic!() };
+    let Screen::Custom { rgb, .. } = s.screen else {
+        panic!()
+    };
     assert_eq!(rgb, start);
 }
 
@@ -166,15 +177,24 @@ fn hex_rolls_and_wraps() {
     custom(&mut s);
     s.press(Btn::Y);
     assert!(matches!(s.screen, Screen::Hex { .. }));
-    let Screen::Hex { digits, .. } = s.screen else { panic!() };
+    let Screen::Hex { digits, .. } = s.screen else {
+        panic!()
+    };
     for _ in 0..16 {
         s.press(Btn::Up);
     }
-    let Screen::Hex { digits: after, .. } = s.screen else { panic!() };
+    let Screen::Hex { digits: after, .. } = s.screen else {
+        panic!()
+    };
     assert_eq!(digits, after);
     s.press(Btn::Right);
     s.press(Btn::Down);
-    let Screen::Hex { digits: down, pos, .. } = s.screen else { panic!() };
+    let Screen::Hex {
+        digits: down, pos, ..
+    } = s.screen
+    else {
+        panic!()
+    };
     assert_eq!(pos, 1);
     assert_eq!(down[1], (digits[1] + 15) % 16);
 }
@@ -185,9 +205,13 @@ fn hex_back_sets_the_sliders() {
     custom(&mut s);
     s.press(Btn::Y);
     s.press(Btn::Up);
-    let Screen::Hex { digits, .. } = s.screen else { panic!() };
+    let Screen::Hex { digits, .. } = s.screen else {
+        panic!()
+    };
     s.press(Btn::B);
-    let Screen::Custom { rgb, .. } = s.screen else { panic!() };
+    let Screen::Custom { rgb, .. } = s.screen else {
+        panic!()
+    };
     assert_eq!(rgb[0], digits[0] * 16 + digits[1]);
 }
 
@@ -236,13 +260,27 @@ fn legends_follow_the_screen() {
         .iter()
         .position(|p| p.chip == slot_ui::palette::Chip::Custom)
         .unwrap();
-    s.screen = Screen::Chips { target: Target::Shell, at: custom };
+    s.screen = Screen::Chips {
+        target: Target::Shell,
+        at: custom,
+    };
     assert_eq!(s.legends(), vec![Legend::Back, Legend::Open]);
     s.chips_jump(2);
     s.press(Btn::A);
-    assert_eq!(s.legends(), vec![Legend::Back, Legend::Change, Legend::Reset, Legend::Hex]);
+    assert_eq!(
+        s.legends(),
+        vec![Legend::Back, Legend::Change, Legend::Reset, Legend::Hex]
+    );
     s.press(Btn::Y);
-    assert_eq!(s.legends(), vec![Legend::Back, Legend::Move, Legend::ChangeVertical, Legend::Reset]);
+    assert_eq!(
+        s.legends(),
+        vec![
+            Legend::Back,
+            Legend::Move,
+            Legend::ChangeVertical,
+            Legend::Reset
+        ]
+    );
 }
 
 #[test]
@@ -312,7 +350,11 @@ mod tray {
     const H: f32 = 183.0;
     const BOTTOM: f32 = 189.0;
 
-    fn settle(slips: &mut Vec<Slip>, sheet: &[LabelKind], ready: &dyn Fn(LabelKind) -> bool) -> usize {
+    fn settle(
+        slips: &mut Vec<Slip>,
+        sheet: &[LabelKind],
+        ready: &dyn Fn(LabelKind) -> bool,
+    ) -> usize {
         let mut now = 0.0;
         let mut prints = 0;
         for _ in 0..200 {
@@ -538,7 +580,10 @@ fn the_mac_build_can_pretend_to_have_wifi() {
 #[test]
 fn signal_reads_the_driver_and_becomes_bars() {
     use slot::update::{parse_rssi, signal_bars};
-    assert_eq!(parse_rssi("rssi:-55\nsignal_strength:45\nsignal_qual:100\n"), Some(-55));
+    assert_eq!(
+        parse_rssi("rssi:-55\nsignal_strength:45\nsignal_qual:100\n"),
+        Some(-55)
+    );
     assert_eq!(parse_rssi("nothing here"), None);
     assert_eq!(signal_bars(-55), 3);
     assert_eq!(signal_bars(-60), 3);
@@ -575,7 +620,10 @@ fn browsing_past_auto_keeps_the_shape() {
         finish: ShellFinish::Glitter,
     });
     let mut s = Studio::new(c, true);
-    s.screen = Screen::Chips { target: Target::Shell, at: 0 };
+    s.screen = Screen::Chips {
+        target: Target::Shell,
+        at: 0,
+    };
     for _ in 0..3 {
         s.press(Btn::Right);
         assert_eq!(s.current_shell().outline, Outline::Rounded);
@@ -589,20 +637,33 @@ fn browsing_past_auto_keeps_the_shape() {
 #[test]
 fn the_print_light_outlasts_the_print() {
     use slot::studio::{Slip, PRINT_LIGHT_HOLD_MS};
-    let slip = Slip { kind: LabelKind::Real, y0: -100.0, y1: 0.0, t0: 1000.0, ms: 300.0 };
+    let slip = Slip {
+        kind: LabelKind::Real,
+        y0: -100.0,
+        y1: 0.0,
+        t0: 1000.0,
+        ms: 300.0,
+    };
     assert!(slip.lit(1100.0));
     assert!(!slip.printing(1350.0));
     assert!(slip.lit(1350.0));
     assert!(slip.lit(1300.0 + PRINT_LIGHT_HOLD_MS - 1.0));
     assert!(!slip.lit(1300.0 + PRINT_LIGHT_HOLD_MS));
-    let settled = Slip { y0: 40.0, y1: 0.0, ..slip };
+    let settled = Slip {
+        y0: 40.0,
+        y1: 0.0,
+        ..slip
+    };
     assert!(!settled.lit(1100.0));
 }
 
 #[test]
 fn reset_undoes_custom_without_saving_a_color() {
     let mut s = Studio::new(cart(Platform::Gb, true), true);
-    s.screen = Screen::Chips { target: Target::Shell, at: 1 };
+    s.screen = Screen::Chips {
+        target: Target::Shell,
+        at: 1,
+    };
     s.chips_jump(1);
     assert_eq!(s.shell, None);
     s.chips_jump(2);
@@ -621,7 +682,10 @@ fn reset_undoes_custom_without_saving_a_color() {
 #[test]
 fn reset_puts_an_automatic_label_color_back() {
     let mut s = gba();
-    s.screen = Screen::Chips { target: Target::Label, at: 2 };
+    s.screen = Screen::Chips {
+        target: Target::Label,
+        at: 2,
+    };
     s.press(Btn::A);
     s.nudge(5);
     assert!(s.ground.is_some());
@@ -656,7 +720,10 @@ fn the_shell_picker_starts_on_the_preset_the_cart_wears() {
     s.press(Btn::A);
     assert_eq!(
         s.screen,
-        Screen::Chips { target: Target::Shell, at: chip_at(Chip::Preset(7)) }
+        Screen::Chips {
+            target: Target::Shell,
+            at: chip_at(Chip::Preset(7))
+        }
     );
     assert_eq!(s.shell, before);
 }
@@ -666,7 +733,13 @@ fn the_shell_picker_starts_on_current_for_a_cart_on_auto_or_a_custom_color() {
     let mut s = gba();
     to_row(&mut s, Row::Color);
     s.press(Btn::A);
-    assert_eq!(s.screen, Screen::Chips { target: Target::Shell, at: 0 });
+    assert_eq!(
+        s.screen,
+        Screen::Chips {
+            target: Target::Shell,
+            at: 0
+        }
+    );
 
     let mut c = cart(Platform::Gba, true);
     c.shell = Some(ShellChoice {
@@ -677,7 +750,13 @@ fn the_shell_picker_starts_on_current_for_a_cart_on_auto_or_a_custom_color() {
     let mut s = Studio::new(c, true);
     to_row(&mut s, Row::Color);
     s.press(Btn::A);
-    assert_eq!(s.screen, Screen::Chips { target: Target::Shell, at: 0 });
+    assert_eq!(
+        s.screen,
+        Screen::Chips {
+            target: Target::Shell,
+            at: 0
+        }
+    );
 }
 
 #[test]
@@ -691,14 +770,20 @@ fn the_shell_picker_reopens_on_what_was_just_picked() {
     s.press(Btn::A);
     assert_eq!(
         s.screen,
-        Screen::Chips { target: Target::Shell, at: chip_at(Chip::Preset(3)) }
+        Screen::Chips {
+            target: Target::Shell,
+            at: chip_at(Chip::Preset(3))
+        }
     );
     s.chips_jump(chip_at(Chip::Auto));
     s.press(Btn::B);
     s.press(Btn::A);
     assert_eq!(
         s.screen,
-        Screen::Chips { target: Target::Shell, at: chip_at(Chip::Auto) }
+        Screen::Chips {
+            target: Target::Shell,
+            at: chip_at(Chip::Auto)
+        }
     );
 }
 
@@ -706,12 +791,18 @@ fn the_shell_picker_reopens_on_what_was_just_picked() {
 fn the_label_picker_starts_on_the_preset_in_use() {
     use slot_ui::palette::Chip;
     let mut s = Studio::new(cart(Platform::Gba, false), true);
-    s.screen = Screen::Chips { target: Target::Label, at: 0 };
+    s.screen = Screen::Chips {
+        target: Target::Label,
+        at: 0,
+    };
     s.chips_jump(chip_at(Chip::Preset(3)));
     s.press(Btn::B);
     s.press(Btn::A);
     assert_eq!(
         s.screen,
-        Screen::Chips { target: Target::Label, at: chip_at(Chip::Preset(3)) }
+        Screen::Chips {
+            target: Target::Label,
+            at: chip_at(Chip::Preset(3))
+        }
     );
 }

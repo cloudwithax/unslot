@@ -1034,11 +1034,18 @@ fn a_card_overlay_draws_over_the_game_and_under_the_bezel() {
     card_png(&d.path().join("Bezels/GBA/edges.png"), 640, 480, |x, y| {
         hole_on_top(x, y, 640, 480)
     });
-    card_png(&d.path().join("Overlays/GBA/grid.png"), 640, 480, |_, _| [255, 0, 0, 255]);
-    card_png(&d.path().join("Overlays/GBA/grid_tile.png"), 2, 1, |x, _| match x {
-        1 => [0, 255, 0, 255],
-        _ => [0, 0, 0, 0],
+    card_png(&d.path().join("Overlays/GBA/grid.png"), 640, 480, |_, _| {
+        [255, 0, 0, 255]
     });
+    card_png(
+        &d.path().join("Overlays/GBA/grid_tile.png"),
+        2,
+        1,
+        |x, _| match x {
+            1 => [0, 255, 0, 255],
+            _ => [0, 0, 0, 0],
+        },
+    );
     let state = slot_store::read_slot_state(d.path());
     slot_store::write_slot_state(
         d.path(),

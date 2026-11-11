@@ -508,7 +508,8 @@ fn the_link_screen_draws_its_role_over_the_game() {
 fn session_playing_on_gpsp() -> (Session, TempDir, Millis) {
     let d = common::tmp_root_with_carts(&["Emerald"]);
     common::write_hack_header(&d, "Emerald", "POKEMON EMER", "BPEE");
-    slot_store::write_selected_core(d.path(), Platform::Gba, "Emerald", Core::Gpsp).expect("write core");
+    slot_store::write_selected_core(d.path(), Platform::Gba, "Emerald", Core::Gpsp)
+        .expect("write core");
     write_slot_state(
         d.path(),
         &SlotState {
@@ -1369,7 +1370,8 @@ fn session_on_a_real_core() -> Option<(Session, TempDir, Millis)> {
     bytes[0xb2] = 0;
     bytes[0xbd] = bytes[0xbd].wrapping_add(0x96);
     std::fs::write(&rom, bytes).expect("rewrite rom");
-    slot_store::write_selected_core(d.path(), Platform::Gba, "Emerald", Core::Gpsp).expect("write core");
+    slot_store::write_selected_core(d.path(), Platform::Gba, "Emerald", Core::Gpsp)
+        .expect("write core");
     std::fs::copy(
         &core,
         d.path()
@@ -1492,12 +1494,18 @@ fn a_device_without_wifi_is_refused_the_link_screen_and_told_why() {
     let wlan0 = d.path().join("net/wlan0");
     app.set_wifi_probe(wlan0.clone());
     app.apply(Action::GameMenu);
-    assert!(!app.game_menu_open(), "a device with no radio offered a link");
+    assert!(
+        !app.game_menu_open(),
+        "a device with no radio offered a link"
+    );
     assert_eq!(app.toast(), Some(Toast::NoWifi));
     assert!(matches!(app.phase(), Phase::Playing { .. }));
     std::fs::create_dir_all(&wlan0).unwrap();
     app.apply(Action::GameMenu);
-    assert!(app.game_menu_open(), "wlan0 arrived and the link stayed refused");
+    assert!(
+        app.game_menu_open(),
+        "wlan0 arrived and the link stayed refused"
+    );
 }
 
 #[test]

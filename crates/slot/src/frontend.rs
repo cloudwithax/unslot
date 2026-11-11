@@ -234,7 +234,8 @@ fn sync_studio(app: &mut App, compositor: &mut Compositor, st: &mut StudioSync) 
         if st.last.as_ref() != Some(&job) {
             st.last = Some(job.clone());
             st.gen += 1;
-            st.worker.ask(crate::studio_faces::PreviewJob { gen: st.gen, ..job });
+            st.worker
+                .ask(crate::studio_faces::PreviewJob { gen: st.gen, ..job });
         }
     }
     for (text, style) in app.studio_wanted_text() {
@@ -271,7 +272,10 @@ fn sync_studio(app: &mut App, compositor: &mut Compositor, st: &mut StudioSync) 
                 let mut texes = Vec::new();
                 for (kind, face) in &faces.faces {
                     let slot = &mut st.face_slots[slot_of(*kind)];
-                    texes.push((*kind, upload_rgba(compositor, slot, face.w, face.h, &face.rgba)));
+                    texes.push((
+                        *kind,
+                        upload_rgba(compositor, slot, face.w, face.h, &face.rgba),
+                    ));
                 }
                 let bare = upload_rgba(compositor, &mut st.bare, w, h, &faces.bare.rgba);
                 let under = faces.under.as_ref().map(|[a, b]| {
@@ -281,7 +285,13 @@ fn sync_studio(app: &mut App, compositor: &mut Compositor, st: &mut StudioSync) 
                         upload_rgba(compositor, ub, b.w, b.h, &b.rgba),
                     ]
                 });
-                app.set_studio_tex(crate::app::StudioTex { faces: texes, bare, under, w, h });
+                app.set_studio_tex(crate::app::StudioTex {
+                    faces: texes,
+                    bare,
+                    under,
+                    w,
+                    h,
+                });
             }
         }
     }
@@ -379,9 +389,8 @@ fn sync_fetch_art(app: &mut App, compositor: &mut Compositor, st: &mut FetchSync
         st.lines = lines;
     }
     let wanted = app.fetch_wanted();
-    let is_wanted = |p: slot_store::Platform, s: &str| {
-        wanted.iter().any(|l| l.platform == p && l.stem == s)
-    };
+    let is_wanted =
+        |p: slot_store::Platform, s: &str| wanted.iter().any(|l| l.platform == p && l.stem == s);
     for set in st.sets.iter_mut() {
         if set.as_ref().is_some_and(|(p, s)| !is_wanted(*p, s)) {
             *set = None;
@@ -415,13 +424,37 @@ fn sync_fetch_art(app: &mut App, compositor: &mut Compositor, st: &mut FetchSync
                 };
                 st.sets[i] = Some((platform, stem.clone()));
                 let slots = &mut st.set_slots[i];
-                let title = upload_rgba(compositor, &mut slots[0], set.title.w, set.title.h, &set.title.rgba);
-                let bare = upload_rgba(compositor, &mut slots[1], set.bare.w, set.bare.h, &set.bare.rgba);
-                let finished = upload_rgba(compositor, &mut slots[2], set.done.w, set.done.h, &set.done.rgba);
+                let title = upload_rgba(
+                    compositor,
+                    &mut slots[0],
+                    set.title.w,
+                    set.title.h,
+                    &set.title.rgba,
+                );
+                let bare = upload_rgba(
+                    compositor,
+                    &mut slots[1],
+                    set.bare.w,
+                    set.bare.h,
+                    &set.bare.rgba,
+                );
+                let finished = upload_rgba(
+                    compositor,
+                    &mut slots[2],
+                    set.done.w,
+                    set.done.h,
+                    &set.done.rgba,
+                );
                 let under = set.under.as_ref().map(|[interior, backing]| {
                     let (a, b) = slots[3..5].split_at_mut(1);
                     [
-                        upload_rgba(compositor, &mut a[0], interior.w, interior.h, &interior.rgba),
+                        upload_rgba(
+                            compositor,
+                            &mut a[0],
+                            interior.w,
+                            interior.h,
+                            &interior.rgba,
+                        ),
                         upload_rgba(compositor, &mut b[0], backing.w, backing.h, &backing.rgba),
                     ]
                 });
@@ -535,9 +568,10 @@ impl Frontend {
             .app_mut()
             .set_art_jobs(crate::art::jobs::art_jobs(platform.root().to_path_buf()));
         #[cfg(feature = "romm")]
-        session
-            .app_mut()
-            .set_romm_jobs(crate::romm::romm_jobs(platform.root().to_path_buf(), crate::romm::http_api));
+        session.app_mut().set_romm_jobs(crate::romm::romm_jobs(
+            platform.root().to_path_buf(),
+            crate::romm::http_api,
+        ));
         session.app_mut().set_wifi(wifi_worker(platform.root()));
         #[cfg(feature = "device")]
         session
@@ -748,8 +782,14 @@ impl Frontend {
             let mut upload =
                 |bytes: &[u8]| compositor.create_texture(slot_ui::SLOT_W, slot_ui::SLOT_H, bytes);
             Some([
-                [upload(slot_ui::ds_slot_back()), upload(slot_ui::ds_slot_front())],
-                [upload(slot_ui::ds_slot_back_light()), upload(slot_ui::ds_slot_front_light())],
+                [
+                    upload(slot_ui::ds_slot_back()),
+                    upload(slot_ui::ds_slot_front()),
+                ],
+                [
+                    upload(slot_ui::ds_slot_back_light()),
+                    upload(slot_ui::ds_slot_front_light()),
+                ],
             ])
         };
         #[cfg(not(feature = "nds"))]
@@ -1086,7 +1126,12 @@ impl Frontend {
         self.session.app_mut().set_two_panels(on);
     }
 
-    pub fn render_screen(&mut self, compositor: &mut Compositor, window: (u32, u32), screen: Screen) {
+    pub fn render_screen(
+        &mut self,
+        compositor: &mut Compositor,
+        window: (u32, u32),
+        screen: Screen,
+    ) {
         if screen == Screen::Top {
             self.render(compositor, window);
             return;
@@ -1108,7 +1153,8 @@ impl Frontend {
         self.draws.clear();
         self.session.app().draw_screen(screen, &mut self.draws);
         if screen == Screen::Top || self.draws.iter().any(|d| matches!(d, Draw::Game)) {
-            self.ds.swap_game(&mut self.draws, &self.session, compositor, screen);
+            self.ds
+                .swap_game(&mut self.draws, &self.session, compositor, screen);
         }
         compositor.draw_list(&self.draws);
         if screen == Screen::Top {
@@ -1179,14 +1225,23 @@ impl Frontend {
         sync_quick_clock(self.session.app_mut(), compositor, &mut self.quick_clock);
         sync_quick_network(self.session.app_mut(), compositor, &mut self.quick_network);
         sync_quick_romm(self.session.app_mut(), compositor, &mut self.quick_romm);
-        sync_quick_kid_shelf(self.session.app_mut(), compositor, &mut self.quick_kid_shelf);
+        sync_quick_kid_shelf(
+            self.session.app_mut(),
+            compositor,
+            &mut self.quick_kid_shelf,
+        );
         self.networks.sync(self.session.app_mut(), compositor);
         sync_quick_palette(self.session.app_mut(), compositor, &mut self.quick_palette);
         sync_wallpaper(self.session.app_mut(), compositor, &mut self.wallpaper);
         sync_picking(self.session.app_mut(), compositor, &mut self.picking_faces);
         sync_game_bezel(self.session.app_mut(), compositor, &mut self.game_bezel);
         compositor.set_game_bezel(self.session.app().shown_game_bezel());
-        sync_overlay(self.session.app_mut(), compositor, &mut self.overlay, self.ds.showing_top());
+        sync_overlay(
+            self.session.app_mut(),
+            compositor,
+            &mut self.overlay,
+            self.ds.showing_top(),
+        );
         compositor.set_sp_frame(self.session.app().picture_on_top());
         sync_core_picker(
             self.session.app_mut(),
@@ -2058,7 +2113,9 @@ fn sync_overlay(app: &mut App, compositor: &mut Compositor, state: &mut OverlayS
     if state.want != want {
         state.want = want;
         state.serial += 1;
-        let dir = app.root().map(|root| crate::overlay::folder(root, platform));
+        let dir = app
+            .root()
+            .map(|root| crate::overlay::folder(root, platform));
         match (entry, dir) {
             (Some(e), Some(dir)) => {
                 let path = |name: &Option<String>| name.as_ref().map(|n| dir.join(n));
@@ -2084,18 +2141,35 @@ fn sync_overlay(app: &mut App, compositor: &mut Compositor, state: &mut OverlayS
     }
     if let Some(done) = state.loader.as_ref().and_then(|l| l.latest()) {
         if done.serial == state.serial {
-            let tile = done
-                .tile
-                .as_ref()
-                .map(|(w, h, rgba)| (upload_rgba(compositor, &mut state.tile, *w, *h, rgba), *w, *h));
+            let tile = done.tile.as_ref().map(|(w, h, rgba)| {
+                (
+                    upload_rgba(compositor, &mut state.tile, *w, *h, rgba),
+                    *w,
+                    *h,
+                )
+            });
             let two = crate::overlay::two_screens(platform);
             let (top, bottom) = match two {
-                true => (done.top.as_ref().or(done.both.as_ref()), done.bottom.as_ref().or(done.both.as_ref())),
+                true => (
+                    done.top.as_ref().or(done.both.as_ref()),
+                    done.bottom.as_ref().or(done.both.as_ref()),
+                ),
                 false => (done.both.as_ref(), None),
             };
-            let top = top.map(|(w, h, rgba)| (upload_rgba(compositor, &mut state.full, *w, *h, rgba), *w, *h));
-            let bottom = bottom
-                .map(|(w, h, rgba)| (upload_rgba(compositor, &mut state.full_bottom, *w, *h, rgba), *w, *h));
+            let top = top.map(|(w, h, rgba)| {
+                (
+                    upload_rgba(compositor, &mut state.full, *w, *h, rgba),
+                    *w,
+                    *h,
+                )
+            });
+            let bottom = bottom.map(|(w, h, rgba)| {
+                (
+                    upload_rgba(compositor, &mut state.full_bottom, *w, *h, rgba),
+                    *w,
+                    *h,
+                )
+            });
             state.shown = Some(ShownOverlay { tile, top, bottom });
             state.ds = Some(done);
         }
@@ -2120,7 +2194,10 @@ fn sync_overlay(app: &mut App, compositor: &mut Compositor, state: &mut OverlayS
         if state.labels[at] == label {
             continue;
         }
-        let (dim, lit) = (quick_value_face(&label, false), quick_value_face(&label, true));
+        let (dim, lit) = (
+            quick_value_face(&label, false),
+            quick_value_face(&label, true),
+        );
         let (dim_size, lit_size) = ((dim.w, dim.h), (lit.w, lit.h));
         let dim = upload(compositor, &mut state.faces[at].0, dim);
         let lit = upload(compositor, &mut state.faces[at].1, lit);
@@ -2387,7 +2464,11 @@ fn sync_quick_romm(app: &mut App, compositor: &mut Compositor, state: &mut [Quic
         return;
     }
     let mut faces = [None; 4];
-    for ((text, slot), face) in texts.into_iter().zip(state.iter_mut()).zip(faces.iter_mut()) {
+    for ((text, slot), face) in texts
+        .into_iter()
+        .zip(state.iter_mut())
+        .zip(faces.iter_mut())
+    {
         if text.is_empty() {
             slot.shown = text;
             continue;
@@ -2399,10 +2480,7 @@ fn sync_quick_romm(app: &mut App, compositor: &mut Compositor, state: &mut [Quic
         let (dim_size, lit_size) = ((dim.w, dim.h), (lit.w, lit.h));
         let dim = upload(compositor, &mut slot.dim, dim);
         let lit = upload(compositor, &mut slot.lit, lit);
-        *face = Some([
-            (dim, dim_size.0, dim_size.1),
-            (lit, lit_size.0, lit_size.1),
-        ]);
+        *face = Some([(dim, dim_size.0, dim_size.1), (lit, lit_size.0, lit_size.1)]);
         slot.shown = text;
     }
     app.set_quick_romm_faces(faces);

@@ -270,7 +270,10 @@ pub fn toast_box(toast: Toast) -> (u32, u32) {
 
 fn toast_box_lines(toast: Toast, lines: usize) -> (u32, u32) {
     let s = setting(toast);
-    (s.w + 2 * HALO_PX, s.h * lines as u32 + detail_h(toast) + 2 * HALO_PX)
+    (
+        s.w + 2 * HALO_PX,
+        s.h * lines as u32 + detail_h(toast) + 2 * HALO_PX,
+    )
 }
 
 fn detail_h(toast: Toast) -> u32 {
@@ -430,7 +433,11 @@ mod tests {
                 layout.px,
                 s.w
             );
-            assert!(layout.lines.len() <= s.lines, "{t:?} took {} lines", layout.lines.len());
+            assert!(
+                layout.lines.len() <= s.lines,
+                "{t:?} took {} lines",
+                layout.lines.len()
+            );
             let w = ink_width(t);
             assert!(w <= s.w, "{:?} is {w} px wide in a {} px box", t, s.w);
         }

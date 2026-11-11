@@ -242,7 +242,10 @@ impl RetroCore for Counted {
 #[test]
 fn a_locked_core_that_falls_behind_runs_every_frame_it_was_ticked_for() {
     let frames = Arc::new(Mutex::new(0u32));
-    let emu = spawn(Box::new(Counted(MockCore::with_size(256, 384), frames.clone())));
+    let emu = spawn(Box::new(Counted(
+        MockCore::with_size(256, 384),
+        frames.clone(),
+    )));
     emu.set_driven(true);
     let present = Duration::from_nanos(16_666_667);
     assert!(wait_for(|| emu.locked()));

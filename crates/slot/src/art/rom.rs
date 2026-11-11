@@ -28,7 +28,11 @@ pub fn cached_crc(root: &Path, rom: &Path) -> std::io::Result<u32> {
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_secs());
-    let key = rom.strip_prefix(root).unwrap_or(rom).to_string_lossy().into_owned();
+    let key = rom
+        .strip_prefix(root)
+        .unwrap_or(rom)
+        .to_string_lossy()
+        .into_owned();
     let path = root.join(CRC_CACHE);
     {
         let _held = CRC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -55,9 +59,13 @@ pub fn cached_crc(root: &Path, rom: &Path) -> std::io::Result<u32> {
 
 fn cached_line(line: &str, key: &str, len: u64, secs: u64) -> Option<u32> {
     let mut parts = line.split('\t');
-    let (Some(k), Some(l), Some(s), Some(c), None) =
-        (parts.next(), parts.next(), parts.next(), parts.next(), parts.next())
-    else {
+    let (Some(k), Some(l), Some(s), Some(c), None) = (
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+    ) else {
         return None;
     };
     if k != key || l.parse::<u64>().ok()? != len || s.parse::<u64>().ok()? != secs {

@@ -2,8 +2,8 @@ use std::io::{Cursor, Read, Write};
 
 use slot::update::{
     check_with, clean_baseos, clock_is_wrong, install_baseos_with, install_with, newer,
-    parse_baseos, parse_release, Device, read_counted, stage, verify, wifi_conf, will_apply, Kind, Release,
-    Running, Stoppable, Ticket, UpdateEvent, UpdateFail,
+    parse_baseos, parse_release, read_counted, stage, verify, wifi_conf, will_apply, Device, Kind,
+    Release, Running, Stoppable, Ticket, UpdateEvent, UpdateFail,
 };
 
 const DIGEST: &str = "e78b2771abbc41a07774fe870e08d3d870c1a06c6db42a1d799626190156aba5";
@@ -180,7 +180,10 @@ fn parse_release_refuses_a_release_without_the_h700_zip() {
 
 #[test]
 fn parse_release_refuses_a_manifest_without_stable() {
-    assert_eq!(parse_release(r#"{"beta": {}}"#, Device::H700), Err(UpdateFail::Bad));
+    assert_eq!(
+        parse_release(r#"{"beta": {}}"#, Device::H700),
+        Err(UpdateFail::Bad)
+    );
 }
 
 #[test]
@@ -723,13 +726,20 @@ fn parse_release_gives_the_ds_plus_its_own_zip() {
 #[test]
 fn parse_release_keeps_the_h700_zip_for_the_sps() {
     let r = parse_release(&both_zips(), Device::H700).unwrap();
-    assert!(r.url.ends_with("/v1.11.0/slot-v1.11.0-h700.zip"), "{}", r.url);
+    assert!(
+        r.url.ends_with("/v1.11.0/slot-v1.11.0-h700.zip"),
+        "{}",
+        r.url
+    );
     assert_eq!(r.size, 6919551);
 }
 
 #[test]
 fn a_ds_plus_refuses_a_manifest_without_its_zip() {
-    assert_eq!(parse_release(&v1_11(), Device::RgDsPlus), Err(UpdateFail::Bad));
+    assert_eq!(
+        parse_release(&v1_11(), Device::RgDsPlus),
+        Err(UpdateFail::Bad)
+    );
 }
 
 #[test]
@@ -760,5 +770,9 @@ fn a_check_on_the_ds_plus_offers_the_ds_plus_zip() {
     let UpdateEvent::Available(offers) = event else {
         panic!("no offer: {event:?}");
     };
-    assert!(offers[0].url.ends_with("slot-v1.11.0-rgdsplus.zip"), "{}", offers[0].url);
+    assert!(
+        offers[0].url.ends_with("slot-v1.11.0-rgdsplus.zip"),
+        "{}",
+        offers[0].url
+    );
 }

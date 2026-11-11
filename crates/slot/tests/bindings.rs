@@ -526,7 +526,11 @@ fn a_shelf_key_pair_switches_shelves_only_with_both_held() {
     let (mut s, mut now) = on_shelf(d.path());
     let before = s.app().shelf_platform_name().map(str::to_string);
     tap(&mut s, &mut now, Btn::R2);
-    assert_eq!(s.app().shelf_platform_name(), before.as_deref(), "R2 alone switched");
+    assert_eq!(
+        s.app().shelf_platform_name(),
+        before.as_deref(),
+        "R2 alone switched"
+    );
     step(&mut s, &mut now, &[RawEvent::Down(Btn::R2)]);
     step(&mut s, &mut now, &[RawEvent::Down(Btn::X)]);
     step(&mut s, &mut now, &[RawEvent::Up(Btn::X)]);
@@ -534,7 +538,11 @@ fn a_shelf_key_pair_switches_shelves_only_with_both_held() {
     for _ in 0..25 {
         step(&mut s, &mut now, &[]);
     }
-    assert_ne!(s.app().shelf_platform_name(), before.as_deref(), "R2+X did not switch");
+    assert_ne!(
+        s.app().shelf_platform_name(),
+        before.as_deref(),
+        "R2+X did not switch"
+    );
 }
 
 #[test]
@@ -893,8 +901,10 @@ fn collection_defaults_reach_the_shelf_as_actions() {
         }
     );
     assert_eq!(next.contexts, slot_input::Contexts::SHELF);
-    assert!(!entries.iter().any(|e| e.chord.modifier == Some(slot_input::Mod::Select)
-        && e.contexts == slot_input::Contexts::SHELF));
+    assert!(!entries
+        .iter()
+        .any(|e| e.chord.modifier == Some(slot_input::Mod::Select)
+            && e.contexts == slot_input::Contexts::SHELF));
     for row in QuickRow::COLLECTION_KEYS {
         assert_eq!(s.app().clash(row), None, "{row:?} clashes by default");
     }

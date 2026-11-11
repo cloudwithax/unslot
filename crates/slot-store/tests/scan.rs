@@ -162,7 +162,11 @@ fn the_same_stem_on_two_platforms_is_two_carts_with_two_labels() {
 fn nds_roms_are_scanned_only_with_the_feature() {
     let d = tmp_root();
     std::fs::create_dir_all(d.path().join("Games/NDS")).unwrap();
-    std::fs::write(d.path().join("Games/NDS/Mario Kart DS.nds"), vec![0u8; 0x200]).unwrap();
+    std::fs::write(
+        d.path().join("Games/NDS/Mario Kart DS.nds"),
+        vec![0u8; 0x200],
+    )
+    .unwrap();
     write_rom(&d, "GBA/Emerald.gba", "POKEMON EMER");
     let carts = scan(d.path()).unwrap();
     let stems: Vec<&str> = carts.iter().map(|c| c.stem.as_str()).collect();

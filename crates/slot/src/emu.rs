@@ -6,9 +6,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::cable::{self, Cable};
-use slot_retro::{
-    mask_for, ButtonMask, Link, LinkChannel, RetroCore, Rumble, NETPACKET_RELIABLE,
-};
+use slot_retro::{mask_for, ButtonMask, Link, LinkChannel, RetroCore, Rumble, NETPACKET_RELIABLE};
 
 use crate::audio::Ring;
 use crate::drc::{drc_ratio, drc_target};
@@ -141,9 +139,7 @@ impl Shared {
             let Some(left) = until.checked_duration_since(Instant::now()) else {
                 return Wait::Late;
             };
-            if self.stop.load(Ordering::Relaxed)
-                || !self.driven.load(Ordering::Relaxed)
-            {
+            if self.stop.load(Ordering::Relaxed) || !self.driven.load(Ordering::Relaxed) {
                 return Wait::Late;
             }
             clock = match self.clocked.wait_timeout(clock, left) {
@@ -1099,7 +1095,6 @@ impl Worker {
             .tick
     }
 
-
     fn publish(&self, video: &[u8]) {
         let mut buf = self.frames.take_write();
         buf.clear();
@@ -1394,11 +1389,20 @@ mod tests {
     #[test]
     fn a_tick_keeps_the_time_the_loop_sent_it() {
         let ring = Arc::new(crate::audio::Ring::new(4096));
-        let handle = EmuHandle::spawn(Box::new(slot_retro::MockCore::new()), "mock".into(), ring, None, None);
+        let handle = EmuHandle::spawn(
+            Box::new(slot_retro::MockCore::new()),
+            "mock".into(),
+            ring,
+            None,
+            None,
+        );
         let sent = Instant::now();
         handle.tick(PRESENT);
         std::thread::sleep(Duration::from_millis(40));
-        match handle.shared.next_tick(0, Instant::now() + Duration::from_millis(1)) {
+        match handle
+            .shared
+            .next_tick(0, Instant::now() + Duration::from_millis(1))
+        {
             Wait::Tick(_, at) => assert!(
                 at.duration_since(sent) < Duration::from_millis(10),
                 "the tick was stamped when the worker read it, {:?} after it was sent",
@@ -1420,8 +1424,14 @@ mod tests {
             from_fixed = from_fixed.or(lock_scale(true, &mut fixed, at, t));
             from_free = from_free.or(lock_scale(false, &mut free, at, t));
         }
-        assert_eq!(from_fixed, None, "a fixed panel period was re-measured from a late loop");
-        assert!(from_free.is_some_and(|s| s > 1.1), "a free period was not measured: {from_free:?}");
+        assert_eq!(
+            from_fixed, None,
+            "a fixed panel period was re-measured from a late loop"
+        );
+        assert!(
+            from_free.is_some_and(|s| s > 1.1),
+            "a free period was not measured: {from_free:?}"
+        );
     }
 
     #[test]

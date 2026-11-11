@@ -802,11 +802,23 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     text.push_str(&format!("bezel_gba={}\n", s.bezel_gba.key()));
     text.push_str(&format!("bezel_gb={}\n", s.bezel_gb.key()));
     text.push_str(&format!("bezel_gbc={}\n", s.bezel_gbc.key()));
-    text.push_str(&format!("overlay_gba={}\n", s.overlay_gba.as_deref().unwrap_or_default()));
-    text.push_str(&format!("overlay_gb={}\n", s.overlay_gb.as_deref().unwrap_or_default()));
-    text.push_str(&format!("overlay_gbc={}\n", s.overlay_gbc.as_deref().unwrap_or_default()));
+    text.push_str(&format!(
+        "overlay_gba={}\n",
+        s.overlay_gba.as_deref().unwrap_or_default()
+    ));
+    text.push_str(&format!(
+        "overlay_gb={}\n",
+        s.overlay_gb.as_deref().unwrap_or_default()
+    ));
+    text.push_str(&format!(
+        "overlay_gbc={}\n",
+        s.overlay_gbc.as_deref().unwrap_or_default()
+    ));
     #[cfg(feature = "nds")]
-    text.push_str(&format!("overlay_nds={}\n", s.overlay_nds.as_deref().unwrap_or_default()));
+    text.push_str(&format!(
+        "overlay_nds={}\n",
+        s.overlay_nds.as_deref().unwrap_or_default()
+    ));
     text.push_str(&format!("scale_gba={}\n", s.scale_gba.name()));
     text.push_str(&format!("scale_gb={}\n", s.scale_gb.name()));
     text.push_str(&format!("scale_gbc={}\n", s.scale_gbc.name()));

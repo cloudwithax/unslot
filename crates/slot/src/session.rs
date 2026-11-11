@@ -100,7 +100,11 @@ impl Session {
             }
             Cue::Tear => self.play_sfx(Sfx::Tear),
             Cue::BuzzOff => {
-                if self.buzz_ends.take().is_some_and(|end| Instant::now() < end) {
+                if self
+                    .buzz_ends
+                    .take()
+                    .is_some_and(|end| Instant::now() < end)
+                {
                     self.sink.ring().hush();
                 }
             }

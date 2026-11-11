@@ -218,7 +218,11 @@ fn a_ds_cart_flings_up_while_the_shelf_parts_on_the_bottom() {
             );
         }
         if seat >= 0.3 {
-            assert_eq!(carts_shown(&bottom(&a), w), 0, "carts on the bottom at seat {seat}");
+            assert_eq!(
+                carts_shown(&bottom(&a), w),
+                0,
+                "carts on the bottom at seat {seat}"
+            );
         }
         if seat < 0.25 {
             early += 1;
@@ -1112,7 +1116,10 @@ mod menu_step {
                     .map(|i| px[i])
                     .max()
                     .unwrap_or(0);
-                assert!(green < 140, "the top screen showed the DS bottom screen on frame {frame} (green {green})");
+                assert!(
+                    green < 140,
+                    "the top screen showed the DS bottom screen on frame {frame} (green {green})"
+                );
             }
             if top_at.is_none() && dimmed(&top) {
                 top_at = Some(frame);
@@ -1127,7 +1134,9 @@ mod menu_step {
         let (Some(t), Some(b)) = (top_at, bottom_at) else {
             panic!("the menu never showed: top {top_at:?} bottom {bottom_at:?}");
         };
-        assert_eq!(t, b, "the top changed on frame {t}, the bottom on frame {b}");
+        assert_eq!(
+            t, b,
+            "the top changed on frame {t}, the bottom on frame {b}"
+        );
     }
-
 }

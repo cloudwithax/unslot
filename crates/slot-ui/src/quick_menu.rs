@@ -367,10 +367,7 @@ impl QuickRow {
         QuickRow::ShelfForget,
     ];
 
-    pub const COLLECTION_KEYS: [QuickRow; 2] = [
-        QuickRow::CollPrev,
-        QuickRow::CollNext,
-    ];
+    pub const COLLECTION_KEYS: [QuickRow; 2] = [QuickRow::CollPrev, QuickRow::CollNext];
 
     pub const CONTROLS: [QuickRow; 12] = [
         QuickRow::GameUp,
@@ -559,9 +556,7 @@ impl QuickRow {
             | QuickRow::CheckUpdates
             | QuickRow::About => &QuickRow::SYSTEM,
             QuickRow::WifiPower | QuickRow::Networks => &QuickRow::WIFI,
-            QuickRow::FetchArt
-            | QuickRow::Romm
-            | QuickRow::Server => &QuickRow::NETWORK,
+            QuickRow::FetchArt | QuickRow::Romm | QuickRow::Server => &QuickRow::NETWORK,
             #[cfg(feature = "nds")]
             QuickRow::FetchBoxArt => &QuickRow::NETWORK,
             QuickRow::RommProtocol
@@ -590,8 +585,7 @@ impl QuickRow {
             }
             r if r.game_button().is_some() => &QuickRow::CONTROLS,
             r if r.shortcut().is_some() => &QuickRow::SHORTCUTS,
-            QuickRow::CollPrev
-            | QuickRow::CollNext => &QuickRow::COLLECTION_KEYS,
+            QuickRow::CollPrev | QuickRow::CollNext => &QuickRow::COLLECTION_KEYS,
             r if r.carousel_action().is_some() => &QuickRow::SHELF_KEYS,
             QuickRow::Shader
             | QuickRow::ColourCorrection
@@ -1497,7 +1491,11 @@ pub fn print_stop_legend(ink: [u8; 3]) -> UndoFace {
     let (src, w, h) = button_legend(ButtonLegend::B);
     let side = PRINT_STOP_BUTTON;
     let rgba = crate::art::cover_rgba(src, w, h, side, side).unwrap_or_default();
-    let button = UndoFace { rgba, w: side, h: side };
+    let button = UndoFace {
+        rgba,
+        w: side,
+        h: side,
+    };
     with_hint(button, "Stop", Some(ink), true)
 }
 
@@ -1517,7 +1515,12 @@ pub enum StudioGlyph {
     UpDown,
 }
 
-pub fn studio_legend(glyph: StudioGlyph, word: &str, ink: [u8; 3], hint_on_right: bool) -> UndoFace {
+pub fn studio_legend(
+    glyph: StudioGlyph,
+    word: &str,
+    ink: [u8; 3],
+    hint_on_right: bool,
+) -> UndoFace {
     let button = match glyph {
         StudioGlyph::A => button_face(ButtonLegend::A),
         StudioGlyph::B => button_face(ButtonLegend::B),
@@ -1916,7 +1919,11 @@ pub fn quick_window(canvas: Canvas, selected: QuickRow, hidden: &[QuickRow]) -> 
     (start, fits)
 }
 
-pub fn quick_scroll(canvas: Canvas, selected: QuickRow, hidden: &[QuickRow]) -> Option<QuickScroll> {
+pub fn quick_scroll(
+    canvas: Canvas,
+    selected: QuickRow,
+    hidden: &[QuickRow],
+) -> Option<QuickScroll> {
     let shown = selected.shown(hidden);
     let (start, len) = quick_window(canvas, selected, hidden);
     if len >= shown.len() {

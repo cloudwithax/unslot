@@ -251,7 +251,8 @@ impl Compositor {
             let [ox, oy] = self.game.origin();
             let top = self.size.1 as f32 - oy - sy * OUT_H as f32;
             let px = [ox + x * sx, top + y * sy, pw * sx, ph * sy];
-            self.overlay_pass.draw_tile(tex, (w, h), px, self.size, &self.quad);
+            self.overlay_pass
+                .draw_tile(tex, (w, h), px, self.size, &self.quad);
         }
     }
 

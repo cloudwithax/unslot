@@ -75,7 +75,10 @@ pub fn build(job: PreviewJob, cache: &mut Cache) -> StudioFaces {
         };
     }
     let size = label_size(&job.cart);
-    let tinted = job.ground.filter(|_| job.text).map(|c| slot_ui::text_label(&job.cart, c));
+    let tinted = job
+        .ground
+        .filter(|_| job.text)
+        .map(|c| slot_ui::text_label(&job.cart, c));
     let mut faces = vec![(LabelKind::Title, cart_face_with(&job.cart, tinted))];
     for (kind, path) in [
         (LabelKind::Existing, &job.existing),
@@ -100,8 +103,12 @@ pub fn build(job: PreviewJob, cache: &mut Cache) -> StudioFaces {
         session: job.session,
         gen: job.gen,
         bare: bare_face(&job.cart),
-        under: shows_interior(&job.cart)
-            .then(|| [cart_interior(&job.cart), cart_backing(gb_shell_of(&job.cart))]),
+        under: shows_interior(&job.cart).then(|| {
+            [
+                cart_interior(&job.cart),
+                cart_backing(gb_shell_of(&job.cart)),
+            ]
+        }),
         faces,
     }
 }
@@ -248,12 +255,18 @@ impl StudioWorker {
                     }
                 }
                 for (cart, ground) in chips {
-                    if tx.send(StudioDone::Chips(chip_atlas(&cart, ground))).is_err() {
+                    if tx
+                        .send(StudioDone::Chips(chip_atlas(&cart, ground)))
+                        .is_err()
+                    {
                         return;
                     }
                 }
                 if let Some(job) = newest {
-                    if tx.send(StudioDone::Preview(build(job, &mut cache))).is_err() {
+                    if tx
+                        .send(StudioDone::Preview(build(job, &mut cache)))
+                        .is_err()
+                    {
                         return;
                     }
                 }

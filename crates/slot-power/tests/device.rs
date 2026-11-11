@@ -607,7 +607,11 @@ fn the_charging_led_is_left_to_the_kernel() {
     let mut p = platform(&d);
     p.set_led(LedState::Running);
     p.set_led(LedState::Charging);
-    assert_eq!(read(&d, "amber:charging/brightness"), "0", "slot drove the kernel's charging LED");
+    assert_eq!(
+        read(&d, "amber:charging/brightness"),
+        "0",
+        "slot drove the kernel's charging LED"
+    );
     assert_eq!(read(&d, "green:power/brightness"), "255");
 }
 
@@ -631,5 +635,8 @@ fn one_screen_has_no_bottom_backlight_to_switch() {
     let d = sysfs("255", "87");
     let mut p = platform(&d);
     p.set_bottom_backlight(false);
-    assert!(!d.path().join("class/backlight/backlight-lcd0/bl_power").exists());
+    assert!(!d
+        .path()
+        .join("class/backlight/backlight-lcd0/bl_power")
+        .exists());
 }

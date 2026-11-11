@@ -1,8 +1,8 @@
 use slot_power::{Battery, Charge};
 use slot_store::{Cart, Platform};
 use slot_ui::{
-    draw_footer, footer_ink, label_colour, rest_y, Canvas, Draw, Gauge, GbShell, Printed, Shelf, TexId,
-    CART_H, CART_W, LABEL_W, LABEL_X, LABEL_Y, OUT_W,
+    draw_footer, footer_ink, label_colour, rest_y, Canvas, Draw, Gauge, GbShell, Printed, Shelf,
+    TexId, CART_H, CART_W, LABEL_W, LABEL_X, LABEL_Y, OUT_W,
 };
 
 fn shelf_with(n: usize) -> Shelf {
@@ -30,7 +30,11 @@ fn placed(s: &Shelf) -> Vec<(f32, f32)> {
             Draw::Tex { x, w, .. } => (x, w),
             Draw::Part { x, w, .. } => (x, w),
             Draw::Turned { x, w, .. } => (x, w),
-            Draw::Game | Draw::Shot { .. } | Draw::Capture | Draw::Quad { .. } | Draw::Paper { .. } => (0.0, OUT_W as f32),
+            Draw::Game
+            | Draw::Shot { .. }
+            | Draw::Capture
+            | Draw::Quad { .. }
+            | Draw::Paper { .. } => (0.0, OUT_W as f32),
         })
         .collect()
 }
@@ -41,7 +45,9 @@ fn xw(d: &Draw) -> (f32, f32) {
         | Draw::Tex { x, w, .. }
         | Draw::Part { x, w, .. }
         | Draw::Turned { x, w, .. } => (x, w),
-        Draw::Game | Draw::Shot { .. } | Draw::Capture | Draw::Quad { .. } | Draw::Paper { .. } => (0.0, OUT_W as f32),
+        Draw::Game | Draw::Shot { .. } | Draw::Capture | Draw::Quad { .. } | Draw::Paper { .. } => {
+            (0.0, OUT_W as f32)
+        }
     }
 }
 
@@ -429,9 +435,9 @@ fn the_gauge_is_white_in_dark_mode_and_black_in_light_mode() {
             Canvas::FRAMED,
             Gauge {
                 battery: Some(Battery {
-                percent: 68,
-                charge: Charge::Discharging,
-            }),
+                    percent: 68,
+                    charge: Charge::Discharging,
+                }),
                 percent: Printed { face: None, w: 30 },
                 ..Gauge::default()
             },
@@ -458,9 +464,9 @@ fn the_band_prints_the_charge_at_one_margin_and_the_clock_at_the_other() {
         Canvas::FRAMED,
         Gauge {
             battery: Some(Battery {
-            percent: 68,
-            charge: Charge::Charging,
-        }),
+                percent: 68,
+                charge: Charge::Charging,
+            }),
             percent: Printed { face: None, w: 30 },
             ..Gauge::default()
         },
@@ -510,9 +516,9 @@ fn the_footer_does_not_move_the_gauge_when_the_charge_state_changes() {
         Canvas::FRAMED,
         Gauge {
             battery: Some(Battery {
-            percent: 68,
-            charge: Charge::Discharging,
-        }),
+                percent: 68,
+                charge: Charge::Discharging,
+            }),
             percent: Printed { face: None, w: 30 },
             ..Gauge::default()
         },
@@ -526,9 +532,9 @@ fn the_footer_does_not_move_the_gauge_when_the_charge_state_changes() {
         Canvas::FRAMED,
         Gauge {
             battery: Some(Battery {
-            percent: 68,
-            charge: Charge::Charging,
-        }),
+                percent: 68,
+                charge: Charge::Charging,
+            }),
             percent: Printed { face: None, w: 30 },
             ..Gauge::default()
         },
@@ -626,7 +632,11 @@ fn cart_spans(out: &[Draw]) -> Vec<(f32, f32)> {
             | Draw::Tex { x, w, h, .. }
             | Draw::Part { x, w, h, .. }
             | Draw::Turned { x, w, h, .. } => (h > 60.0).then_some((x, x + w)),
-            Draw::Game | Draw::Shot { .. } | Draw::Capture | Draw::Quad { .. } | Draw::Paper { .. } => None,
+            Draw::Game
+            | Draw::Shot { .. }
+            | Draw::Capture
+            | Draw::Quad { .. }
+            | Draw::Paper { .. } => None,
         })
         .filter(|(x0, x1)| *x1 > 0.0 && *x0 < OUT_W as f32)
         .collect()
@@ -1028,7 +1038,11 @@ fn a_pak_draws_its_folder_shape_until_its_rom_is_indexed() {
             _ => None,
         })
     };
-    assert_eq!(shadow(&s), Some(rounded), "the shelf read the ROM while drawing");
+    assert_eq!(
+        shadow(&s),
+        Some(rounded),
+        "the shelf read the ROM while drawing"
+    );
     slot_store::gb::cached_header(&s.carts[1].rom);
     assert_eq!(shadow(&s), Some(notched), "the indexed shape was not used");
 }
@@ -1297,14 +1311,20 @@ fn a_wrapped_cart_stands_on_the_cart_foot_with_no_cart_parts_around_it() {
     s.set_wrapped(0, Some(TexId::from_raw(7)));
     let mut d = Vec::new();
     s.draw_row(Canvas::FRAMED, None, 0.0, 0.0, 1.0, &mut d);
-    let [Draw::Tex { x, y, w, h, tex, .. }] = d[..] else {
+    let [Draw::Tex {
+        x, y, w, h, tex, ..
+    }] = d[..]
+    else {
         panic!("{d:?}");
     };
     let (bw, bh) = slot_ui::box_size(Platform::Gba);
     assert_eq!(tex, TexId::from_raw(7));
     assert_eq!((w, h), (bw as f32, bh as f32));
     assert_eq!(x + w / 2.0, Canvas::FRAMED.w / 2.0);
-    assert_eq!(y + h, slot_ui::foot_y(slot_ui::Canvas::FRAMED, CART_H as f32));
+    assert_eq!(
+        y + h,
+        slot_ui::foot_y(slot_ui::Canvas::FRAMED, CART_H as f32)
+    );
 }
 
 #[test]
@@ -1317,7 +1337,9 @@ fn a_wrapped_cart_draws_its_box_and_an_unwrapped_one_draws_its_cart() {
     s.set_wrapped(0, Some(TexId::from_raw(7)));
     let mut boxed = Vec::new();
     s.draw_row(Canvas::FRAMED, None, 0.0, 0.0, 1.0, &mut boxed);
-    assert!(boxed.iter().any(|d| matches!(d, Draw::Tex { tex, .. } if *tex == TexId::from_raw(7))));
+    assert!(boxed
+        .iter()
+        .any(|d| matches!(d, Draw::Tex { tex, .. } if *tex == TexId::from_raw(7))));
     s.set_wrapped(0, None);
     let mut after = Vec::new();
     s.draw_row(Canvas::FRAMED, None, 0.0, 0.0, 1.0, &mut after);

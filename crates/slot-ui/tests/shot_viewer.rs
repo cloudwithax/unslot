@@ -249,13 +249,7 @@ use slot_ui::{thumbnail, Draw, Gauge, Printed, TexId};
 
 fn drawn(v: &ShotViewer, canvas: Canvas) -> Vec<Draw> {
     let mut out = Vec::new();
-    v.draw(
-        canvas,
-        Gauge::default(),
-        None,
-        Printed::default(),
-        &mut out,
-    );
+    v.draw(canvas, Gauge::default(), None, Printed::default(), &mut out);
     out
 }
 
@@ -287,9 +281,13 @@ fn thumbed(n: usize) -> ShotViewer {
 fn white_rects(out: &[Draw]) -> Vec<(f32, f32, f32, f32)> {
     out.iter()
         .filter_map(|d| match *d {
-            Draw::Rect { x, y, w, h, colour: [1.0, 1.0, 1.0, 1.0] } => {
-                Some((x, y, w, h))
-            }
+            Draw::Rect {
+                x,
+                y,
+                w,
+                h,
+                colour: [1.0, 1.0, 1.0, 1.0],
+            } => Some((x, y, w, h)),
             _ => None,
         })
         .collect()

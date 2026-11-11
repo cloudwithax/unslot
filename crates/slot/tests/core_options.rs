@@ -363,15 +363,7 @@ fn every_frame_blending_slot_sets_is_one_the_core_declares() {
         let platform = test_platform(which);
         for blending in Blending::MGBA {
             let mut core = LibretroCore::open(&path).expect("open core");
-            slot::core::apply_core_options(
-                &mut core,
-                which,
-                platform,
-                "auto",
-                false,
-                false,
-                None,
-            );
+            slot::core::apply_core_options(&mut core, which, platform, "auto", false, false, None);
             slot::core::apply_blending(&mut core, which, blending);
             every_option_is_one_the_core_has(
                 &core,

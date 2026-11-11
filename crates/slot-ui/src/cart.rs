@@ -212,7 +212,10 @@ pub fn seated_box(platform: Platform) -> (u32, u32) {
     match platform {
         Platform::Gba | Platform::Gbav => (SEATED_W, SEATED_H),
         #[cfg(feature = "nds")]
-        Platform::Nds => ((SEATED_H * bitmaps::DS_CART_W + bitmaps::DS_CART_H / 2) / bitmaps::DS_CART_H, SEATED_H),
+        Platform::Nds => (
+            (SEATED_H * bitmaps::DS_CART_W + bitmaps::DS_CART_H / 2) / bitmaps::DS_CART_H,
+            SEATED_H,
+        ),
         Platform::Gb | Platform::Gbc => (SEATED_W, GB_SEATED_H),
     }
 }
@@ -737,7 +740,10 @@ fn banner_label(s: &Spec, cart: &Cart) -> Vec<u8> {
     rgba.extend_from_slice(&text);
     if let Some(b) = banner {
         let scale = ((icon_room - PAD) / 32).min((lw - 2 * PAD) / 32).max(1);
-        let (x0, y0) = ((lw - 32 * scale) / 2, (icon_room - 32 * scale) / 2 + PAD / 2);
+        let (x0, y0) = (
+            (lw - 32 * scale) / 2,
+            (icon_room - 32 * scale) / 2 + PAD / 2,
+        );
         for y in 0..32 * scale {
             for x in 0..32 * scale {
                 let src = (((y / scale) * 32 + x / scale) * 4) as usize;

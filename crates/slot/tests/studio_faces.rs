@@ -49,9 +49,18 @@ fn a_preview_uses_the_edited_shell() {
     let plain = build(job(1, None), &mut cache);
     let tinted = build(job(2, red()), &mut cache);
     let title = |f: &slot::studio_faces::StudioFaces| {
-        f.faces.iter().find(|(k, _)| *k == LabelKind::Title).unwrap().1.rgba.clone()
+        f.faces
+            .iter()
+            .find(|(k, _)| *k == LabelKind::Title)
+            .unwrap()
+            .1
+            .rgba
+            .clone()
     };
-    assert_ne!(px(&title(&plain), 360, 20, 100), px(&title(&tinted), 360, 20, 100));
+    assert_ne!(
+        px(&title(&plain), 360, 20, 100),
+        px(&title(&tinted), 360, 20, 100)
+    );
 }
 
 #[test]
@@ -97,7 +106,13 @@ fn a_tinted_text_label_previews_its_color() {
     j.text = false;
     let plain = build(j, &mut Cache::default());
     let title = |f: &slot::studio_faces::StudioFaces| {
-        f.faces.iter().find(|(k, _)| *k == slot::studio::LabelKind::Title).unwrap().1.rgba.clone()
+        f.faces
+            .iter()
+            .find(|(k, _)| *k == slot::studio::LabelKind::Title)
+            .unwrap()
+            .1
+            .rgba
+            .clone()
     };
     assert_ne!(title(&tinted), title(&plain));
 }
@@ -112,7 +127,10 @@ fn a_text_color_stays_off_the_logo_sticker() {
         let mut enc = png::Encoder::new(&mut out, w, h);
         enc.set_color(png::ColorType::Rgba);
         enc.set_depth(png::BitDepth::Eight);
-        enc.write_header().unwrap().write_image_data(&[200, 40, 40, 255].repeat((w * h) as usize)).unwrap();
+        enc.write_header()
+            .unwrap()
+            .write_image_data(&[200, 40, 40, 255].repeat((w * h) as usize))
+            .unwrap();
     }
     std::fs::write(&logo, out).unwrap();
     let mut j = job(1, None);
@@ -131,8 +149,14 @@ fn a_worn_logo_previews_automatic_from_the_wheel() {
     let mut j = job(1, None);
     j.wheel = Some(wheel);
     let faces = build(j.clone(), &mut Cache::default());
-    assert!(faces.faces.iter().any(|(k, _)| *k == LabelKind::Logo), "no Automatic preview");
+    assert!(
+        faces.faces.iter().any(|(k, _)| *k == LabelKind::Logo),
+        "no Automatic preview"
+    );
     j.ground = Some([9, 99, 199]);
     let faces = build(j, &mut Cache::default());
-    assert!(faces.faces.iter().any(|(k, _)| *k == LabelKind::Logo), "no JPEG wheel preview");
+    assert!(
+        faces.faces.iter().any(|(k, _)| *k == LabelKind::Logo),
+        "no JPEG wheel preview"
+    );
 }

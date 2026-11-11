@@ -83,12 +83,20 @@ pub fn layout(canvas_w: f32, platform: Platform) -> Layout {
     let narrow = canvas_w < 700.0;
     let (w, ratio) = match platform {
         Platform::Gba | Platform::Gbav => (
-            if narrow { 268.0 } else { slot_ui::CART_W as f32 },
+            if narrow {
+                268.0
+            } else {
+                slot_ui::CART_W as f32
+            },
             slot_ui::CART_H as f32 / slot_ui::CART_W as f32,
         ),
         #[cfg(feature = "nds")]
         Platform::Nds => (
-            (if narrow { 268.0 } else { slot_ui::CART_W as f32 }) * slot_ui::DS_CART_W as f32
+            (if narrow {
+                268.0
+            } else {
+                slot_ui::CART_W as f32
+            }) * slot_ui::DS_CART_W as f32
                 / slot_ui::CART_W as f32,
             slot_ui::DS_CART_H as f32 / slot_ui::DS_CART_W as f32,
         ),
@@ -212,7 +220,13 @@ fn list(s: &Studio, row: usize, left: f32, right: f32, out: &mut Vec<Item>) {
     let mid = (left + right) / 2.0;
     let name_scale = ((right - left - 24.0) / LONGEST_NAME).min(MAX_SCALE);
     let rows = s.rows();
-    let height = |r: &Row| if row_choice(s, *r).is_some() { INLINE_H } else { OPEN_H };
+    let height = |r: &Row| {
+        if row_choice(s, *r).is_some() {
+            INLINE_H
+        } else {
+            OPEN_H
+        }
+    };
     let total: f32 = rows.iter().map(height).sum();
     let mut y = ((FOOTER_TOP - total) / 2.0).floor();
     for (i, r) in rows.iter().enumerate() {
@@ -227,7 +241,14 @@ fn list(s: &Studio, row: usize, left: f32, right: f32, out: &mut Vec<Item>) {
             scale: name_scale,
         });
         if let Some((value, at)) = row_choice(s, *r) {
-            out.push(text(value, Style::Detail, Align::Center, mid, y + 46.0, alpha * 0.8));
+            out.push(text(
+                value,
+                Style::Detail,
+                Align::Center,
+                mid,
+                y + 46.0,
+                alpha * 0.8,
+            ));
             let left = mid - DOT / 2.0 - DOT_STEP;
             for dot in 0..3 {
                 out.push(Item::Dot {
@@ -252,7 +273,15 @@ fn chip_label(s: &Studio, chip: Chip, target: Target) -> String {
     }
 }
 
-fn chips(s: &Studio, target: Target, at: usize, right: f32, mid: f32, l: &Layout, out: &mut Vec<Item>) {
+fn chips(
+    s: &Studio,
+    target: Target,
+    at: usize,
+    right: f32,
+    mid: f32,
+    l: &Layout,
+    out: &mut Vec<Item>,
+) {
     let probe = chip_grid(0.0, 0.0);
     let height = probe.last().map_or(0.0, |p| p.y) + CHIP_SIZE;
     let room = GRID_BOTTOM - GRID_TOP;
@@ -264,7 +293,14 @@ fn chips(s: &Studio, target: Target, at: usize, right: f32, mid: f32, l: &Layout
         Target::Shell => "Shell Color",
         Target::Label => "Label Color",
     };
-    out.push(text(heading, Style::Heading, Align::Center, x0 + GRID_W / 2.0, top, 1.0));
+    out.push(text(
+        heading,
+        Style::Heading,
+        Align::Center,
+        x0 + GRID_W / 2.0,
+        top,
+        1.0,
+    ));
     let row = match target {
         Target::Shell => 0,
         Target::Label => 1,
@@ -299,15 +335,34 @@ fn chips(s: &Studio, target: Target, at: usize, right: f32, mid: f32, l: &Layout
             });
         }
         if p.chip == Chip::Custom {
-            out.push(text("+", Style::Detail, Align::Center, p.x + CHIP_SIZE / 2.0, p.y + 10.0, 1.0));
+            out.push(text(
+                "+",
+                Style::Detail,
+                Align::Center,
+                p.x + CHIP_SIZE / 2.0,
+                p.y + 10.0,
+                1.0,
+            ));
         }
     }
     if height > room {
         let x = right + CHIP_EDGE - SCROLL_INSET - SCROLL_W;
         let thumb = room * room / height;
         let y = GRID_TOP + (room - thumb) * scroll / (height - room);
-        out.push(Item::Rect { x, y: GRID_TOP, w: SCROLL_W, h: room, color: [1.0, 1.0, 1.0, 0.2] });
-        out.push(Item::Rect { x, y, w: SCROLL_W, h: thumb, color: [1.0, 1.0, 1.0, 1.0] });
+        out.push(Item::Rect {
+            x,
+            y: GRID_TOP,
+            w: SCROLL_W,
+            h: room,
+            color: [1.0, 1.0, 1.0, 0.2],
+        });
+        out.push(Item::Rect {
+            x,
+            y,
+            w: SCROLL_W,
+            h: thumb,
+            color: [1.0, 1.0, 1.0, 1.0],
+        });
     }
     let name = chip_label(s, probe[at].chip, target);
     let (sin, cos) = CART_TILT.to_radians().abs().sin_cos();
@@ -315,10 +370,25 @@ fn chips(s: &Studio, target: Target, at: usize, right: f32, mid: f32, l: &Layout
     let gap = FOOTER_TOP - bottom;
     let scale = (gap / 32.0).clamp(0.72, 1.0);
     let name_y = (bottom + (gap - NAME_H * scale) / 2.0 - 3.0).floor();
-    out.push(Item::Text { text: name, style: Style::Detail, align: Align::Center, x: mid, y: name_y, alpha: 1.0, scale });
+    out.push(Item::Text {
+        text: name,
+        style: Style::Detail,
+        align: Align::Center,
+        x: mid,
+        y: name_y,
+        alpha: 1.0,
+        scale,
+    });
 }
 
-fn custom(target: Target, rgb: [u8; 3], channel: usize, left: f32, right: f32, out: &mut Vec<Item>) {
+fn custom(
+    target: Target,
+    rgb: [u8; 3],
+    channel: usize,
+    left: f32,
+    right: f32,
+    out: &mut Vec<Item>,
+) {
     const ROW: f32 = 58.0;
     let mid = (left + right) / 2.0;
     let track = right - left - 96.0;
@@ -332,7 +402,14 @@ fn custom(target: Target, rgb: [u8; 3], channel: usize, left: f32, right: f32, o
     for c in 0..3 {
         let y = top + HEAD_H + 12.0 + c as f32 * ROW;
         let alpha = if c == channel { 1.0 } else { 0.6 };
-        out.push(text(["R", "G", "B"][c], Style::Detail, Align::Left, left, y, alpha));
+        out.push(text(
+            ["R", "G", "B"][c],
+            Style::Detail,
+            Align::Left,
+            left,
+            y,
+            alpha,
+        ));
         for step in 0..30 {
             let mut color = rgb.map(|v| v as f32 / 255.0);
             color[c] = step as f32 / 29.0;
@@ -351,7 +428,14 @@ fn custom(target: Target, rgb: [u8; 3], channel: usize, left: f32, right: f32, o
             h: 24.0,
             color: [0.957, 0.945, 0.918, 1.0],
         });
-        out.push(text(rgb[c].to_string(), Style::Detail, Align::Right, right, y, alpha));
+        out.push(text(
+            rgb[c].to_string(),
+            Style::Detail,
+            Align::Right,
+            right,
+            y,
+            alpha,
+        ));
     }
     let hex = format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]);
     let y = top + HEAD_H + 12.0 + 3.0 * ROW;
@@ -370,8 +454,22 @@ fn hex(target: Target, digits: [u8; 6], pos: usize, left: f32, right: f32, out: 
         Target::Label => "Label Hex",
     };
     let y = top + HEAD_H + 16.0;
-    out.push(text(heading, Style::Heading, Align::Center, x0 - step / 2.0 + (6.0 * step + box_w) / 2.0, top, 1.0));
-    out.push(text("#", Style::Heading, Align::Center, x0 - step + box_w / 2.0, y + 9.0, 1.0));
+    out.push(text(
+        heading,
+        Style::Heading,
+        Align::Center,
+        x0 - step / 2.0 + (6.0 * step + box_w) / 2.0,
+        top,
+        1.0,
+    ));
+    out.push(text(
+        "#",
+        Style::Heading,
+        Align::Center,
+        x0 - step + box_w / 2.0,
+        y + 9.0,
+        1.0,
+    ));
     for (i, d) in digits.iter().enumerate() {
         let x = x0 + i as f32 * step;
         let on = i == pos;
@@ -387,7 +485,14 @@ fn hex(target: Target, digits: [u8; 6], pos: usize, left: f32, right: f32, out: 
             },
         });
         let style = if on { Style::DigitOn } else { Style::Digit };
-        out.push(text(format!("{d:X}"), style, Align::Center, x + box_w / 2.0, y + 9.0, 1.0));
+        out.push(text(
+            format!("{d:X}"),
+            style,
+            Align::Center,
+            x + box_w / 2.0,
+            y + 9.0,
+            1.0,
+        ));
     }
 }
 
@@ -398,9 +503,13 @@ pub fn view(s: &Studio, canvas_w: f32) -> View {
     let mut items = vec![Item::Cart];
     let closed_bar = s.legends().len() > 2;
     match s.screen {
-        Screen::List { row } => {
-            list(s, row, l.edge + LIST_INSET, canvas_w - LIST_INSET, &mut items)
-        }
+        Screen::List { row } => list(
+            s,
+            row,
+            l.edge + LIST_INSET,
+            canvas_w - LIST_INSET,
+            &mut items,
+        ),
         Screen::Sheet { .. } if s.sheet.is_empty() => {
             let line = match (s.art_failed, s.duplicates) {
                 (true, _) => "No Connection",
@@ -411,9 +520,21 @@ pub fn view(s: &Studio, canvas_w: f32) -> View {
             items.push(text(line, Style::Detail, Align::Center, mid, 197.0, 1.0));
         }
         Screen::Sheet { .. } => items.push(Item::Sheet),
-        Screen::Chips { target, at } => chips(s, target, at, canvas_w - CHIP_EDGE, mid, &l, &mut items),
-        Screen::Custom { target, rgb, channel, .. } => custom(target, rgb, channel, l.edge + CUSTOM_GAP, right, &mut items),
-        Screen::Hex { target, digits, pos, .. } => hex(target, digits, pos, l.edge, right, &mut items),
+        Screen::Chips { target, at } => {
+            chips(s, target, at, canvas_w - CHIP_EDGE, mid, &l, &mut items)
+        }
+        Screen::Custom {
+            target,
+            rgb,
+            channel,
+            ..
+        } => custom(target, rgb, channel, l.edge + CUSTOM_GAP, right, &mut items),
+        Screen::Hex {
+            target,
+            digits,
+            pos,
+            ..
+        } => hex(target, digits, pos, l.edge, right, &mut items),
     }
     View { items, closed_bar }
 }
@@ -448,7 +569,10 @@ pub fn turned(rect: [f32; 4], centre: [f32; 2], deg: f32) -> [[f32; 2]; 4] {
     let (sin, cos) = deg.to_radians().sin_cos();
     [[x, y], [x + w, y], [x + w, y + h], [x, y + h]].map(|[px, py]| {
         let (dx, dy) = (px - centre[0], py - centre[1]);
-        [centre[0] + dx * cos - dy * sin, centre[1] + dx * sin + dy * cos]
+        [
+            centre[0] + dx * cos - dy * sin,
+            centre[1] + dx * sin + dy * cos,
+        ]
     })
 }
 
@@ -479,10 +603,20 @@ pub fn tray(canvas_w: f32, cart: &slot_store::Cart) -> Tray {
 pub fn well_of(cart: &slot_store::Cart) -> [u32; 4] {
     #[cfg(feature = "nds")]
     if cart.platform == Platform::Nds {
-        return [slot_ui::DS_LABEL_X, slot_ui::DS_LABEL_Y, slot_ui::DS_LABEL_W, slot_ui::DS_LABEL_H];
+        return [
+            slot_ui::DS_LABEL_X,
+            slot_ui::DS_LABEL_Y,
+            slot_ui::DS_LABEL_W,
+            slot_ui::DS_LABEL_H,
+        ];
     }
     match slot_ui::gb_shell_of(cart) {
-        None => [slot_ui::LABEL_X, slot_ui::LABEL_Y, slot_ui::LABEL_W, slot_ui::LABEL_H],
+        None => [
+            slot_ui::LABEL_X,
+            slot_ui::LABEL_Y,
+            slot_ui::LABEL_W,
+            slot_ui::LABEL_H,
+        ],
         Some(slot_ui::GbShell::Notched) => [
             slot_ui::GB_LABEL_X,
             slot_ui::GB_LABEL_Y,

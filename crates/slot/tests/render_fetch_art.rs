@@ -137,7 +137,10 @@ fn choice_screen_renders() {
     let frame = c.read_frame();
     dump(&frame, "choice");
     let (left, right) = (first_edge(&frame, 200), first_edge(&frame, 520));
-    assert!((8..=12).contains(&(right as i32 - left as i32)), "left {left} right {right}");
+    assert!(
+        (8..=12).contains(&(right as i32 - left as i32)),
+        "left {left} right {right}"
+    );
     let inked = |xs: std::ops::Range<usize>| {
         xs.flat_map(|x| (430..470).map(move |y| (x, y)))
             .filter(|&(x, y)| luma(px(&frame, x, y)) > 180.0)
@@ -175,7 +178,8 @@ fn mid_peel_shows_paper_and_well() {
         return;
     };
     let start = running_with_label(&mut f, &mut c, &d, &art);
-    f.app_mut().tick_ms((start + slot::fetch_art::stage_start(Stage::Peel) + 200.0) as u64);
+    f.app_mut()
+        .tick_ms((start + slot::fetch_art::stage_start(Stage::Peel) + 200.0) as u64);
     f.compose(&mut c);
     let frame = c.read_frame();
     dump(&frame, "peel");
@@ -183,7 +187,10 @@ fn mid_peel_shows_paper_and_well() {
         .flat_map(|x| (110..300).map(move |y| (x, y)))
         .any(|(x, y)| near(px(&frame, x, y), [0xf6, 0xf4, 0xef], 10));
     assert!(paper, "no paper back showing mid-peel");
-    assert!(!near(px(&frame, 486, 222), BLUE, 40), "the new label showed before it was applied");
+    assert!(
+        !near(px(&frame, 486, 222), BLUE, 40),
+        "the new label showed before it was applied"
+    );
 }
 
 #[test]
@@ -197,30 +204,43 @@ fn landed_face_is_identical_at_rest() {
     f.compose(&mut c);
     let frame = c.read_frame();
     dump(&frame, "rest");
-    assert!(near(px(&frame, 360, 222), BLUE, 3), "{:?}", px(&frame, 360, 222));
+    assert!(
+        near(px(&frame, 360, 222), BLUE, 3),
+        "{:?}",
+        px(&frame, 360, 222)
+    );
     f.app_mut()
         .tick_ms((start + slot::fetch_art::stage_start(Stage::Rest) + 260.0) as u64);
     f.compose(&mut c);
     let later = c.read_frame();
     for y in 120..320 {
         for x in 240..480 {
-            assert_eq!(px(&frame, x, y), px(&later, x, y), "the landed face moved at {x},{y}");
+            assert_eq!(
+                px(&frame, x, y),
+                px(&later, x, y),
+                "the landed face moved at {x},{y}"
+            );
         }
     }
 }
 
 #[test]
 fn a_clear_shell_shows_its_board_under_the_bare_well() {
-    let Some((d, mut f, mut c, _s, art)) = setup_with_shell(Some("Emerald = auto ff2020 clear\n")) else {
+    let Some((d, mut f, mut c, _s, art)) = setup_with_shell(Some("Emerald = auto ff2020 clear\n"))
+    else {
         return;
     };
     let start = running_with_label(&mut f, &mut c, &d, &art);
-    f.app_mut().tick_ms((start + slot::fetch_art::stage_start(Stage::Peel) + 200.0) as u64);
+    f.app_mut()
+        .tick_ms((start + slot::fetch_art::stage_start(Stage::Peel) + 200.0) as u64);
     f.compose(&mut c);
     let frame = c.read_frame();
     dump(&frame, "clear-peel");
     let p = px(&frame, 486, 222);
-    assert!(p[1] > 30, "the bare well shows plain plastic, no board: {p:?}");
+    assert!(
+        p[1] > 30,
+        "the bare well shows plain plastic, no board: {p:?}"
+    );
 }
 
 fn example_up(f: &mut Frontend, c: &mut Compositor) {
@@ -243,8 +263,14 @@ fn connecting_is_centered_text_alone() {
         .filter(|&y| (0..720).any(|x| luma(px(&frame, x, y)) > 180.0))
         .collect();
     let (top, bottom) = (lit[0], lit[lit.len() - 1]);
-    assert!(((top + bottom) as i32 - 422).abs() <= 8, "text spans {top}..{bottom}");
-    assert!(bottom - top < 60, "more than a line of text: {top}..{bottom}");
+    assert!(
+        ((top + bottom) as i32 - 422).abs() <= 8,
+        "text spans {top}..{bottom}"
+    );
+    assert!(
+        bottom - top < 60,
+        "more than a line of text: {top}..{bottom}"
+    );
 }
 
 #[test]
@@ -254,16 +280,28 @@ fn summary_with_nothing_landed_has_no_cart() {
     };
     example_up(&mut f, &mut c);
     art.push(ArtEvent::Counted(1));
-    art.push(ArtEvent::Missed { stem: "Fusion".into() });
-    art.push(ArtEvent::Done { landed: 0, missed: vec!["Fusion".into()] });
-    compose_until(&mut f, &mut c, |f| matches!(f.app().fetch_art(), Some(FetchArt::Summary { .. })));
+    art.push(ArtEvent::Missed {
+        stem: "Fusion".into(),
+    });
+    art.push(ArtEvent::Done {
+        landed: 0,
+        missed: vec!["Fusion".into()],
+    });
+    compose_until(&mut f, &mut c, |f| {
+        matches!(f.app().fetch_art(), Some(FetchArt::Summary { .. }))
+    });
     f.compose(&mut c);
     let frame = c.read_frame();
     dump(&frame, "summary-empty");
     let ink: Vec<usize> = (0..720)
         .filter(|&x| (0..422).any(|y| luma(px(&frame, x, y)) > 180.0))
         .collect();
-    assert!(ink[0] > 150 && *ink.last().unwrap() < 570, "{}..{}", ink[0], ink.last().unwrap());
+    assert!(
+        ink[0] > 150 && *ink.last().unwrap() < 570,
+        "{}..{}",
+        ink[0],
+        ink.last().unwrap()
+    );
 }
 
 #[test]
@@ -272,15 +310,24 @@ fn summary_shows_a_cart_that_landed() {
         return;
     };
     let start = running_with_label(&mut f, &mut c, &d, &art);
-    art.push(ArtEvent::Done { landed: 1, missed: vec![] });
-    f.app_mut().tick_ms((start + slot::fetch_art::SCENE_MS + 10.0) as u64);
+    art.push(ArtEvent::Done {
+        landed: 1,
+        missed: vec![],
+    });
+    f.app_mut()
+        .tick_ms((start + slot::fetch_art::SCENE_MS + 10.0) as u64);
     compose_until(&mut f, &mut c, |f| {
-        matches!(f.app().fetch_art(), Some(FetchArt::Summary { .. })) && f.app().fetch_featured_ready()
+        matches!(f.app().fetch_art(), Some(FetchArt::Summary { .. }))
+            && f.app().fetch_featured_ready()
     });
     f.compose(&mut c);
     let frame = c.read_frame();
     dump(&frame, "summary");
-    assert!(near(px(&frame, 188, 211), BLUE, 6), "{:?}", px(&frame, 188, 211));
+    assert!(
+        near(px(&frame, 188, 211), BLUE, 6),
+        "{:?}",
+        px(&frame, 188, 211)
+    );
 }
 
 #[test]
@@ -294,10 +341,17 @@ fn the_cart_itself_is_centered_above_the_footer() {
     f.compose(&mut c);
     let frame = c.read_frame();
     dump(&frame, "centered");
-    let blue: Vec<usize> = (0..422).filter(|&y| near(px(&frame, 360, y), BLUE, 6)).collect();
+    let blue: Vec<usize> = (0..422)
+        .filter(|&y| near(px(&frame, 360, y), BLUE, 6))
+        .collect();
     let well = (blue[0] + blue[blue.len() - 1]) as i32;
     let want = 2 * (106 + 118);
-    assert!((well - want).abs() <= 4, "well spans {}..{}", blue[0], blue[blue.len() - 1]);
+    assert!(
+        (well - want).abs() <= 4,
+        "well spans {}..{}",
+        blue[0],
+        blue[blue.len() - 1]
+    );
 }
 
 #[test]
@@ -353,8 +407,13 @@ fn skipping_draws_a_centered_bar_and_no_cart() {
     }
     let frame = c.read_frame();
     dump(&frame, "skip-progress");
-    assert!(!near(px(&frame, 360, 120), BLUE, 40), "a cart is still showing");
-    let bright = (150..570).filter(|&x| luma(px(&frame, x, 210)) > 200.0).count();
+    assert!(
+        !near(px(&frame, 360, 120), BLUE, 40),
+        "a cart is still showing"
+    );
+    let bright = (150..570)
+        .filter(|&x| luma(px(&frame, x, 210)) > 200.0)
+        .count();
     assert!(bright > 300, "no filled bar: {bright}");
 }
 
@@ -366,7 +425,15 @@ fn the_summary_cart_is_there_on_its_first_frame() {
     running_with_label(&mut f, &mut c, &d, &art);
     f.app_mut().apply(Action::GbaDown(Btn::X));
     f.app_mut().apply(Action::GbaUp(Btn::X));
-    art.push(ArtEvent::Done { landed: 1, missed: Vec::new() });
-    compose_until(&mut f, &mut c, |f| matches!(f.app().fetch_art(), Some(FetchArt::Summary { .. })));
-    assert!(f.app().fetch_featured_ready(), "the cart popped in after the summary");
+    art.push(ArtEvent::Done {
+        landed: 1,
+        missed: Vec::new(),
+    });
+    compose_until(&mut f, &mut c, |f| {
+        matches!(f.app().fetch_art(), Some(FetchArt::Summary { .. }))
+    });
+    assert!(
+        f.app().fetch_featured_ready(),
+        "the cart popped in after the summary"
+    );
 }

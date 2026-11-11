@@ -361,7 +361,10 @@ impl Studio {
     fn step_shape(&mut self, forward: bool) {
         const ORDER: [Outline; 3] = [Outline::Auto, Outline::Notched, Outline::Rounded];
         let current = self.current_shell();
-        let at = ORDER.iter().position(|o| *o == current.outline).unwrap_or(0);
+        let at = ORDER
+            .iter()
+            .position(|o| *o == current.outline)
+            .unwrap_or(0);
         let next = if forward { at + 1 } else { at + 2 } % 3;
         self.shell = Some(ShellChoice {
             outline: ORDER[next],
@@ -392,8 +395,16 @@ impl Studio {
         let rows = self.rows();
         let count = rows.len();
         match (btn, rows.get(row).copied()?) {
-            (Btn::Up, _) => self.screen = Screen::List { row: (row + count - 1) % count },
-            (Btn::Down, _) => self.screen = Screen::List { row: (row + 1) % count },
+            (Btn::Up, _) => {
+                self.screen = Screen::List {
+                    row: (row + count - 1) % count,
+                }
+            }
+            (Btn::Down, _) => {
+                self.screen = Screen::List {
+                    row: (row + 1) % count,
+                }
+            }
             (Btn::B, _) => return Some(Effect::Close),
             (Btn::A, Row::Label) => {
                 self.screen = Screen::Sheet { at: 0 };
@@ -421,10 +432,22 @@ impl Studio {
     fn press_sheet(&mut self, at: usize, btn: Btn) -> Option<Effect> {
         let last = self.sheet.len().saturating_sub(1);
         match btn {
-            Btn::Left | Btn::Up => self.screen = Screen::Sheet { at: at.saturating_sub(1) },
-            Btn::Right | Btn::Down => self.screen = Screen::Sheet { at: (at + 1).min(last) },
+            Btn::Left | Btn::Up => {
+                self.screen = Screen::Sheet {
+                    at: at.saturating_sub(1),
+                }
+            }
+            Btn::Right | Btn::Down => {
+                self.screen = Screen::Sheet {
+                    at: (at + 1).min(last),
+                }
+            }
             Btn::B => {
-                let row = self.rows().iter().position(|r| *r == Row::Label).unwrap_or(0);
+                let row = self
+                    .rows()
+                    .iter()
+                    .position(|r| *r == Row::Label)
+                    .unwrap_or(0);
                 self.screen = Screen::List { row };
             }
             Btn::A => {
@@ -537,7 +560,11 @@ impl Studio {
                 start,
             } => match btn {
                 Btn::Left | Btn::Right => {
-                    let pos = if btn == Btn::Left { (pos + 5) % 6 } else { (pos + 1) % 6 };
+                    let pos = if btn == Btn::Left {
+                        (pos + 5) % 6
+                    } else {
+                        (pos + 1) % 6
+                    };
                     self.screen = Screen::Hex {
                         target,
                         digits,

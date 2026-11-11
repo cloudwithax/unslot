@@ -453,9 +453,19 @@ fn no_cart_shows_as_a_sliver_on_a_wide_panel() {
 
 fn label_run(shown: &Shown, y: usize) -> usize {
     let label = shown.at(shown.w / 2, y);
-    let near = |p: [u8; 4]| p[..3].iter().zip(&label[..3]).all(|(a, b)| a.abs_diff(*b) < 12);
-    let left = (0..shown.w / 2).rev().take_while(|x| near(shown.at(*x, y))).count();
-    let right = (shown.w / 2..shown.w).take_while(|x| near(shown.at(*x, y))).count();
+    let near = |p: [u8; 4]| {
+        p[..3]
+            .iter()
+            .zip(&label[..3])
+            .all(|(a, b)| a.abs_diff(*b) < 12)
+    };
+    let left = (0..shown.w / 2)
+        .rev()
+        .take_while(|x| near(shown.at(*x, y)))
+        .count();
+    let right = (shown.w / 2..shown.w)
+        .take_while(|x| near(shown.at(*x, y)))
+        .count();
     left + right
 }
 
