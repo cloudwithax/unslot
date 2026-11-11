@@ -610,3 +610,26 @@ fn the_charging_led_is_left_to_the_kernel() {
     assert_eq!(read(&d, "amber:charging/brightness"), "0", "slot drove the kernel's charging LED");
     assert_eq!(read(&d, "green:power/brightness"), "255");
 }
+
+#[test]
+fn the_bottom_screen_backlight_powers_down_and_back_on_its_own() {
+    let d = sysfs("1666", "87");
+    let top = second_panel(&d, "1666");
+    let bottom_power = d.path().join("class/backlight/backlight-lcd0/bl_power");
+    let mut p = platform(&d);
+    p.set_bottom_backlight(false);
+    assert_eq!(fs::read_to_string(&bottom_power).unwrap(), "4");
+    assert!(!top.with_file_name("bl_power").exists());
+    p.set_backlight(10);
+    assert_eq!(fs::read_to_string(&bottom_power).unwrap(), "4");
+    p.set_bottom_backlight(true);
+    assert_eq!(fs::read_to_string(&bottom_power).unwrap(), "0");
+}
+
+#[test]
+fn one_screen_has_no_bottom_backlight_to_switch() {
+    let d = sysfs("255", "87");
+    let mut p = platform(&d);
+    p.set_bottom_backlight(false);
+    assert!(!d.path().join("class/backlight/backlight-lcd0/bl_power").exists());
+}

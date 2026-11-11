@@ -130,6 +130,7 @@ pub fn run() {
     let (mut frames, mut missed, mut early, mut stale) = (0u32, 0u32, 0u32, 0u32);
     let (mut repeats, mut shown_at) = (0u32, None::<Instant>);
     let mut stages = Stages::default();
+    let mut bottom_blank = false;
     loop {
         pacer.wait();
         let began = Instant::now();
@@ -180,11 +181,14 @@ pub fn run() {
         let bottom_began = Instant::now();
         if let Some(pass) = ds.as_ref() {
             let power = frontend.ds_frame().map(|_| frontend.screen_power());
-            let drawn = match frontend.bottom_source() {
+            let source = frontend.bottom_source();
+            let drawn = match source {
                 BottomSource::Compositor => draw_menu_below(&mut *surface, &mut frontend, &mut compositor, window),
                 BottomSource::DsScreen => draw_bottom(&mut *surface, pass, power),
+                BottomSource::Black if bottom_blank => Ok(()),
                 BottomSource::Black => draw_bottom(&mut *surface, pass, None),
             };
+            bottom_blank = source == BottomSource::Black && drawn.is_ok();
             if let Err(e) = drawn {
                 eprintln!("slot: bottom panel: {e}");
                 ds = None;

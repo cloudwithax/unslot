@@ -565,6 +565,19 @@ impl Platform for DevicePlatform {
         }
     }
 
+    fn set_bottom_backlight(&mut self, on: bool) {
+        let Some(Backlight::Class(dirs)) = &self.backlight else {
+            return;
+        };
+        let [(bottom, _), _] = dirs.as_slice() else {
+            return;
+        };
+        let file = bottom.join("bl_power");
+        if let Err(e) = fs::write(&file, if on { "0" } else { "4" }) {
+            eprintln!("slot: {}: {e}", file.display());
+        }
+    }
+
     fn battery(&self) -> Option<Battery> {
         let dir = self.battery.as_ref()?;
         let percent = read_number(&dir.join("capacity"))?;

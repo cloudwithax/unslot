@@ -721,6 +721,7 @@ pub struct App {
     pending_save: Option<std::thread::JoinHandle<()>>,
     eject_write: Option<std::thread::JoinHandle<bool>>,
     two_panels: bool,
+    bottom_lit: Option<bool>,
     ds_slot_faces: Option<(TexId, TexId)>,
     box_art: Option<BoxArtFaces>,
     ds_landed: Option<f64>,
@@ -1218,6 +1219,7 @@ impl App {
             pending_save: None,
             eject_write: None,
             two_panels: false,
+            bottom_lit: None,
             ds_slot_faces: None,
             box_art: None,
             ds_landed: None,
@@ -6296,6 +6298,7 @@ impl App {
         }
         self.timers();
         self.poll_link();
+        self.sync_bottom_backlight();
         let now = self.now();
         self.tick_move(now);
         let lead = match (&self.edit, self.move_view(now)) {
@@ -7017,7 +7020,7 @@ impl App {
             (Screen::Top, false) if gaming && self.screen > 0.0 && self.panel_lit() => out.push(Draw::Game),
             (Screen::Top, false) => self.draw_top_idle(out),
             (Screen::Bottom, false) if ds => {}
-            (Screen::Bottom, false) if matches!(self.phase, Phase::Playing { .. }) => self.draw_bottom_slot(out),
+            (Screen::Bottom, false) if matches!(self.phase, Phase::Playing { .. }) => {}
             (Screen::Bottom, false) => {
                 let from = out.len();
                 single(out);
@@ -7184,20 +7187,18 @@ impl App {
         );
     }
 
-    fn draw_bottom_slot(&self, out: &mut Vec<Draw>) {
-        let Phase::Playing { cart } = &self.phase else {
+    fn sync_bottom_backlight(&mut self) {
+        if !self.two_panels {
             return;
-        };
-        self.draw_background(out);
-        self.draw_seated_mouth(cart, out);
-        draw_footer(
-            self.canvas(),
-            self.gauge(),
-            self.bolt,
-            self.shelf_clock,
-            footer_ink(self.light()),
-            out,
-        );
+        }
+        let lit = self.bottom_source() != BottomSource::Black;
+        if self.bottom_lit == Some(lit) {
+            return;
+        }
+        self.bottom_lit = Some(lit);
+        if let Some(power) = &mut self.power {
+            power.set_bottom_backlight(lit);
+        }
     }
 
     pub fn bottom_source(&self) -> BottomSource {
@@ -7209,6 +7210,9 @@ impl App {
         }
         if self.ds_seated() && !self.ds_flying() && !self.ds_powering_on() {
             return BottomSource::DsScreen;
+        }
+        if matches!(self.phase, Phase::Playing { .. }) && !self.ds_seated() {
+            return BottomSource::Black;
         }
         BottomSource::Compositor
     }

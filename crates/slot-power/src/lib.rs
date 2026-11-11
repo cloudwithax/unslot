@@ -54,6 +54,9 @@ pub enum LedState {
 
 pub trait Platform: Send {
     fn set_backlight(&mut self, step: u8);
+
+    fn set_bottom_backlight(&mut self, _on: bool) {}
+
     fn battery(&self) -> Option<Battery>;
     fn charge(&self) -> Charge;
     fn set_led(&mut self, state: LedState);

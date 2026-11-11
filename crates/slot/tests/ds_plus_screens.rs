@@ -126,7 +126,7 @@ fn a_gba_cart_inserts_on_the_bottom_screen() {
 }
 
 #[test]
-fn a_gba_cart_stays_seated_in_the_bottom_slot_while_it_plays() {
+fn the_bottom_screen_goes_black_while_a_gba_cart_plays() {
     let (_d, mut a) = two_panel_app();
     a.set_snapshot(StubSnapshot::boxed());
     a.apply(slot_input::Action::Insert);
@@ -139,11 +139,7 @@ fn a_gba_cart_stays_seated_in_the_bottom_slot_while_it_plays() {
         "{:?}",
         a.phase()
     );
-    assert_eq!(a.bottom_source(), slot::app::BottomSource::Compositor);
-    assert!(
-        big_tex(&bottom(&a)).is_some(),
-        "no seated cart on the bottom screen"
-    );
+    assert_eq!(a.bottom_source(), slot::app::BottomSource::Black);
     a.set_game_ready(true);
     let mut top = Vec::new();
     a.draw_screen(Screen::Top, &mut top);
@@ -545,7 +541,7 @@ mod rendered {
     }
 
     #[test]
-    fn the_bottom_screen_shows_the_gba_slot_on_the_shelf_and_while_playing() {
+    fn the_bottom_screen_shows_the_gba_slot_on_the_shelf_and_goes_black_in_game() {
         let mut r = Rig::gba();
         assert_eq!(r.f.bottom_source(), BottomSource::Compositor);
         let shelf = r.shot(Screen::Bottom, "slot-shelf-bottom");
@@ -571,12 +567,14 @@ mod rendered {
             r.shot(Screen::Bottom, &format!("slot-insert-bottom-{i}"));
         }
         r.run_for(4.0);
+        assert_eq!(r.f.bottom_source(), BottomSource::Black);
         let playing = r.shot(Screen::Bottom, "slot-play-bottom");
         r.shot(Screen::Top, "slot-play-top");
-        assert_ne!(
-            shelf, playing,
-            "the seated cart does not show on the bottom"
-        );
+        let lit = playing
+            .chunks(4)
+            .filter(|p| p[0] > 30 || p[1] > 30 || p[2] > 30)
+            .count();
+        assert_eq!(lit, 0, "the bottom screen is lit in game");
     }
 
     fn title_band(px: &[u8]) -> usize {
