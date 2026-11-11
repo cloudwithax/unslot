@@ -251,7 +251,6 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             shader_gbc: Shader::Simpletex,
             resume_insert: true,
             resume_power_on: true,
-            turbo: true,
             rewind: true,
             gb_palettes: false,
             gb_palette: GbPalette::DEFAULT,
@@ -299,7 +298,6 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
         shader_gb: Shader::Off,
         resume_insert: false,
         resume_power_on: true,
-        turbo: false,
         rewind: false,
         gb_palettes: true,
         gb_palette: GbPalette::parse("GBC Dark Green →A").unwrap(),
@@ -333,7 +331,6 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
         "shader_gb=off",
         "resume_insert=0",
         "resume_power_on=1",
-        "turbo=0",
         "rewind=0",
         "gb_palettes=1",
         "gb_palette=GBC Dark Green →A",
@@ -746,5 +743,27 @@ fn a_frame_blending_the_rows_do_not_offer_reads_as_off() {
     assert!(
         read.clock_set,
         "the rest of the card was thrown away with it"
+    );
+}
+
+#[test]
+fn only_a_card_that_turned_turbo_off_reads_as_turbo_off() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("Config")).unwrap();
+    assert!(!slot_store::legacy_turbo_off(d.path()));
+    for (text, off) in [
+        ("rewind=1\nturbo=0\n", true),
+        ("turbo=1\n", false),
+        ("rewind=0\n", false),
+        ("turbo=nope\n", false),
+    ] {
+        std::fs::write(d.path().join("Config/slot.state"), text).unwrap();
+        assert_eq!(slot_store::legacy_turbo_off(d.path()), off, "{text:?}");
+    }
+    write_slot_state(d.path(), &read_slot_state(d.path())).unwrap();
+    let text = std::fs::read_to_string(d.path().join("Config/slot.state")).unwrap();
+    assert!(
+        !text.contains("turbo="),
+        "slot.state still writes the turbo switch"
     );
 }

@@ -1257,6 +1257,7 @@ impl App {
         app.root = Some(root.to_path_buf());
         app.loading = loading;
         app.state = read_slot_state(root);
+        let turbo_off = slot_store::legacy_turbo_off(root);
         app.give_wallpapers(root);
         tell_libc_the_zone(app.state.zone);
         app.romm = crate::romm::RommConf::load(root);
@@ -1264,6 +1265,9 @@ impl App {
         app.carousel = read_carousel(root);
         app.shortcuts = read_shortcuts(root);
         app.controls = read_controls(root);
+        if turbo_off {
+            app.turbo_off_moves_to_controls(root);
+        }
         app.install_collections(slot_store::read_collections(root));
         app.restock_recents();
         app.restock_favorites();
@@ -2611,9 +2615,6 @@ impl App {
         if !self.left_stick {
             hidden.push(QuickRow::LeftStick);
         }
-        if !self.state.turbo {
-            hidden.extend([QuickRow::GameTurboA, QuickRow::GameTurboB]);
-        }
         if !self.has_states || self.link_active() {
             hidden.push(QuickRow::States);
         }
@@ -2787,7 +2788,6 @@ impl App {
             QuickRow::LeftStick => Some(QuickValue::flag(self.state.left_stick_dpad)),
             QuickRow::ResumeInsert => Some(QuickValue::flag(self.state.resume_insert)),
             QuickRow::ResumePowerOn => Some(QuickValue::flag(self.state.resume_power_on)),
-            QuickRow::Turbo => Some(QuickValue::flag(self.state.turbo)),
             QuickRow::Rewind => Some(QuickValue::flag(self.state.rewind)),
             QuickRow::Recents => Some(if self.state.show_recents {
                 QuickValue::Show
@@ -3624,9 +3624,6 @@ impl App {
         if !self.left_stick {
             hidden.push(QuickRow::LeftStick);
         }
-        if !self.state.turbo {
-            hidden.extend([QuickRow::GameTurboA, QuickRow::GameTurboB]);
-        }
         if !self.server_allowed() {
             hidden.push(QuickRow::Server);
         }
@@ -4290,15 +4287,9 @@ impl App {
                 &self.shortcuts,
                 &self.carousel,
                 self.state.kid_mode,
-                self.state.turbo,
             );
         }
-        crate::input::Table::new(
-            &self.controls,
-            &self.shortcuts,
-            &self.carousel,
-            self.state.turbo,
-        )
+        crate::input::Table::new(&self.controls, &self.shortcuts, &self.carousel)
     }
 
     pub fn input_context(&self) -> slot_input::Context {
@@ -4544,12 +4535,25 @@ impl App {
         self.link.as_ref().map(|s| s.client_id)
     }
 
-    pub fn may_rewind(&self) -> bool {
-        self.state.rewind && !self.link_active()
+    fn turbo_off_moves_to_controls(&mut self, root: &Path) {
+        self.controls.set_game(GameButton::TurboA, None);
+        self.controls.set_game(GameButton::TurboB, None);
+        let written = write_controls(root, &self.controls);
+        self.card_writes.wrote("controls", &written);
+        if let Err(e) = written {
+            eprintln!("slot: turbo off: controls: {e}");
+            return;
+        }
+        let written = write_slot_state(root, &self.state);
+        self.card_writes.wrote("state", &written);
+        match written {
+            Ok(()) => eprintln!("slot: turbo off moved to unbound Turbo A and Turbo B"),
+            Err(e) => eprintln!("slot: turbo off: state: {e}"),
+        }
     }
 
-    pub fn turbo(&self) -> bool {
-        self.state.turbo
+    pub fn may_rewind(&self) -> bool {
+        self.state.rewind && !self.link_active()
     }
 
     pub fn records_rewind(&self) -> bool {
@@ -5590,7 +5594,6 @@ impl App {
             | QuickRow::PlayContrast
             | QuickRow::ResumeInsert
             | QuickRow::ResumePowerOn
-            | QuickRow::Turbo
             | QuickRow::Rewind
             | QuickRow::FastForward
             | QuickRow::FastForwardSound
@@ -5891,7 +5894,6 @@ impl App {
             QuickRow::LeftStick => s.left_stick_dpad = !s.left_stick_dpad,
             QuickRow::ResumeInsert => s.resume_insert = !s.resume_insert,
             QuickRow::ResumePowerOn => s.resume_power_on = !s.resume_power_on,
-            QuickRow::Turbo => s.turbo = !s.turbo,
             QuickRow::Rewind => s.rewind = !s.rewind,
             QuickRow::GbaBlending => {
                 s.blending_gba = s.blending_gba.step(&Blending::MGBA, right);

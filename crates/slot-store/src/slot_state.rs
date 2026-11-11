@@ -468,7 +468,6 @@ pub struct SlotState {
     pub shader_gbc: Shader,
     pub resume_insert: bool,
     pub resume_power_on: bool,
-    pub turbo: bool,
     pub rewind: bool,
     pub gb_palettes: bool,
     pub gb_palette: GbPalette,
@@ -657,7 +656,6 @@ impl Default for SlotState {
             shader_gbc: Shader::Simpletex,
             resume_insert: true,
             resume_power_on: true,
-            turbo: true,
             rewind: true,
             gb_palettes: false,
             gb_palette: GbPalette::DEFAULT,
@@ -705,6 +703,14 @@ fn state_path(root: &Path) -> PathBuf {
     root.join("Config").join("slot.state")
 }
 
+pub fn legacy_turbo_off(root: &Path) -> bool {
+    std::fs::read_to_string(state_path(root)).is_ok_and(|text| {
+        text.lines()
+            .filter_map(|l| l.split_once('='))
+            .any(|(key, value)| key.trim() == "turbo" && flag(value.trim()) == Some(false))
+    })
+}
+
 const RECENTS_FILE: &str = "recents.txt";
 const FAVORITES_FILE: &str = "favorites.txt";
 
@@ -749,7 +755,7 @@ fn write_list(root: &Path, name: &str, list: &[Recent]) -> std::io::Result<()> {
 
 pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     let mut text = format!(
-        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nzone={}\nclock_24h={}\nnetwork_time={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction_gba={}\ncolour_correction_gb={}\nshader_gba={}\nshader_gb={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nappearance={}\nwallpaper={}\n",
+        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nzone={}\nclock_24h={}\nnetwork_time={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction_gba={}\ncolour_correction_gb={}\nshader_gba={}\nshader_gb={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nappearance={}\nwallpaper={}\n",
         s.cart.as_deref().unwrap_or(""),
         s.cart_platform.map_or(String::new(), platform_key),
         s.brightness,
@@ -769,7 +775,6 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         s.colour_correction_gb as u8,
         s.shader_gba.name(),
         s.shader_gb.name(),
-        s.turbo as u8,
         s.rewind as u8,
         s.gb_palettes as u8,
         s.gb_palette.core_name(),
@@ -889,7 +894,6 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut resume_insert = None;
     let mut resume_power_on = None;
     let mut wallpapers_given = None;
-    let mut turbo = None;
     let mut rewind = None;
     let mut gb_palettes = None;
     let mut gb_palette = None;
@@ -959,7 +963,6 @@ fn parse(text: &str) -> Option<SlotState> {
             "resume_insert" => resume_insert = flag(value),
             "resume_power_on" => resume_power_on = flag(value),
             "wallpapers_given" => wallpapers_given = flag(value),
-            "turbo" => turbo = flag(value),
             "rewind" => rewind = flag(value),
             "gb_palettes" => gb_palettes = flag(value),
             "gb_palette" => gb_palette = GbPalette::parse(value),
@@ -1041,7 +1044,6 @@ fn parse(text: &str) -> Option<SlotState> {
         resume_power_on: resume_power_on
             .or(auto_load.map(|(_, power_on)| power_on))
             .unwrap_or(fallback.resume_power_on),
-        turbo: turbo.unwrap_or(fallback.turbo),
         rewind: rewind.unwrap_or(fallback.rewind),
         gb_palettes: gb_palettes.unwrap_or(fallback.gb_palettes),
         gb_palette: gb_palette.unwrap_or(fallback.gb_palette),

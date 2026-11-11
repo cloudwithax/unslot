@@ -170,7 +170,6 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Fast Forward",
             "Fast Forward Sound",
             "Rewind",
-            "Turbo Buttons",
             "Rumble",
             "Left Stick as D-Pad",
             "Resume on Insert",
@@ -844,4 +843,15 @@ fn tools_labels() -> Vec<&'static str> {
         labels.push("Fetch Box Art");
     }
     labels
+}
+
+#[test]
+fn every_row_sits_in_all_at_its_own_index() {
+    for (i, row) in QuickRow::ALL.iter().enumerate() {
+        assert_eq!(
+            row.index(),
+            i,
+            "{row:?} is declared out of step with QuickRow::ALL, so it would draw another row's label"
+        );
+    }
 }

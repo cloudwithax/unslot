@@ -21,7 +21,6 @@ pub enum QuickRow {
     GbColourCorrection,
     Game,
     ResumePowerOn,
-    Turbo,
     Rewind,
     GbPalette,
     Theme,
@@ -149,7 +148,7 @@ pub enum QuickRow {
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 135 + cfg!(feature = "nds") as usize] = [
+    pub const ALL: [QuickRow; 134 + cfg!(feature = "nds") as usize] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -162,7 +161,6 @@ impl QuickRow {
         QuickRow::GbColourCorrection,
         QuickRow::Game,
         QuickRow::ResumePowerOn,
-        QuickRow::Turbo,
         QuickRow::Rewind,
         QuickRow::GbPalette,
         QuickRow::Theme,
@@ -450,11 +448,10 @@ impl QuickRow {
         QuickRow::GbStretch,
     ];
 
-    pub const GAME: [QuickRow; 8] = [
+    pub const GAME: [QuickRow; 7] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Rewind,
-        QuickRow::Turbo,
         QuickRow::Rumble,
         QuickRow::LeftStick,
         QuickRow::ResumeInsert,
@@ -536,7 +533,6 @@ impl QuickRow {
             QuickRow::FastForward
             | QuickRow::FastForwardSound
             | QuickRow::Rewind
-            | QuickRow::Turbo
             | QuickRow::Rumble
             | QuickRow::LeftStick
             | QuickRow::ResumeInsert
@@ -708,7 +704,6 @@ impl QuickRow {
             QuickRow::Game => "Gameplay",
             QuickRow::ResumeInsert => "Resume on Insert",
             QuickRow::ResumePowerOn => "Resume on Power On",
-            QuickRow::Turbo => "Turbo Buttons",
             QuickRow::Rewind => "Rewind",
             QuickRow::GbPalette => "Palette",
             QuickRow::Theme => "Theme",

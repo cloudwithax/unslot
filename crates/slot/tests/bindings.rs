@@ -549,8 +549,7 @@ fn a_shelf_key_pair_switches_shelves_only_with_both_held() {
 fn a_shortcut_pair_reaches_the_gestures_as_a_pair() {
     let mut keys = ShortcutKeys::default();
     keys.set(Shortcut::SaveState, Binding::pair(Device::R1, Device::L1));
-    let table =
-        slot::input::Table::new(&Controls::default(), &keys, &CarouselKeys::default(), true);
+    let table = slot::input::Table::new(&Controls::default(), &keys, &CarouselKeys::default());
     assert!(table.entries().iter().any(|e| e.chord
         == slot_input::Chord {
             modifier: Some(slot_input::Mod::Button(Btn::L1)),
@@ -594,8 +593,7 @@ fn a_start_pair_clashes_only_with_a_single_on_start() {
     );
     keys.set(Shortcut::FastForward, Binding::plain(Device::L2));
     keys.set(Shortcut::Rewind, Binding::plain(Device::R2));
-    let table =
-        slot::input::Table::new(&Controls::default(), &keys, &CarouselKeys::default(), true);
+    let table = slot::input::Table::new(&Controls::default(), &keys, &CarouselKeys::default());
     for row in [
         QuickRow::ScPaletteBack,
         QuickRow::ScPaletteNext,
@@ -609,8 +607,7 @@ fn a_start_pair_clashes_only_with_a_single_on_start() {
         );
     }
     keys.set(Shortcut::Rewind, Binding::plain(Device::Start));
-    let table =
-        slot::input::Table::new(&Controls::default(), &keys, &CarouselKeys::default(), true);
+    let table = slot::input::Table::new(&Controls::default(), &keys, &CarouselKeys::default());
     assert!(
         table.clash(QuickRow::ScRewind).is_some(),
         "START alone does block a START pair"
@@ -622,8 +619,7 @@ fn an_unordered_pair_still_clashes_with_a_single_on_either_button() {
     let mut keys = ShortcutKeys::default();
     keys.set(Shortcut::SaveState, Binding::pair(Device::L1, Device::R1));
     keys.set(Shortcut::Rewind, Binding::plain(Device::R1));
-    let table =
-        slot::input::Table::new(&Controls::default(), &keys, &CarouselKeys::default(), true);
+    let table = slot::input::Table::new(&Controls::default(), &keys, &CarouselKeys::default());
     assert_eq!(table.clash(QuickRow::ScSave), Some(QuickRow::ScRewind));
 }
 
@@ -704,8 +700,7 @@ fn a_shelf_key_led_by_start_needs_start_first() {
         CarouselAction::Favorite,
         Binding::pair(Device::Start, Device::A),
     );
-    let table =
-        slot::input::Table::new(&Controls::default(), &ShortcutKeys::default(), &keys, true);
+    let table = slot::input::Table::new(&Controls::default(), &ShortcutKeys::default(), &keys);
     let shelf = || {
         let mut g = slot_input::Gestures::new();
         g.set_entries(table.entries());
@@ -818,22 +813,66 @@ fn brightness_on_a_shelf_key_does_both_on_the_shelf_and_is_flagged() {
 }
 
 #[test]
-fn with_turbo_off_its_rows_are_hidden_and_never_flagged() {
+fn a_card_with_turbo_off_unbinds_both_turbo_buttons_once() {
     let mut keys = ShortcutKeys::default();
     keys.set(Shortcut::SaveState, Binding::plain(Device::X));
     let d = shelf_card();
     write_shortcuts(d.path(), &keys).expect("write shortcuts");
+    let state_file = d.path().join("Config/slot.state");
+    let text = std::fs::read_to_string(&state_file).expect("read slot.state");
+    let text: String = text
+        .lines()
+        .filter(|l| !l.starts_with("turbo="))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(&state_file, format!("{text}turbo=0\n")).expect("write slot.state");
+
     let (s, _) = on_shelf(d.path());
-    assert_eq!(s.app().clash(QuickRow::ScSave), Some(QuickRow::GameTurboA));
-    let mut state = slot_store::read_slot_state(d.path());
-    state.turbo = false;
-    slot_store::write_slot_state(d.path(), &state).expect("write slot.state");
-    let (s, _) = on_shelf(d.path());
+    for g in [GameButton::TurboA, GameButton::TurboB] {
+        assert_eq!(
+            read_controls(d.path()).game(g),
+            None,
+            "{g:?} still bound on the card"
+        );
+    }
     for row in [QuickRow::GameTurboA, QuickRow::GameTurboB] {
-        assert!(s.app().hidden_rows().contains(&row), "{row:?} is shown");
+        assert!(!s.app().hidden_rows().contains(&row), "{row:?} is hidden");
         assert_eq!(s.app().clash(row), None);
     }
     assert_eq!(s.app().clash(QuickRow::ScSave), None);
+    let text = std::fs::read_to_string(&state_file).expect("read slot.state");
+    assert!(
+        !text.lines().any(|l| l.starts_with("turbo=")),
+        "the old switch is still on the card, so the next boot would unbind again"
+    );
+    drop(s);
+
+    let mut controls = read_controls(d.path());
+    controls.set_game(GameButton::TurboA, Binding::plain(Device::L2));
+    slot_store::write_controls(d.path(), &controls).expect("write controls");
+    let (_s, _) = on_shelf(d.path());
+    assert_eq!(
+        read_controls(d.path()).game(GameButton::TurboA),
+        Binding::plain(Device::L2),
+        "a later boot undid the player's own turbo binding"
+    );
+}
+
+#[test]
+fn a_card_with_turbo_on_keeps_turbo_on_x_and_y() {
+    let d = shelf_card();
+    let state_file = d.path().join("Config/slot.state");
+    let text = std::fs::read_to_string(&state_file).unwrap_or_default();
+    std::fs::write(&state_file, format!("{text}turbo=1\n")).expect("write slot.state");
+    let (_s, _) = on_shelf(d.path());
+    assert_eq!(
+        read_controls(d.path()).game(GameButton::TurboA),
+        Binding::plain(Device::X)
+    );
+    assert_eq!(
+        read_controls(d.path()).game(GameButton::TurboB),
+        Binding::plain(Device::Y)
+    );
 }
 
 #[test]
@@ -842,7 +881,6 @@ fn select_x_in_game_is_the_screenshot_action() {
         &Controls::default(),
         &ShortcutKeys::default(),
         &CarouselKeys::default(),
-        true,
     );
     assert!(table.entries().iter().any(|e| e.chord
         == slot_input::Chord {

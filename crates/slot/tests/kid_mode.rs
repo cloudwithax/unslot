@@ -338,14 +338,7 @@ fn a_game_bound_to_l2_keeps_it() {
         slot_store::Binding::plain(slot_store::Device::L2),
     );
     slot_store::write_controls(d.path(), &controls).unwrap();
-    write_slot_state(
-        d.path(),
-        &SlotState {
-            turbo: true,
-            ..SlotState::default()
-        },
-    )
-    .unwrap();
+    write_slot_state(d.path(), &SlotState::default()).unwrap();
     let mut a = {
         let mut s = read_slot_state(d.path());
         s.cart = Some("Emerald".into());
