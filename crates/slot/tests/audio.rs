@@ -438,7 +438,8 @@ impl slot_power::Platform for PowerCut {
 
 #[test]
 fn the_speaker_is_let_go_before_the_power_is_cut() {
-    let cuts: [(&str, fn(&mut slot::frontend::Frontend)); 2] = [
+    type Cut = fn(&mut slot::frontend::Frontend);
+    let cuts: [(&str, Cut); 2] = [
         ("power off", |f| f.poweroff()),
         ("restart", |f| f.restart()),
     ];

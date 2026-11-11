@@ -113,7 +113,7 @@ fn alpha(d: &Draw) -> f32 {
         | Draw::Part { alpha, .. }
         | Draw::Turned { alpha, .. }
         | Draw::Quad { alpha, .. } => alpha,
-        Draw::Game | Draw::Shot { .. } | Draw::Capture | Draw::Quad { .. } | Draw::Paper { .. } => 1.0,
+        Draw::Game | Draw::Shot { .. } | Draw::Capture | Draw::Paper { .. } => 1.0,
     }
 }
 

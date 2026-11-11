@@ -442,7 +442,9 @@ fn every_shortcut_row_keeps_its_label_clear_of_its_binding_on_a_4_by_3_panel() {
         tap(&mut f, Btn::Down);
     }
     tap(&mut f, Btn::A);
-    tap(&mut f, Btn::Down);
+    while f.app().quick_menu() != Some(QuickRow::Shortcuts) {
+        tap(&mut f, Btn::Down);
+    }
     tap(&mut f, Btn::A);
     for row in QuickRow::SHORTCUTS {
         assert_eq!(f.app().quick_menu(), Some(row));
@@ -484,6 +486,9 @@ fn link_screen_on(panel: (u32, u32)) -> Option<Vec<u8>> {
     let mut c = Compositor::new(&surface).ok()?;
     let d = common::tmp_root_with_gb_carts(&["Tetris"]);
     clocked(d.path());
+    let mut s = slot_store::read_slot_state(d.path());
+    s.gb_core = slot_store::Core::Mgba;
+    slot_store::write_slot_state(d.path(), &s).unwrap();
     let mut f = Frontend::boot(Box::new(SimPlatform::at(d.path().to_path_buf())));
     f.upload_faces(&mut c);
     f.upload_bezel(&mut c, panel);
@@ -885,7 +890,7 @@ fn long_menu_values_keep_clear_of_their_labels_on_a_4_by_3_panel() {
     tap(&mut f, &mut input, Btn::Menu);
     down_to(&mut f, &mut input, QuickRow::Controls);
     tap(&mut f, &mut input, Btn::A);
-    tap(&mut f, &mut input, Btn::Down);
+    down_to(&mut f, &mut input, QuickRow::Shortcuts);
     tap(&mut f, &mut input, Btn::A);
     check(&mut f, &mut c, &mut input, QuickRow::ScColour);
     check(&mut f, &mut c, &mut input, QuickRow::ScFastForwardToggle);

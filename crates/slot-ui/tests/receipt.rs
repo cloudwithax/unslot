@@ -73,7 +73,7 @@ fn no_host_omits_the_line() {
     let m = modules(URL);
     let with = receipt_face(&m, &text(Some("GAMEBIT.LOCAL"), "192.168.1.42"));
     let without = receipt_face(&m, &text(None, "192.168.1.42"));
-    let last = |f: &UndoFace| ink_rows(f).into_iter().filter(|y| *y < 368).last().unwrap();
+    let last = |f: &UndoFace| ink_rows(f).into_iter().rfind(|y| *y < 368).unwrap();
     assert!(last(&without) < last(&with));
 }
 

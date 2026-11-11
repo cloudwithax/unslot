@@ -119,8 +119,8 @@ fn press(f: &mut Frontend, btn: Btn) {
 }
 
 fn first_edge(frame: &[u8], x: usize) -> usize {
-    let ground = px(frame, x, 100);
-    (100..400)
+    let ground = px(frame, x, 125);
+    (125..400)
         .find(|&y| !near(px(frame, x, y), ground, 30))
         .unwrap_or(400)
 }

@@ -807,13 +807,11 @@ fn the_wifi_page_renders() {
         !inked(&off, 40..360, wifi).is_empty(),
         "the Wi-Fi row moved when Wi-Fi went off"
     );
-    for row in [QuickRow::Networks] {
-        let top = quick_row_top(slot_ui::Canvas::FRAMED, row, &[]) as usize;
-        assert!(
-            inked(&off, 40..right + 4, top).is_empty(),
-            "{row:?} is still drawn with Wi-Fi off"
-        );
-    }
+    let top = quick_row_top(slot_ui::Canvas::FRAMED, QuickRow::Networks, &[]) as usize;
+    assert!(
+        inked(&off, 40..right + 4, top).is_empty(),
+        "Networks is still drawn with Wi-Fi off"
+    );
 }
 
 #[test]

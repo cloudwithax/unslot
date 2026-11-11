@@ -596,16 +596,14 @@ fn clean_baseos_removes_only_our_stale_files() {
     }
 }
 
-fn ranged(
-    body: &[u8],
-    chunk: u64,
-    short_at: Option<u64>,
-) -> (
+type Ranged = (
     Result<[u8; 32], UpdateFail>,
     Vec<u8>,
     Vec<(u64, u64)>,
     Vec<u64>,
-) {
+);
+
+fn ranged(body: &[u8], chunk: u64, short_at: Option<u64>) -> Ranged {
     let mut asked = Vec::new();
     let mut out = Vec::new();
     let mut seen = Vec::new();

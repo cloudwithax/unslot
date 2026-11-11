@@ -340,6 +340,8 @@ pub const LINKED_HOLD_MS: Millis = 1000;
 
 pub const UNPLUG_HOLD_MS: Millis = 420;
 
+pub type NameFace = (String, [(TexId, u32, u32); 2]);
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct BoxArtFaces {
     pub boxed: Option<(TexId, u32, u32)>,
@@ -588,7 +590,7 @@ pub struct App {
     glide: Option<(f32, Millis)>,
     leaving: Option<(Leaving, Millis)>,
     press: Option<(Btn, Millis)>,
-    name_faces: Vec<(String, [(TexId, u32, u32); 2])>,
+    name_faces: Vec<NameFace>,
     add_faces: Option<([(TexId, u32); 2], usize)>,
     count_badge: Option<((TexId, f32, f32), usize)>,
     core_board_face: Option<TexId>,
@@ -3410,7 +3412,6 @@ impl App {
         let name = &self.collections[i].name;
         self.collection_pngs
             .iter()
-            .cloned()
             .find(|file| {
                 file.rsplit_once('.')
                     .is_some_and(|(stem, _)| stem.eq_ignore_ascii_case(name))
@@ -7454,8 +7455,7 @@ impl App {
                     _ => {
                         if self.edit.is_some() {
                             self.draw_picking(out);
-                        } else if self.draw_leaving(out) {
-                        } else if self.draw_pressing(out) {
+                        } else if self.draw_leaving(out) || self.draw_pressing(out) {
                         } else if let Some(part) = self.ds_parted() {
                             self.shelf().draw_row_parted(self.canvas(), None, part, out);
                             draw_empty_slot(self.canvas(), self.slot_faces, out);
@@ -8683,7 +8683,7 @@ impl App {
         self.heading_face = face;
     }
 
-    pub fn set_name_faces(&mut self, faces: Vec<(String, [(TexId, u32, u32); 2])>) {
+    pub fn set_name_faces(&mut self, faces: Vec<NameFace>) {
         self.name_faces = faces;
     }
 
