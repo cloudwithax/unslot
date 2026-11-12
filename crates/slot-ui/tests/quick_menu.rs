@@ -116,8 +116,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
         .map(QuickRow::label)
         .collect();
     // The Game Boy family first, then every other system in the order of the shelves.
-    // Every system but the apps, which draw no game.
-    assert_eq!(screens.len(), Platform::COUNT - 1);
+    // Every system but the apps, which draw no game, and the DS, which DraStic draws.
+    assert_eq!(screens.len(), Platform::COUNT - 2);
     assert_eq!(
         screens[..13],
         [

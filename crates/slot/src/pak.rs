@@ -9,6 +9,7 @@
 //!   pak.sig    the ed25519 signature of `pak`, in hex
 //!   MinUI.zip  the update itself, as tools/update/pack.sh made it
 
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use ed25519_dalek::{Signature, VerifyingKey};
@@ -24,37 +25,87 @@ pub const RELEASE_KEY: [u8; 32] = [
 const FORMAT: &str = "format=unslot-pak/1";
 const ZIP: &str = "MinUI.zip";
 
-/// A pack that checked out: the version it says it is and the update inside it.
-#[derive(Debug)]
-pub struct Pak {
-    pub version: String,
-    pub zip: Vec<u8>,
-}
-
 /// The name a release's pack goes by.
 pub fn file_name(version: &str) -> String {
     format!("unslot-{version}.pak")
 }
 
-/// Reads the pack at `path` and checks it against unslot's release key.
-pub fn open(path: &Path) -> Result<Pak, String> {
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-    check(&bytes, &RELEASE_KEY)
+/// Checks a pack on disk without keeping its update in memory.
+pub fn check_file(path: &Path, key: &[u8; 32]) -> Result<String, String> {
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    check(&mut file, key)
 }
 
-/// Checks a pack's bytes against `key`: its note is signed by it, says what it is, and names
-/// the zip inside by a checksum the zip matches.
-pub fn check(bytes: &[u8], key: &[u8; 32]) -> Result<Pak, String> {
-    let entries = stored_entries(bytes).ok_or("this is not an unslot pack")?;
-    let entry = |name: &str| {
-        entries
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, data)| *data)
-            .ok_or_else(|| format!("the pack has no {name}"))
+/// Checks a seekable pack against `key`, discarding the verified update.
+pub fn check(reader: &mut (impl Read + Seek), key: &[u8; 32]) -> Result<String, String> {
+    read_pack(reader, key, &mut std::io::sink())
+}
+
+/// Copies and checks the update in one pass; a failed copy is never left to install.
+pub fn unpack(path: &Path, out: &Path, key: &[u8; 32]) -> Result<String, String> {
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut output = std::fs::File::create(out).map_err(|e| e.to_string())?;
+    let result = read_pack(&mut file, key, &mut output);
+    drop(output);
+    if result.is_err() {
+        let _ = std::fs::remove_file(out);
+    }
+    result
+}
+
+fn read_pack(
+    reader: &mut (impl Read + Seek),
+    key: &[u8; 32],
+    output: &mut impl Write,
+) -> Result<String, String> {
+    let entries = regions(reader).map_err(|_| "this is not an unslot pack")?;
+    let entry = |index: usize| {
+        entries[index].ok_or_else(|| format!("the pack has no {}", ["pak", "pak.sig", ZIP][index]))
     };
-    let note = entry("pak")?;
-    let sig = entry("pak.sig")?;
+    let mut small = |index| -> Result<Vec<u8>, String> {
+        let (at, size) = entry(index)?;
+        if size > 65_536 {
+            return Err("the pack's note or signature is too large".into());
+        }
+        let mut bytes = vec![0; size as usize];
+        reader
+            .seek(SeekFrom::Start(at))
+            .map_err(|e| e.to_string())?;
+        reader.read_exact(&mut bytes).map_err(|e| e.to_string())?;
+        Ok(bytes)
+    };
+    let note = small(0)?;
+    let sig = small(1)?;
+    let (version, want) = check_note(&note, &sig, key)?;
+    let (at, mut remaining) = entry(2)?;
+    reader
+        .seek(SeekFrom::Start(at))
+        .map_err(|e| e.to_string())?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0; 65_536];
+    while remaining != 0 {
+        let count = remaining.min(buffer.len() as u64) as usize;
+        reader
+            .read_exact(&mut buffer[..count])
+            .map_err(|e| e.to_string())?;
+        hash.update(&buffer[..count]);
+        output
+            .write_all(&buffer[..count])
+            .map_err(|e| e.to_string())?;
+        remaining -= count as u64;
+    }
+    let got: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    if !got.eq_ignore_ascii_case(want) {
+        return Err(format!("{version}'s zip is not the one it was signed with"));
+    }
+    Ok(version.to_string())
+}
+
+fn check_note<'a>(
+    note: &'a [u8],
+    sig: &[u8],
+    key: &[u8; 32],
+) -> Result<(&'a str, &'a str), String> {
     verify(
         "the pack",
         note,
@@ -75,18 +126,7 @@ pub fn check(bytes: &[u8], key: &[u8; 32]) -> Result<Pak, String> {
         .filter(|v| !v.is_empty())
         .ok_or("the pack does not say what version it is")?;
     let want = field("sha256").ok_or("the pack does not say what its zip is")?;
-    let zip = entry(ZIP)?;
-    let got: String = Sha256::digest(zip)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    if !got.eq_ignore_ascii_case(want) {
-        return Err(format!("{version}'s zip is not the one it was signed with"));
-    }
-    Ok(Pak {
-        version: version.to_string(),
-        zip: zip.to_vec(),
-    })
+    Ok((version, want))
 }
 
 /// Checks that `signed`, which complaints call `what`, is what `key` signed, by its signature
@@ -120,35 +160,68 @@ fn u32_at(b: &[u8], at: usize) -> Option<usize> {
     Some(u32::from_le_bytes(b.get(at..at + 4)?.try_into().ok()?) as usize)
 }
 
-/// A zip's entries, by name, when every one is stored rather than compressed, as a pack's are.
-fn stored_entries(b: &[u8]) -> Option<Vec<(String, &[u8])>> {
-    // The end of the central directory is the last record, after at most a 64 KiB comment.
-    let end = (0..=b.len().checked_sub(22)?)
+type Regions = [Option<(u64, u64)>; 3];
+
+// Read directory records individually: even an archive full of extras stays bounded.
+fn regions(reader: &mut (impl Read + Seek)) -> std::io::Result<Regions> {
+    let invalid = || std::io::Error::from(std::io::ErrorKind::InvalidData);
+    let len = reader.seek(SeekFrom::End(0))?;
+    let tail_len = len.min(65_536 + 22) as usize;
+    let mut tail = vec![0; tail_len];
+    reader.seek(SeekFrom::Start(len - tail_len as u64))?;
+    reader.read_exact(&mut tail)?;
+    let end = (0..=tail_len.checked_sub(22).ok_or_else(invalid)?)
         .rev()
-        .take(65_536 + 22)
-        .find(|&i| b[i..].starts_with(&[0x50, 0x4b, 0x05, 0x06]))?;
-    let (count, mut at) = (u16_at(b, end + 10)?, u32_at(b, end + 16)?);
-    let mut out = Vec::with_capacity(count);
+        .find(|&i| tail[i..].starts_with(&[0x50, 0x4b, 0x05, 0x06]))
+        .ok_or_else(invalid)?;
+    let count = u16_at(&tail, end + 10).ok_or_else(invalid)?;
+    let mut at = u32_at(&tail, end + 16).ok_or_else(invalid)? as u64;
+    drop(tail);
+    let mut entries = [None; 3];
     for _ in 0..count {
-        if !b.get(at..)?.starts_with(&[0x50, 0x4b, 0x01, 0x02]) || u16_at(b, at + 10)? != 0 {
-            return None;
+        reader.seek(SeekFrom::Start(at))?;
+        let mut header = [0; 46];
+        reader.read_exact(&mut header)?;
+        if !header.starts_with(&[0x50, 0x4b, 0x01, 0x02]) {
+            return Err(invalid());
         }
-        let size = u32_at(b, at + 20)?;
-        let (name_len, extra, comment) = (
-            u16_at(b, at + 28)?,
-            u16_at(b, at + 30)?,
-            u16_at(b, at + 32)?,
-        );
-        let local = u32_at(b, at + 42)?;
-        let name = String::from_utf8(b.get(at + 46..at + 46 + name_len)?.to_vec()).ok()?;
-        if !b.get(local..)?.starts_with(&[0x50, 0x4b, 0x03, 0x04]) {
-            return None;
+        let name_len = u16_at(&header, 28).ok_or_else(invalid)?;
+        at += (46
+            + name_len
+            + u16_at(&header, 30).ok_or_else(invalid)?
+            + u16_at(&header, 32).ok_or_else(invalid)?) as u64;
+        if u16_at(&header, 10) != Some(0) {
+            continue;
         }
-        let data = local + 30 + u16_at(b, local + 26)? + u16_at(b, local + 28)?;
-        out.push((name, b.get(data..data + size)?));
-        at += 46 + name_len + extra + comment;
+        let mut name = vec![0; name_len];
+        reader.read_exact(&mut name)?;
+        let Some(index) = [b"pak".as_slice(), b"pak.sig", ZIP.as_bytes()]
+            .iter()
+            .position(|&n| n == name)
+        else {
+            continue;
+        };
+        if entries[index].is_some() {
+            continue;
+        }
+        let local = u32_at(&header, 42).ok_or_else(invalid)? as u64;
+        let size = u32_at(&header, 20).ok_or_else(invalid)? as u64;
+        reader.seek(SeekFrom::Start(local))?;
+        let mut header = [0; 30];
+        reader.read_exact(&mut header)?;
+        if !header.starts_with(&[0x50, 0x4b, 0x03, 0x04]) || u16_at(&header, 8) != Some(0) {
+            return Err(invalid());
+        }
+        let data = local
+            + 30
+            + u16_at(&header, 26).ok_or_else(invalid)? as u64
+            + u16_at(&header, 28).ok_or_else(invalid)? as u64;
+        if data + size > len {
+            return Err(invalid());
+        }
+        entries[index] = Some((data, size));
     }
-    Some(out)
+    Ok(entries)
 }
 
 /// Packs made here, for the pretend updater on the desktop and for the tests.
@@ -191,7 +264,7 @@ pub mod build {
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
-        let mut note = format!("{FORMAT}\nversion={version}\nzip={ZIP}\nsha256={sha}\n");
+        let mut note = note(version, &sha);
         let sig = SigningKey::from_bytes(&seed).sign(note.as_bytes());
         tamper(&mut note);
         let sig: String = sig.to_bytes().iter().map(|b| format!("{b:02x}")).collect();
@@ -200,6 +273,10 @@ pub mod build {
             ("pak.sig", sig.as_bytes()),
             (ZIP, zip),
         ])
+    }
+
+    pub(super) fn note(version: &str, sha: &str) -> String {
+        format!("{FORMAT}\nversion={version}\nzip={ZIP}\nsha256={sha}\n")
     }
 
     /// A zip of stored entries, with no extras, as `zip -0 -X` makes.
@@ -247,6 +324,152 @@ pub mod build {
 mod tests {
     use super::build::*;
     use super::*;
+    use std::io::Cursor;
+
+    #[derive(Debug)]
+    struct Checked {
+        version: String,
+        zip: Vec<u8>,
+    }
+
+    fn check(bytes: &[u8], key: &[u8; 32]) -> Result<Checked, String> {
+        let mut zip = Vec::new();
+        let version = read_pack(&mut Cursor::new(bytes), key, &mut zip)?;
+        Ok(Checked { version, zip })
+    }
+
+    fn stored_entries(bytes: &[u8]) -> Option<Vec<(String, &[u8])>> {
+        let entries = regions(&mut Cursor::new(bytes)).ok()?;
+        ["pak", "pak.sig", ZIP]
+            .into_iter()
+            .zip(entries)
+            .map(|(name, region)| {
+                let (at, size) = region?;
+                Some((
+                    name.to_string(),
+                    bytes.get(at as usize..(at + size) as usize)?,
+                ))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn unpack_copies_the_zip_and_removes_a_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("update.pak");
+        let out = dir.path().join("MinUI.zip");
+        let zip = vec![42; 200_000];
+        let good = pack("v2.11.0", &zip, TEST_SEED, |_| {});
+        std::fs::write(&path, &good).unwrap();
+        assert_eq!(unpack(&path, &out, &test_key()).unwrap(), "v2.11.0");
+        assert_eq!(std::fs::read(&out).unwrap(), zip);
+        let entries = stored_entries(&good).unwrap();
+        let swapped = stored_zip(&[
+            ("pak", entries[0].1),
+            ("pak.sig", entries[1].1),
+            (ZIP, b"swapped"),
+        ]);
+        std::fs::write(&path, swapped).unwrap();
+        assert!(unpack(&path, &out, &test_key())
+            .unwrap_err()
+            .contains("not the one it was signed with"));
+        assert!(!out.exists());
+    }
+
+    // The signed note from the published v2.11.0 pack, fetched with curl -L -r 0-4095.
+    const RELEASE_NOTE: &str = "format=unslot-pak/1\nversion=v2.11.0\nzip=MinUI.zip\nsha256=402d2a611817d08393764f4203c1ec42813249ddfbbd682148beaec5e94167b1\n";
+    const RELEASE_SIG: &str = "332398137cc5e0b1c89f59122ab3fcd5d16c6cf44ee812bb3d94d4dd5f582a6f94a7c19f7ace5f0abaff03503c8dbddc680b896e1b2daaa367b472696716210d";
+    const RELEASE_SHA: &str = "402d2a611817d08393764f4203c1ec42813249ddfbbd682148beaec5e94167b1";
+
+    #[test]
+    fn the_published_release_note_verifies() {
+        assert_eq!(
+            check_note(
+                RELEASE_NOTE.as_bytes(),
+                RELEASE_SIG.as_bytes(),
+                &RELEASE_KEY
+            )
+            .unwrap(),
+            ("v2.11.0", RELEASE_SHA)
+        );
+    }
+
+    #[test]
+    fn the_writer_keeps_the_published_note_format() {
+        assert_eq!(build::note("v2.11.0", RELEASE_SHA), RELEASE_NOTE);
+    }
+
+    #[test]
+    fn signed_unknown_lines_and_crlf_are_accepted() {
+        let bytes = pack("v2.11.0", b"the update", TEST_SEED, |_| {});
+        let entries = stored_entries(&bytes).unwrap();
+        let note = format!(
+            "future=before\r\n{}future=after\r\n",
+            std::str::from_utf8(entries[0].1)
+                .unwrap()
+                .replace('\n', "\r\n")
+        );
+        let sig = sign(note.as_bytes(), TEST_SEED);
+        let bytes = stored_zip(&[
+            ("pak", note.as_bytes()),
+            ("pak.sig", sig.as_bytes()),
+            (ZIP, b"the update"),
+        ]);
+        let pak = check(&bytes, &test_key()).unwrap();
+        assert_eq!(pak.version, "v2.11.0");
+        assert_eq!(pak.zip, b"the update");
+    }
+
+    #[test]
+    fn a_deflated_extra_is_ignored() {
+        let good = pack("v2.11.0", b"the update", TEST_SEED, |_| {});
+        let entries = stored_entries(&good).unwrap();
+        let extra = b"future metadata";
+        let deflated = miniz_oxide::deflate::compress_to_vec(extra, 6);
+        let mut bytes = stored_zip(&[
+            ("pak", entries[0].1),
+            ("pak.sig", entries[1].1),
+            (ZIP, entries[2].1),
+            ("extra", &deflated),
+        ]);
+        let end = bytes.len() - 22;
+        let mut at = u32_at(&bytes, end + 16).unwrap();
+        for _ in 0..3 {
+            at += 46 + u16_at(&bytes, at + 28).unwrap();
+        }
+        let local = u32_at(&bytes, at + 42).unwrap();
+        bytes[at + 10..at + 12].copy_from_slice(&8u16.to_le_bytes());
+        bytes[local + 8..local + 10].copy_from_slice(&8u16.to_le_bytes());
+        for (crc, size) in [(at + 16, at + 24), (local + 14, local + 22)] {
+            bytes[crc..crc + 4].copy_from_slice(&crc32fast::hash(extra).to_le_bytes());
+            bytes[size..size + 4].copy_from_slice(&(extra.len() as u32).to_le_bytes());
+        }
+        let pak = check(&bytes, &test_key()).unwrap();
+        assert_eq!(pak.version, "v2.11.0");
+        assert_eq!(pak.zip, b"the update");
+    }
+
+    #[test]
+    fn required_entries_must_be_stored_and_present() {
+        let good = pack("v2.11.0", b"the update", TEST_SEED, |_| {});
+        let entries = stored_entries(&good).unwrap();
+        for index in 0..3 {
+            let mut bytes = good.clone();
+            let mut at = u32_at(&bytes, bytes.len() - 6).unwrap();
+            for _ in 0..index {
+                at += 46 + u16_at(&bytes, at + 28).unwrap();
+            }
+            bytes[at + 10..at + 12].copy_from_slice(&8u16.to_le_bytes());
+            assert!(check(&bytes, &test_key()).is_err());
+            let remaining: Vec<_> = entries
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != index)
+                .map(|(_, (name, data))| (name.as_str(), *data))
+                .collect();
+            assert!(check(&stored_zip(&remaining), &test_key()).is_err());
+        }
+    }
 
     #[test]
     fn a_signed_pack_gives_up_its_zip_untouched() {

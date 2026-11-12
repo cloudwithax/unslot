@@ -88,7 +88,7 @@ fn play(c: &Cheevos, want: impl Fn(&Notice) -> bool) -> Vec<Notice> {
 }
 
 /// Signs in, loads the game and maps `ram` as the NES' memory.
-fn start(http: Arc<dyn Http>, rom: &Path, ram: &mut [u8]) -> (Cheevos, Notice) {
+fn start(http: Arc<dyn Http>, rom: &Path, ram: &mut [u8], hardcore: bool) -> (Cheevos, Notice) {
     let mut c = Cheevos::new(http).unwrap();
     let (ptr, len) = (ram.as_mut_ptr(), ram.len());
     let mapped = unsafe {
@@ -103,6 +103,7 @@ fn start(http: Arc<dyn Http>, rom: &Path, ram: &mut [u8]) -> (Cheevos, Notice) {
         wait(&c, |n| matches!(n, Notice::LoggedIn(_))),
         Notice::LoggedIn(Ok(()))
     );
+    c.set_hardcore(hardcore);
     c.load_game(rom, Console::NES);
     let loaded = wait(&c, |n| matches!(n, Notice::GameLoaded(_)));
     (c, loaded)
@@ -131,14 +132,14 @@ fn achievements_are_earned_offline_and_sent_once_back_online() {
     // Online once, which keeps the account and the game's achievements on the card.
     server.online.store(true, Ordering::SeqCst);
     let mut ram = vec![0u8; 0x800];
-    let (c, loaded) = start(offline.clone(), &rom, &mut ram);
+    let (c, loaded) = start(offline.clone(), &rom, &mut ram, false);
     assert!(matches!(loaded, Notice::GameLoaded(Ok(_))), "{loaded:?}");
     drop(c);
 
     // The Wi-Fi goes. The game still loads, and an unlock is queued instead of lost.
     server.online.store(false, Ordering::SeqCst);
     let mut ram = vec![0u8; 0x800];
-    let (c, loaded) = start(offline.clone(), &rom, &mut ram);
+    let (c, loaded) = start(offline.clone(), &rom, &mut ram, false);
     assert!(matches!(loaded, Notice::GameLoaded(Ok(_))), "{loaded:?}");
     play(&c, |_| false);
     ram[0] = 1;
@@ -151,7 +152,7 @@ fn achievements_are_earned_offline_and_sent_once_back_online() {
 
     // Started again, still offline: what was earned is not earned twice.
     let mut ram = vec![0u8; 0x800];
-    let (c, loaded) = start(offline.clone(), &rom, &mut ram);
+    let (c, loaded) = start(offline.clone(), &rom, &mut ram, false);
     match &loaded {
         Notice::GameLoaded(Ok((summary, _))) => assert!(summary.contains('1'), "{summary}"),
         n => panic!("{n:?}"),
@@ -180,6 +181,50 @@ fn achievements_are_earned_offline_and_sent_once_back_online() {
         .unwrap();
     assert!((3600..3700).contains(&o), "{award}");
     assert_eq!(offline.sync(), 0);
+}
+
+#[test]
+fn hardcore_unlocks_survive_offline_restarts_after_a_softcore_session() {
+    let d = tempfile::tempdir().unwrap();
+    let rom = d.path().join("game.nes");
+    std::fs::write(&rom, (0..=255u8).cycle().take(1024).collect::<Vec<_>>()).unwrap();
+    let dir = d.path().join("ra");
+    let server = Arc::new(Server::default());
+    let offline = Arc::new(Offline::with_clock(
+        &dir,
+        server.clone(),
+        Box::new(|| 1_800_000_000),
+    ));
+
+    server.online.store(true, Ordering::SeqCst);
+    let mut ram = vec![0u8; 0x800];
+    let (c, loaded) = start(offline.clone(), &rom, &mut ram, false);
+    assert!(matches!(loaded, Notice::GameLoaded(Ok(_))), "{loaded:?}");
+    drop(c);
+
+    server.online.store(false, Ordering::SeqCst);
+    let mut ram = vec![0u8; 0x800];
+    let (c, loaded) = start(offline.clone(), &rom, &mut ram, true);
+    assert!(matches!(loaded, Notice::GameLoaded(Ok(_))), "{loaded:?}");
+    play(&c, |_| false);
+    ram[0] = 1;
+    let seen = play(&c, |n| matches!(n, Notice::Unlocked { .. }));
+    assert!(unlocked(&seen, "First"), "{seen:?}");
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(Offline::pending(&dir), 1);
+    let queued = walk(&dir.join("queue"));
+    let body = std::fs::read_to_string(&queued[0]).unwrap();
+    assert!(body.contains("&h=1&"), "{body}");
+    drop(c);
+
+    let mut ram = vec![0u8; 0x800];
+    let (c, loaded) = start(offline, &rom, &mut ram, true);
+    assert!(matches!(loaded, Notice::GameLoaded(Ok(_))), "{loaded:?}");
+    play(&c, |_| false);
+    ram[0] = 1;
+    let seen = play(&c, |n| matches!(n, Notice::Unlocked { .. }));
+    assert!(!unlocked(&seen, "First"), "{seen:?}");
+    assert_eq!(Offline::pending(&dir), 1);
 }
 
 #[test]
@@ -394,4 +439,68 @@ fn formatted_cached_json_merges_unlocks_without_duplicate_keys() {
     assert_eq!(data["ServerNow"], 200);
     assert_eq!(data["Unlocks"][0]["ID"], 1);
     assert_eq!(data["Unlocks"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn cached_sessions_merge_unlock_modes_and_keep_hardcore_upgrades() {
+    struct Session {
+        online: AtomicBool,
+        body: &'static str,
+    }
+    impl Http for Session {
+        fn send(&self, _: &HttpRequest) -> Result<(u16, Vec<u8>), String> {
+            if !self.online.load(Ordering::SeqCst) {
+                return Err("offline".into());
+            }
+            Ok((200, self.body.as_bytes().to_vec()))
+        }
+    }
+    for body in [
+        r#"{"Success":true,"Unlocks":[]}"#,
+        r#"{"Success":true,"Unlocks":null,"HardcoreUnlocks":false}"#,
+        r#"{"Success":true,"Unlocks":[{"ID":1,"When":100}],"HardcoreUnlocks":[{"ID":1,"When":100}]}"#,
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        let server = Arc::new(Session {
+            online: AtomicBool::new(true),
+            body,
+        });
+        let offline = Offline::with_clock(d.path(), server.clone(), Box::new(|| 200));
+        let start = HttpRequest {
+            url: "https://retroachievements.org/dorequest.php".into(),
+            post: Some("r=startsession&u=Benni&g=100&t=tok&h=0".into()),
+            content_type: None,
+        };
+        offline.send(&start).unwrap();
+        offline.send(&award(1)).unwrap();
+        let hardcore = |id| HttpRequest {
+            post: Some(format!("r=awardachievement&u=Benni&t=tok&a={id}&h=1&v=x")),
+            ..award(id)
+        };
+        offline.send(&hardcore(2)).unwrap();
+        server.online.store(false, Ordering::SeqCst);
+        offline.send(&award(1)).unwrap();
+        offline.send(&hardcore(1)).unwrap();
+        offline.send(&hardcore(1)).unwrap();
+        offline.send(&award(1)).unwrap();
+        offline.send(&award(2)).unwrap();
+        offline.send(&award(3)).unwrap();
+        let recorded = std::fs::read_to_string(d.path().join("unlocks/Benni.txt")).unwrap();
+        assert_eq!(recorded, "1 200\n2 200 h\n1 200 h\n3 200\n");
+
+        let (_, body) = offline.send(&start).unwrap();
+        let data: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(data["ServerNow"], 200);
+        for (key, ids) in [("Unlocks", [1, 3]), ("HardcoreUnlocks", [1, 2])] {
+            let unlocks = data[key].as_array().unwrap();
+            assert_eq!(unlocks.len(), 2, "{data}");
+            for id in ids {
+                assert_eq!(
+                    unlocks.iter().filter(|v| v["ID"] == id).count(),
+                    1,
+                    "{data}"
+                );
+            }
+        }
+    }
 }

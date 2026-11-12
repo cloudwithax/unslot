@@ -327,6 +327,27 @@ tasks:
     cmds:
       - sh tools/services/build.sh vendor/services
 
+  drastic:
+    desc: >-
+      Fetch DraStic and its own BIOS from trngaje's advanced_drastic and build SDL_drastic with
+      Knulli's H700 patches into vendor/drastic, for the DS, noting where each came from in
+      drastic.manifest
+    status:
+      - test -f vendor/drastic/drastic.manifest
+      - test -f vendor/drastic/libs/libunslot-drastic.so
+    cmds:
+      - task: device:sh
+        vars:
+          CMD: >-
+            DRASTIC_CACHE=target-device/drastic-cache sh tools/drastic/build.sh vendor/drastic
+            && chown -R {{.UID}}:{{.GID}} vendor/drastic
+      - file vendor/drastic/drastic | grep -q aarch64
+      - file vendor/drastic/libs/libSDL2-2.0.so.0 | grep -q aarch64
+      - file vendor/drastic/libs/libunslot-drastic.so | grep -q aarch64
+    vars:
+      UID: {sh: id -u}
+      GID: {sh: id -g}
+
   core:fetch:update:
     desc: Re-fetch the buildbot cores even if every one is already in vendor/
     cmds:
@@ -571,7 +592,7 @@ tasks:
 
   dist:device:
     desc: Build the SD2 tree for an H700 device, OUT defaults to ./dist-device
-    deps: [core:device, core:gpsp, core:fetch, core:gles, core:nodosumi, cast:lib, services, media, overlays, build:device]
+    deps: [core:device, core:gpsp, core:fetch, core:gles, core:nodosumi, cast:lib, services, media, overlays, drastic, build:device]
     vars:
       OUT: '{{.OUT | default "dist-device"}}'
       UID: {sh: id -u}
@@ -613,6 +634,13 @@ tasks:
         cp vendor/media/mutool vendor/media/ffmpeg "{{.OUT}}/System/bin/"
         cp vendor/media/media.meta vendor/media/ffmpeg-GPLv3.txt "{{.OUT}}/System/licenses/"
       - cp -R vendor/services {{.OUT}}/System/services
+      - |
+        set -eu
+        # DraStic, Exophase's freeware, beside the launcher and settings card/System/drastic gave
+        # it, and the SDL it runs on, zlib's; with where each came from.
+        mkdir -p "{{.OUT}}/System/drastic"
+        cp -R vendor/drastic/drastic vendor/drastic/libs vendor/drastic/system vendor/drastic/game_database.xml "{{.OUT}}/System/drastic/"
+        cp vendor/drastic/drastic.manifest vendor/drastic/drastic_readme.txt vendor/drastic/SDL-LICENSE.txt "{{.OUT}}/System/licenses/"
       - |
         set -eu
         # R. Savant's overlays, free for any H700 handheld, with where they came from.
@@ -709,7 +737,7 @@ tasks:
 
   deploy:device:
     desc: Build and push onto a device over adb, then restart it. SD defaults to /mnt/sdcard
-    deps: [core:device, core:gpsp, core:fetch, services, build:device]
+    deps: [core:device, core:gpsp, core:fetch, services, drastic, build:device]
     vars:
       SD: '{{.SD | default "/mnt/sdcard"}}'
     cmds:
@@ -723,6 +751,7 @@ tasks:
       - for c in {{.FETCHED}}; do adb push "vendor/${c}_libretro.so" '{{.SD}}/System/'; done
       - adb push licenses '{{.SD}}/System/'
       - adb push vendor/services '{{.SD}}/System/'
+      - for f in drastic libs system game_database.xml; do adb push "vendor/drastic/$f" '{{.SD}}/System/drastic/'; done
       - adb shell 'mkdir -p {{.SD}}/System/Wallpapers {{.SD}}/System/Slots'
       - |
         for f in assets/wallpapers/*; do

@@ -70,7 +70,7 @@ const POWER_OFF_S: f32 = 0.16;
 
 const FOOTER_SLIDE_S: f32 = POWER_ON_S;
 
-const VOLUME_STEP: u8 = 5;
+pub(crate) const VOLUME_STEP: u8 = 5;
 
 const AUTOSAVE_MS: Millis = 300_000;
 const CARD_CHECK_MS: Millis = 2_000;
@@ -144,7 +144,34 @@ struct Reload {
     cancelled: bool,
     from: LinkKind,
     from_serial: &'static str,
-    fallback: bool,
+}
+
+enum LinkReload {
+    /// Asked for with the serial to load, and not yet taken up by the session.
+    Asked(Reload, &'static str),
+    Loading(Reload),
+    /// The load failed, so the old serial is asked for, and not yet taken up.
+    Back(Reload),
+    Returning(Reload),
+}
+
+impl LinkReload {
+    fn job(&mut self) -> &mut Reload {
+        match self {
+            LinkReload::Asked(r, _)
+            | LinkReload::Loading(r)
+            | LinkReload::Back(r)
+            | LinkReload::Returning(r) => r,
+        }
+    }
+
+    /// The job, and whether it was on its way back to the old serial.
+    fn into_job(self) -> (Reload, bool) {
+        match self {
+            LinkReload::Asked(r, _) | LinkReload::Loading(r) => (r, false),
+            LinkReload::Back(r) | LinkReload::Returning(r) => (r, true),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -427,6 +454,13 @@ pub enum PageModel {
     Video(crate::apps::VideoModel),
 }
 
+/// The random wallpaper, once one has been looked for.
+enum RandomDraw {
+    Unseen,
+    Bare,
+    Pick(String),
+}
+
 /// A row on the network page.
 enum NetRow {
     Network(Network),
@@ -468,6 +502,30 @@ impl Rack {
 const RECENTS_AT: usize = 0;
 const FAVORITES_AT: usize = 1;
 
+/// Where the shelf's slot name is: waiting on its face, shown since a time, or done.
+#[derive(Copy, Clone)]
+enum SlotName {
+    Idle,
+    Waiting,
+    Named(Millis),
+}
+
+/// Whether a game's hardcore achievements stand, or were just given up for its tracker to hear.
+#[derive(Copy, Clone, PartialEq)]
+enum HardcoreGame {
+    Off,
+    On,
+    Dropped,
+}
+
+/// The card's games being looked through again: not at all, on a thread, or on one with another
+/// look queued behind it.
+enum Rescan {
+    Idle,
+    Running(std::sync::mpsc::Receiver<Vec<Cart>>),
+    Queued(std::sync::mpsc::Receiver<Vec<Cart>>),
+}
+
 pub struct App {
     phase: Phase,
     shelves: Vec<(Rack, Shelf)>,
@@ -496,8 +554,7 @@ pub struct App {
     last_role: LinkRow,
     link_choices: HashMap<String, LinkKind>,
     link_loaded: Option<&'static str>,
-    link_reload: Option<(String, &'static str)>,
-    reload: Option<Reload>,
+    reload: Option<LinkReload>,
     link_menu_faces: Vec<(TexId, u32, u32)>,
     link_linked_face: Option<(TexId, u32, u32)>,
     link_step_faces: Vec<(TexId, u32, u32)>,
@@ -505,11 +562,10 @@ pub struct App {
     link_legend_faces: Vec<(TexId, u32)>,
     starting: Option<LinkStarting>,
     link_transport: Option<(u16, Box<dyn LinkChannel>)>,
-    restarting: bool,
-    reloading: bool,
+    /// How slot is going down, and when it may go, once the screen has shown it.
+    shutdown: Option<(PowerChoice, Millis)>,
     /// Whether the picture is on a TV through HDMI rather than on the panel.
     external_display: bool,
-    act_at: Millis,
     root: Option<PathBuf>,
     state: SlotState,
     vol_before: Vec<(u8, bool, Millis)>,
@@ -567,7 +623,7 @@ pub struct App {
     ground: Option<TexId>,
     blur: Option<TexId>,
     wallpaper: Option<TexId>,
-    random_wallpaper: Option<Option<String>>,
+    random_wallpaper: RandomDraw,
     battery_percent: slot_ui::Printed,
     bolt: Option<TexId>,
     hud_bolt: Option<TexId>,
@@ -576,9 +632,8 @@ pub struct App {
     slot_faces: Option<(TexId, TexId)>,
     shelf_platform: slot_ui::Printed,
     shelf_title: slot_ui::Printed,
-    name_pending: bool,
+    slot_name: SlotName,
     slot_letter: Option<char>,
-    shelf_named: Option<Millis>,
     shelf_clock: slot_ui::Printed,
     hud: Hud,
     screen: f32,
@@ -593,10 +648,9 @@ pub struct App {
     dozed_at: Millis,
     /// Whether this doze has started a search for missing art, for Art While Asleep.
     art_asleep: bool,
-    /// Whether the game in the slot was started with hardcore achievements.
-    hardcore_game: bool,
-    /// Hardcore was turned off during a game, for its tracker to hear.
-    softcore_pending: bool,
+    /// Whether the game in the slot was started with hardcore achievements, or hardcore was turned
+    /// off during it, for its tracker to hear.
+    hardcore_game: HardcoreGame,
     woke_on_press: bool,
     autosave_at: Millis,
     pending_save: Option<std::thread::JoinHandle<()>>,
@@ -609,7 +663,6 @@ pub struct App {
     headphones_at: Millis,
     battery: Option<Battery>,
     last_led: Option<LedState>,
-    powering_off: bool,
     radio: Box<dyn RadioJobs>,
     state_writer: crate::state_writer::StateWriter,
     wifi: Option<Wifi>,
@@ -658,8 +711,7 @@ pub struct App {
     synced_seen: u64,
     /// A look through the card's games under way, whether another is wanted when it is done,
     /// and what one found, waiting for the shelf to be showing.
-    rescan: Option<std::sync::mpsc::Receiver<Vec<Cart>>>,
-    rescan_again: bool,
+    rescan: Rescan,
     rescanned: Option<Vec<Cart>>,
     /// The line saying how far Syncthing has got.
     sync_face: Option<(TexId, u32, u32)>,
@@ -786,7 +838,6 @@ impl App {
             last_role: LinkRow::Host,
             link_choices: HashMap::new(),
             link_loaded: None,
-            link_reload: None,
             reload: None,
             link_menu_faces: Vec::new(),
             link_linked_face: None,
@@ -795,10 +846,8 @@ impl App {
             link_legend_faces: Vec::new(),
             starting: None,
             link_transport: None,
-            restarting: false,
-            reloading: false,
+            shutdown: None,
             external_display: false,
-            act_at: 0,
             root: None,
             state: SlotState::default(),
             vol_before: Vec::new(),
@@ -847,7 +896,7 @@ impl App {
             ground: None,
             blur: None,
             wallpaper: None,
-            random_wallpaper: None,
+            random_wallpaper: RandomDraw::Unseen,
             battery_percent: slot_ui::Printed::default(),
             bolt: None,
             hud_bolt: None,
@@ -855,9 +904,8 @@ impl App {
             slot_faces: None,
             shelf_platform: slot_ui::Printed::default(),
             shelf_title: slot_ui::Printed::default(),
-            name_pending: false,
+            slot_name: SlotName::Idle,
             slot_letter: None,
-            shelf_named: None,
             shelf_clock: slot_ui::Printed::default(),
             hud: Hud::new(),
             screen: 0.0,
@@ -870,8 +918,7 @@ impl App {
             power: None,
             dozed_at: 0,
             art_asleep: false,
-            hardcore_game: false,
-            softcore_pending: false,
+            hardcore_game: HardcoreGame::Off,
             woke_on_press: false,
             autosave_at: AUTOSAVE_MS,
             pending_save: None,
@@ -884,7 +931,6 @@ impl App {
             headphones_at: 0,
             battery: None,
             last_led: None,
-            powering_off: false,
             wifi: None,
             wifi_view: WifiView::default(),
             bluetooth: None,
@@ -914,8 +960,7 @@ impl App {
             ss_state: SsState::Off,
             page_face: None,
             synced_seen: 0,
-            rescan: None,
-            rescan_again: false,
+            rescan: Rescan::Idle,
             rescanned: None,
             sync_face: None,
             cheevo_lines: VecDeque::new(),
@@ -985,6 +1030,14 @@ impl App {
                     .or_else(|| self.seat_of(&stem, platform))
             })
         };
+        // A DS game is left on the shelf, or slot would quit for DraStic again each time it ends.
+        let seated = seated.filter(|&(at, i)| {
+            self.shelves[at]
+                .1
+                .carts
+                .get(i)
+                .is_none_or(|c| c.platform != Platform::Nds)
+        });
         self.phase = Phase::Shelf;
         match seated {
             Some((at, i)) => {
@@ -999,7 +1052,7 @@ impl App {
             None => {
                 self.state.cart = None;
                 self.state.cart_platform = None;
-                self.name_pending = true;
+                self.slot_name = SlotName::Waiting;
             }
         }
     }
@@ -1021,8 +1074,7 @@ impl App {
         self.shelf_at = to;
         self.shelf_platform = slot_ui::Printed::default();
         self.slot_letter = None;
-        self.shelf_named = None;
-        self.name_pending = true;
+        self.slot_name = SlotName::Waiting;
     }
 
     fn track_held_dir(&mut self, action: Action) {
@@ -1094,12 +1146,11 @@ impl App {
             self.shelf_platform = slot_ui::Printed::default();
         }
         self.slot_letter = Some(letter);
-        self.shelf_named = None;
-        self.name_pending = true;
+        self.slot_name = SlotName::Waiting;
     }
 
     fn slot_name_alpha(&self) -> f32 {
-        let Some(at) = self.shelf_named else {
+        let SlotName::Named(at) = self.slot_name else {
             return 0.0;
         };
         let t = self.now().saturating_sub(at);
@@ -1525,15 +1576,18 @@ impl App {
     }
 
     fn random_wallpaper(&mut self) -> Option<String> {
-        if self.random_wallpaper.is_none() {
+        if matches!(self.random_wallpaper, RandomDraw::Unseen) {
             let seed = self.wall_secs().unsigned_abs();
             let pick = self
                 .root()
                 .and_then(|root| crate::wallpaper::pick(root, seed))
                 .and_then(|path| Some(path.file_name()?.to_str()?.to_owned()));
-            self.random_wallpaper = Some(pick);
+            self.random_wallpaper = pick.map_or(RandomDraw::Bare, RandomDraw::Pick);
         }
-        self.random_wallpaper.clone().flatten()
+        match &self.random_wallpaper {
+            RandomDraw::Pick(name) => Some(name.clone()),
+            _ => None,
+        }
     }
 
     fn cycle_wallpaper(&mut self, right: bool) {
@@ -1641,7 +1695,7 @@ impl App {
     }
 
     fn random_drawn(&self) -> bool {
-        matches!(self.random_wallpaper, Some(Some(_)))
+        matches!(self.random_wallpaper, RandomDraw::Pick(_))
     }
 
     pub fn set_sticker_face(&mut self, face: TexId) {
@@ -1765,10 +1819,15 @@ impl App {
     }
 
     fn title_alpha(&self) -> f32 {
-        if !self.state.show_titles || (self.name_pending && self.slot_text().is_some()) {
+        if !self.state.show_titles
+            || (matches!(self.slot_name, SlotName::Waiting) && self.slot_text().is_some())
+        {
             return 0.0;
         }
-        let named = self.shelf_named.map(|at| self.now().saturating_sub(at));
+        let named = match self.slot_name {
+            SlotName::Named(at) => Some(self.now().saturating_sub(at)),
+            _ => None,
+        };
         if named.is_some_and(|t| t < SLOT_NAME_IN_MS + SLOT_NAME_HOLD_MS) {
             return 0.0;
         }
@@ -2061,17 +2120,24 @@ impl App {
     /// Whether the game in the slot earns hardcore achievements, which no rewind or loaded state
     /// may touch. Turning Hardcore on waits for the next game; turning it off counts at once.
     pub fn hardcore(&self) -> bool {
-        self.hardcore_game
+        self.hardcore_game == HardcoreGame::On
     }
 
     pub fn set_hardcore_game(&mut self, on: bool) {
-        self.hardcore_game = on;
-        self.softcore_pending = false;
+        self.hardcore_game = if on {
+            HardcoreGame::On
+        } else {
+            HardcoreGame::Off
+        };
     }
 
     /// Whether Hardcore was turned off during the game since last asked.
     pub fn take_softcore(&mut self) -> bool {
-        std::mem::take(&mut self.softcore_pending)
+        let dropped = self.hardcore_game == HardcoreGame::Dropped;
+        if dropped {
+            self.hardcore_game = HardcoreGame::Off;
+        }
+        dropped
     }
 
     /// Whether the next game started would earn hardcore achievements.
@@ -2333,27 +2399,31 @@ impl App {
     }
 
     pub fn powering_off(&self) -> bool {
-        self.powering_off
+        matches!(self.shutdown, Some((PowerChoice::PowerOff, _)))
+    }
+
+    fn ready_to(&self, choice: PowerChoice) -> bool {
+        matches!(self.shutdown, Some((c, at)) if c == choice && self.now() >= at)
     }
 
     pub fn ready_to_power_off(&self) -> bool {
-        self.powering_off && self.now() >= self.act_at
+        self.ready_to(PowerChoice::PowerOff)
     }
 
     pub fn ready_to_restart(&self) -> bool {
-        self.restarting && self.now() >= self.act_at
+        self.ready_to(PowerChoice::Restart)
     }
 
     pub fn ready_to_reload(&self) -> bool {
-        self.reloading && self.now() >= self.act_at
+        self.ready_to(PowerChoice::Reload)
     }
 
     pub fn shutting_down(&self) -> bool {
-        self.powering_off || self.restarting || self.reloading
+        self.shutdown.is_some()
     }
 
     pub fn restarting(&self) -> bool {
-        self.restarting
+        matches!(self.shutdown, Some((PowerChoice::Restart, _)))
     }
 
     pub fn restart(&mut self) {
@@ -2406,7 +2476,30 @@ impl App {
     }
 
     pub fn take_link_reload(&mut self) -> Option<(String, &'static str)> {
-        self.link_reload.take()
+        match self.reload.take()? {
+            LinkReload::Asked(r, serial) => {
+                let stem = r.stem.clone();
+                self.reload = Some(LinkReload::Loading(r));
+                Some((stem, serial))
+            }
+            LinkReload::Back(r) => {
+                let (stem, serial) = (r.stem.clone(), r.from_serial);
+                self.reload = Some(LinkReload::Returning(r));
+                Some((stem, serial))
+            }
+            other => {
+                self.reload = Some(other);
+                None
+            }
+        }
+    }
+
+    /// Whether a core is loading for the link, which the session must not take for dead.
+    pub fn link_reloading(&self) -> bool {
+        matches!(
+            self.reload,
+            Some(LinkReload::Loading(_) | LinkReload::Returning(_))
+        )
     }
 
     pub fn link_player(&self) -> Option<u8> {
@@ -2663,10 +2756,10 @@ impl App {
     }
 
     pub fn link_reload_done(&mut self) {
-        let Some(reload) = self.reload.take() else {
+        let Some((reload, fallback)) = self.reload.take().map(LinkReload::into_job) else {
             return;
         };
-        if reload.fallback {
+        if fallback {
             self.link_choices.insert(reload.stem, reload.from);
             self.close_game_menu();
             return self.refuse();
@@ -2686,13 +2779,11 @@ impl App {
     }
 
     pub fn link_reload_failed(&mut self) {
-        let Some(mut reload) = self.reload.take() else {
+        let Some((reload, fallback)) = self.reload.take().map(LinkReload::into_job) else {
             return;
         };
-        if !reload.fallback {
-            self.link_reload = Some((reload.stem.clone(), reload.from_serial));
-            reload.fallback = true;
-            self.reload = Some(reload);
+        if !fallback {
+            self.reload = Some(LinkReload::Back(reload));
             return;
         }
         self.link_choices.insert(reload.stem, reload.from);
@@ -3655,6 +3746,28 @@ impl App {
         self.apps = Some(apps);
         self.phase = Phase::Apps;
         self.apps_done(done);
+    }
+
+    /// Leaves the DS game at `at` for DraStic, which runs it with slot gone, as a port is run.
+    fn hand_to_drastic(&mut self, at: usize) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let Some(rom) = self.shelf().carts.get(at).map(|c| c.rom.clone()) else {
+            return;
+        };
+        let script = root.join(crate::apps::ports::DRASTIC);
+        if !script.is_file() {
+            eprintln!("slot: launch: {} is not on the card", script.display());
+            return self.refuse();
+        }
+        if let Err(e) = crate::apps::ports::queue(&root, &script, Some(&rom)) {
+            eprintln!("slot: launch: drastic: {e}");
+            return self.refuse();
+        }
+        eprintln!("slot: launch: drastic {}", rom.display());
+        self.music = None;
+        self.begin_reload();
     }
 
     fn apps_input(&mut self, action: Action) {
@@ -4667,8 +4780,8 @@ impl App {
             QuickRow::ArtAsleep => s.art_asleep = !s.art_asleep,
             QuickRow::Hardcore => {
                 s.hardcore = !s.hardcore;
-                if !s.hardcore && std::mem::take(&mut self.hardcore_game) {
-                    self.softcore_pending = true;
+                if !s.hardcore && self.hardcore_game == HardcoreGame::On {
+                    self.hardcore_game = HardcoreGame::Dropped;
                 }
             }
             QuickRow::EjectSave => s.eject_save = !s.eject_save,
@@ -4962,9 +5075,8 @@ impl App {
 
     pub fn update(&mut self, dt: f32) {
         self.clock += dt as f64 * 1000.0;
-        if self.name_pending && self.shelf_platform.face.is_some() {
-            self.name_pending = false;
-            self.shelf_named = Some(self.now());
+        if matches!(self.slot_name, SlotName::Waiting) && self.shelf_platform.face.is_some() {
+            self.slot_name = SlotName::Named(self.now());
         }
         self.timers();
         self.poll_link();
@@ -5434,8 +5546,10 @@ impl App {
         let Some(root) = self.root.clone() else {
             return;
         };
-        if self.rescan.is_some() {
-            self.rescan_again = true;
+        if let Rescan::Running(rx) | Rescan::Queued(rx) =
+            std::mem::replace(&mut self.rescan, Rescan::Idle)
+        {
+            self.rescan = Rescan::Queued(rx);
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
@@ -5448,24 +5562,28 @@ impl App {
                 }
             });
         match spawned {
-            Ok(_) => self.rescan = Some(rx),
+            Ok(_) => self.rescan = Rescan::Running(rx),
             Err(e) => eprintln!("slot: rescan: {e}"),
         }
     }
 
     /// Puts what a rescan found on the shelves once the shelf is what is showing.
     fn take_rescan(&mut self) {
-        if let Some(rx) = &self.rescan {
-            match rx.try_recv() {
+        if let Rescan::Running(rx) | Rescan::Queued(rx) = &self.rescan {
+            let again = matches!(self.rescan, Rescan::Queued(_));
+            let done = match rx.try_recv() {
                 Ok(carts) => {
                     self.rescanned = Some(carts);
-                    self.rescan = None;
+                    true
                 }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.rescan = None,
-                Err(std::sync::mpsc::TryRecvError::Empty) => {}
-            }
-            if self.rescan.is_none() && std::mem::take(&mut self.rescan_again) {
-                self.rescan();
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => true,
+                Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            };
+            if done {
+                self.rescan = Rescan::Idle;
+                if again {
+                    self.rescan();
+                }
             }
         }
         if self.on_shelf() && self.core_picker.is_none() {
@@ -5506,8 +5624,7 @@ impl App {
         if self.shelf_at != shelf_at {
             self.shelf_platform = slot_ui::Printed::default();
             self.slot_letter = None;
-            self.shelf_named = None;
-            self.name_pending = true;
+            self.slot_name = SlotName::Waiting;
         }
     }
 
@@ -5654,8 +5771,7 @@ impl App {
         if self.shelf_at != shelf_at {
             self.shelf_platform = slot_ui::Printed::default();
             self.slot_letter = None;
-            self.shelf_named = None;
-            self.name_pending = true;
+            self.slot_name = SlotName::Waiting;
         }
         self.persist();
     }
@@ -5772,8 +5888,7 @@ impl App {
             Layout::Framed => self.overlay_slide(),
             Layout::Native => 0.0,
         };
-        self.in_game_menu = None;
-        self.game_cast = None;
+        self.close_game_overlays();
         self.end_link();
         self.close_game_menu();
         self.pending = None;
@@ -5887,13 +6002,9 @@ impl App {
                 h: self.canvas().h,
                 colour: [0.0, 0.0, 0.0, 1.0],
             });
-            let which = if self.restarting {
-                PowerChoice::Restart
-            } else if self.reloading {
-                PowerChoice::Reload
-            } else {
-                PowerChoice::PowerOff
-            };
+            let which = self
+                .shutdown
+                .map_or(PowerChoice::PowerOff, |(which, _)| which);
             if let Some((tex, w, h)) = self.shutdown_faces.get(which.index()).copied() {
                 out.push(Draw::Tex {
                     x: self.canvas().centred(w as f32).floor(),
@@ -6719,6 +6830,9 @@ impl App {
         if platform == Platform::Apps {
             return self.open_app(at);
         }
+        if platform == Platform::Nds {
+            return self.hand_to_drastic(at);
+        }
         if let Some(missing) = self.missing_bios(platform) {
             eprintln!("slot: launch: {cart} needs BIOS/{missing}, which is not on the card");
             self.hud.toast(Toast::NoBios, self.now());
@@ -6764,6 +6878,14 @@ impl App {
         }
     }
 
+    /// Puts away the game's menu and the pages that stand in place of it.
+    fn close_game_overlays(&mut self) {
+        self.in_game_menu = None;
+        self.game_cast = None;
+        self.controls = None;
+        self.core_options = None;
+    }
+
     fn eject(&mut self) {
         if self.single_cart() {
             return self.refuse();
@@ -6772,9 +6894,7 @@ impl App {
             Layout::Framed => self.overlay_slide(),
             Layout::Native => 0.0,
         };
-        self.in_game_menu = None;
-        self.game_cast = None;
-        self.controls = None;
+        self.close_game_overlays();
         let cart = match &mut self.phase {
             Phase::Playing { cart } | Phase::Inserting { cart, .. } => std::mem::take(cart),
             _ => return,
@@ -6899,8 +7019,7 @@ impl App {
             return;
         }
         self.remember_shelf();
-        self.restarting = true;
-        self.act_at = self.now() + SHUTDOWN_SHOW_MS;
+        self.shutdown = Some((PowerChoice::Restart, self.now() + SHUTDOWN_SHOW_MS));
         self.set_led(LedState::Off);
     }
 
@@ -6909,8 +7028,7 @@ impl App {
             return;
         }
         self.remember_shelf();
-        self.reloading = true;
-        self.act_at = self.now() + SHUTDOWN_SHOW_MS;
+        self.shutdown = Some((PowerChoice::Reload, self.now() + SHUTDOWN_SHOW_MS));
         self.set_led(LedState::Off);
     }
 
@@ -7151,8 +7269,7 @@ impl App {
             self.shelf_at = at;
             self.shelf_platform = slot_ui::Printed::default();
             self.slot_letter = None;
-            self.shelf_named = None;
-            self.name_pending = true;
+            self.slot_name = SlotName::Waiting;
         }
         self.shelves[at].1.select(i);
         self.remember_shelf();
@@ -7323,7 +7440,7 @@ impl App {
                         starting.starter.cancel();
                     }
                     if let Some(reload) = &mut self.reload {
-                        reload.cancelled = true;
+                        reload.job().cancelled = true;
                     }
                 }
             }
@@ -7396,15 +7513,16 @@ impl App {
                 return self.refuse();
             }
             self.link_player = Some(player);
-            self.link_reload = Some((stem.clone(), loaded));
-            self.reload = Some(Reload {
-                stem,
-                role,
-                cancelled: false,
-                from: self.link_hardware,
-                from_serial: loaded,
-                fallback: false,
-            });
+            self.reload = Some(LinkReload::Asked(
+                Reload {
+                    stem,
+                    role,
+                    cancelled: false,
+                    from: self.link_hardware,
+                    from_serial: loaded,
+                },
+                loaded,
+            ));
             self.game_menu = Some(GameMenu::Working {
                 role,
                 step: LinkStep::Radio,
@@ -7422,15 +7540,16 @@ impl App {
         if self.snapshot.as_ref().is_some_and(|s| !s.resume_trusted()) {
             return self.refuse();
         }
-        self.link_reload = Some((stem.clone(), serial));
-        self.reload = Some(Reload {
-            stem,
-            role,
-            cancelled: false,
-            from: self.link_hardware.other(),
-            from_serial: loaded,
-            fallback: false,
-        });
+        self.reload = Some(LinkReload::Asked(
+            Reload {
+                stem,
+                role,
+                cancelled: false,
+                from: self.link_hardware.other(),
+                from_serial: loaded,
+            },
+            serial,
+        ));
         self.game_menu = Some(GameMenu::Working {
             role,
             step: LinkStep::Radio,
@@ -7463,13 +7582,10 @@ impl App {
         if !self.link_active() {
             self.cool_radio();
         }
-        let uncollected =
-            self.link_reload.is_some() && self.reload.as_ref().is_some_and(|r| !r.fallback);
-        if uncollected {
-            self.link_reload = None;
-            self.reload = None;
-        } else if let Some(reload) = &mut self.reload {
-            reload.cancelled = true;
+        match &mut self.reload {
+            Some(LinkReload::Asked(..)) => self.reload = None,
+            Some(reload) => reload.job().cancelled = true,
+            None => {}
         }
     }
 
@@ -7537,7 +7653,7 @@ impl App {
     }
 
     fn begin_power_off(&mut self) {
-        if self.powering_off {
+        if self.powering_off() {
             return;
         }
         if self.link_active() {
@@ -7545,13 +7661,12 @@ impl App {
         }
         self.close_game_menu();
         self.remember_shelf();
-        self.powering_off = true;
-        self.act_at = self.now() + SHUTDOWN_SHOW_MS;
+        self.shutdown = Some((PowerChoice::PowerOff, self.now() + SHUTDOWN_SHOW_MS));
         self.set_led(LedState::Off);
     }
 
     pub fn on_battery(&mut self, b: Battery) {
-        if b.percent > BATTERY_CRITICAL || self.powering_off {
+        if b.percent > BATTERY_CRITICAL || self.powering_off() {
             return;
         }
         if matches!(b.charge, Charge::Charging | Charge::Full) {

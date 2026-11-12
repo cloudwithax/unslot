@@ -21,11 +21,11 @@ fn main() {
                 eprintln!("slot: --unpack-pak needs a pack and where to put its zip");
                 std::process::exit(2);
             };
-            let unpacked = slot::pak::open(std::path::Path::new(&pak)).and_then(|p| {
-                std::fs::write(&out, &p.zip)
-                    .map(|()| p.version)
-                    .map_err(|e| e.to_string())
-            });
+            let unpacked = slot::pak::unpack(
+                std::path::Path::new(&pak),
+                std::path::Path::new(&out),
+                &slot::pak::RELEASE_KEY,
+            );
             match unpacked {
                 Ok(version) => println!("{version}"),
                 Err(e) => {
@@ -34,6 +34,22 @@ fn main() {
                 }
             }
             return;
+        }
+        // For System/drastic/launch.sh: the volume keys and Menu, while DraStic runs in slot's
+        // place.
+        Some("--drastic") => {
+            let root = std::env::var_os("SLOT_ROOT").unwrap_or_else(|| "/mnt/sdcard".into());
+            slot::drastic::run(std::path::Path::new(&root));
+            return;
+        }
+        // The in-game menu over a stopped DraStic, for --drastic.
+        Some("--drastic-menu") => {
+            let root = std::env::var_os("SLOT_ROOT").unwrap_or_else(|| "/mnt/sdcard".into());
+            let frame = std::env::args_os().nth(2).unwrap_or_default();
+            std::process::exit(slot::drastic::menu(
+                std::path::Path::new(&root),
+                std::path::Path::new(&frame),
+            ));
         }
         #[cfg(feature = "device")]
         Some("--core-host") => {

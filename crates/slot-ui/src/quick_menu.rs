@@ -213,6 +213,7 @@ const SCREEN_ORDER: [Platform; Platform::COUNT] = [
     Platform::Pico8,
     Platform::Tic80,
     Platform::Psp,
+    Platform::Nds,
     Platform::Apps,
 ];
 
@@ -315,11 +316,11 @@ impl QuickRow {
         QuickRow::Bezel,
     ];
 
-    /// The Screen page: one row for each platform a core runs, which leaves out Apps.
+    /// The Screen page: one row for each platform a core runs, which leaves out Apps and the DS.
     pub fn screen_page() -> Vec<QuickRow> {
         SCREEN_ORDER
             .into_iter()
-            .filter(|p| *p != Platform::Apps)
+            .filter(|p| !matches!(p, Platform::Apps | Platform::Nds))
             .map(QuickRow::ScreenOf)
             .collect()
     }

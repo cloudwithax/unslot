@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use slot_gfx::{Compositor, TexId};
 use slot_store::Cart;
@@ -12,6 +13,8 @@ use crate::app::{App, FaceWant};
 use crate::label_cache::face;
 
 const WORKERS: usize = 2;
+/// The longest the first frame waits for the faces on screen.
+const SETTLE: Duration = Duration::from_secs(5);
 
 type Key = (usize, usize);
 
@@ -68,14 +71,22 @@ impl CartFaces {
             self.asked = wants;
         }
         self.rebuild(app);
+    }
+
+    /// `sync`, then waits for the faces on screen, so the first frame has them. Gives up on any
+    /// that take longer than `SETTLE`.
+    pub fn settle(&mut self, app: &mut App, compositor: &mut Compositor) {
+        self.sync(app, compositor);
         let mut waiting: Vec<Key> = self
             .asked
             .iter()
             .filter(|w| w.on_screen)
             .map(|w| (w.shelf, w.index))
             .collect();
+        let until = Instant::now() + SETTLE;
         while !waiting.is_empty() {
-            let Ok((key, rom, face, interior)) = self.built.recv() else {
+            let left = until.saturating_duration_since(Instant::now());
+            let Ok((key, rom, face, interior)) = self.built.recv_timeout(left) else {
                 return;
             };
             waiting.retain(|k| *k != key);

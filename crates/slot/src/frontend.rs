@@ -385,7 +385,7 @@ impl Frontend {
         Self::upload_paper(compositor);
         crate::boot_time::mark("paper");
         if self.rebuild.is_none() {
-            self.cart_faces.sync(self.session.app_mut(), compositor);
+            self.cart_faces.settle(self.session.app_mut(), compositor);
         }
         crate::boot_time::mark("cart faces");
         let (tx, rx) = std::sync::mpsc::channel();

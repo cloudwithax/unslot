@@ -45,6 +45,7 @@ pub enum Media {
     Tape,
     AmstradDisk,
     Umd,
+    Nds,
     Fantasy,
 }
 
@@ -303,6 +304,13 @@ const ART: [Art; Media::COUNT] = [
         colour: [0xe6, 0xe6, 0xe2],
     },
     Art {
+        png: include_bytes!("../../../assets/nds_neutral.png"),
+        w: 300,
+        h: 283,
+        label: (22, 22, 255, 201),
+        colour: [0x3a, 0x3a, 0x3e],
+    },
+    Art {
         png: include_bytes!("../../../assets/fantasy_neutral.png"),
         w: 320,
         h: 347,
@@ -323,7 +331,7 @@ const UMD_PRINT_INNER: f32 = 12.6 / 28.4;
 const SEATED_MAX_H: u32 = 259;
 
 impl Media {
-    pub const COUNT: usize = 36;
+    pub const COUNT: usize = 37;
     pub const ALL: [Media; Media::COUNT] = [
         Media::Nes,
         Media::Snes,
@@ -360,6 +368,7 @@ impl Media {
         Media::Tape,
         Media::AmstradDisk,
         Media::Umd,
+        Media::Nds,
         Media::Fantasy,
     ];
 
@@ -412,6 +421,7 @@ impl Media {
             Platform::ZxSpectrum => Media::Tape,
             Platform::AmstradCpc => Media::AmstradDisk,
             Platform::Psp => Media::Umd,
+            Platform::Nds => Media::Nds,
             Platform::Pico8 | Platform::Tic80 | Platform::Apps => Media::Fantasy,
         })
     }

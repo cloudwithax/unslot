@@ -143,6 +143,7 @@ boot || fail "installing onto an empty card failed"
 cat > "$TMP/fake-slot" <<EOF
 #!/bin/sh
 [ "\$1" = --unpack-pak ] || exit 2
+printf '%s\n' "\$2" > "$TMP/picked-pak"
 grep -q signed "\$2" || { echo "not signed by unslot" >&2; exit 1; }
 cp "$TMP/MinUI.zip" "\$3" && echo v9.9.9
 EOF
@@ -171,6 +172,16 @@ launch
 [ -f "$CARD/unslot-v9.9.9.pak.bad" ] || fail "an unsigned .pak was not set aside"
 [ ! -e "$CARD/unslot-v9.9.9.pak" ] || fail "an unsigned .pak would be tried at every start"
 grep -q "not an update unslot signed" "$CARD/Logs/update.log" || fail "an unsigned .pak was not logged"
+
+# Version order, not lexical order, decides which pack slot checks.
+card
+rm -f "$CARD/MinUI.zip"
+echo signed > "$CARD/unslot-v2.9.1.pak"
+echo signed > "$CARD/unslot-v2.12.0.pak"
+: > "$CARD/System/led.sh"
+launch
+[ "$(cat "$TMP/picked-pak")" = "$CARD/unslot-v2.12.0.pak" ] ||
+	fail "the newest version was not handed to --unpack-pak"
 
 # slotupdate.sh fetches through curl and checks what it got.
 mkdir -p "$TMP/bin"

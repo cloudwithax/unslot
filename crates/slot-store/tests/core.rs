@@ -209,7 +209,11 @@ fn the_picker_boards_two_sockets_are_the_gbas_own_cores() {
 
 #[test]
 fn every_systems_default_core_comes_with_unslot() {
-    for p in Platform::ALL.into_iter().filter(|p| *p != Platform::Apps) {
+    // The apps are opened by slot itself and DS games by DraStic: neither has a core.
+    for p in Platform::ALL
+        .into_iter()
+        .filter(|p| !matches!(p, Platform::Apps | Platform::Nds))
+    {
         assert!(
             !Core::default_for(p).download_only(),
             "{p:?}'s default is downloaded"
@@ -244,7 +248,11 @@ fn a_core_not_downloaded_yet_gives_way_to_the_default() {
 
 #[test]
 fn every_system_has_a_core_and_no_core_twice() {
-    for p in Platform::ALL.into_iter().filter(|p| *p != Platform::Apps) {
+    // The apps are opened by slot itself and DS games by DraStic: neither has a core.
+    for p in Platform::ALL
+        .into_iter()
+        .filter(|p| !matches!(p, Platform::Apps | Platform::Nds))
+    {
         let cores = p.spec().cores;
         assert!(!cores.is_empty(), "{p:?} has no core");
         for (i, c) in cores.iter().enumerate() {

@@ -1,4 +1,11 @@
+use std::fs::OpenOptions;
+use std::path::PathBuf;
+use std::process::Command;
+use std::time::{Duration, Instant};
+
 use slot::app::App;
+use slot::cart_faces::CartFaces;
+use slot_gfx::{Compositor, HeadlessSurface};
 use slot_store::{Cart, Platform};
 use slot_ui::TexId;
 
@@ -75,4 +82,52 @@ fn faces_far_from_the_cursor_are_shed_and_near_ones_kept() {
     shed.sort_by_key(|t| format!("{t:?}"));
     assert_eq!(shed, vec![TexId::from_raw(3), TexId::from_raw(4)]);
     assert!(app.shed_faces().is_empty());
+}
+
+/// A library whose every label is a pipe nothing has written to, so each face stalls its worker.
+fn stalled(dir: &std::path::Path, n: usize) -> (App, PathBuf) {
+    let pipe = dir.join("label.png");
+    assert!(Command::new("mkfifo")
+        .arg(&pipe)
+        .status()
+        .unwrap()
+        .success());
+    let mut app = library(n, 0);
+    let carts: Vec<Cart> = app
+        .carts()
+        .map(|c| Cart {
+            label: Some(pipe.clone()),
+            ..c.clone()
+        })
+        .collect();
+    app = App::new(carts);
+    (app, pipe)
+}
+
+#[test]
+fn a_letter_jump_does_not_wait_on_the_faces_it_lands_on() {
+    let Ok(surface) = HeadlessSurface::new() else {
+        return;
+    };
+    let Ok(mut compositor) = Compositor::new(&surface) else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let (mut app, pipe) = stalled(dir.path(), 5000);
+    let mut faces = CartFaces::spawn(dir.path().to_path_buf());
+    // Past three seconds, let the stalled workers go so a blocking sync ends and fails below.
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(3));
+        for _ in 0..16 {
+            let _ = OpenOptions::new().write(true).open(&pipe);
+        }
+    });
+    let start = Instant::now();
+    faces.sync(&mut app, &mut compositor);
+    let took = start.elapsed();
+    release.join().unwrap();
+    assert!(
+        took < Duration::from_secs(1),
+        "sync held the frame for {took:?} while faces were still being built"
+    );
 }

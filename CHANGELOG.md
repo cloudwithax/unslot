@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.12.0
+
+- Nintendo DS, from `Games/NDS`, run by DraStic. unslot closes while a DS game runs, as it does for a port, and comes back when the game ends. DraStic brings its own stand-ins for the DS BIOS, so none goes in `BIOS`, and keeps its saves, states and settings in `Saves/NDS`, which updates leave alone. Its own menu, with its states and settings, is on Select + X. The Screen settings have no DS row, as DraStic draws the game.
+- A tap of Menu in a DS game stops it and opens unslot's menu over its picture, with Resume and Exit Game; Exit Game has DraStic save and close. The volume keys and the mute chord work as in any other game, at the same level for the speaker and the headphones, and each press shows a bar over the game for a moment.
+- DS games sit on the shelf as DS Game Cards, with the corner cut at the top right and NINTENDO DS on the strip under the label, and Game Art fetches their art.
+- A card whose only game is a DS game opens on the shelf instead of starting it, as a single game of another system is, so the game does not start again each time DraStic is left.
+- Jumping by letter through a shelf of thousands of games stays smooth. Each frame measured every cart between the old place and the new one; now it measures the few near the screen. The shelf glides over the last few carts of a jump instead of flying the whole letter past an empty screen.
+- A letter jump no longer holds the screen until the labels it lands on are drawn; they come in as they are ready. Only the first screen at start waits for them, and for no more than five seconds.
+- Ejecting a game closes its Core Options page too, and a core dying under a game closes its Controls and Core Options pages.
+- Achievements work offline after switching between softcore and hardcore, and hardcore unlocks stay earned when the game is started again without a connection.
+- With more than one update pack on the card, the newest version goes in, not whichever sorts last by name: `unslot-v2.9.1.pak` no longer wins over `unslot-v2.12.0.pak`.
+- Update packs are checked and unpacked a piece at a time instead of whole in memory. Unpacking v2.11.0's 240 MB pack took about 460 MB of the handheld's 1 GB, so a pack would have stopped going in a few releases from now. A pack can also carry new, compressed entries or new lines in its note, and this release still installs it; the note it writes is byte for byte what every unslot since v2.2.0 reads.
+- `System/licenses` has rcheevos's MIT notice, which its licence requires to travel with the achievements code, and DraStic's readme and SDL's licence beside DraStic, with where each came from.
+
 ## v2.11.0
 
 - Hardcore achievements, under Settings → Gameplay. Turning it on takes effect from the next game; turning it off counts at once. In hardcore nothing may rewind or load a state, so the States page hides Load, and, as in RetroArch, a little play is wanted between pauses, so that pausing cannot step through a game a few frames at a time. RetroAchievements now accepts hardcore unlocks from unslot, which identifies itself as a libretro frontend.

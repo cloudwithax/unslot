@@ -102,4 +102,12 @@ rm "$TMP/card/Ports/ran"
 launch
 [ ! -e "$TMP/card/Ports/ran" ] || fail "the port ran a second time"
 
+# A DS game slot quit for goes to DraStic's script whole, spaces and all.
+setup
+mkdir -p "$TMP/card/System/drastic"
+printf '#!/bin/sh\necho "$#:$1" > ran\n' > "$TMP/card/System/drastic/launch.sh"
+printf '%s\n%s' "$TMP/card/System/drastic/launch.sh" "$TMP/card/Games/NDS/Mario 64 DS.nds" > "$TMP/card/.unslot-port"
+launch
+[ "$(cat "$TMP/card/System/drastic/ran")" = "1:$TMP/card/Games/NDS/Mario 64 DS.nds" ] || fail "DraStic was not handed the game"
+
 echo "launch: all passed"

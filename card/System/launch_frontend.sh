@@ -25,7 +25,7 @@ log() {
 # unpacked and installed as BaseOS installs a MinUI.zip. A pack that does not check out is left
 # as .bad, and System is not touched.
 SLOT_BIN="${AGS_SLOT:-/lib/ld-linux-aarch64.so.1 $SYS/slot}"
-pak="$(ls -1 "$SD"/unslot-*.pak 2>/dev/null | tail -n 1)"
+pak="$(ls -1 "$SD"/unslot-*.pak 2>/dev/null | sort -V | tail -n 1)"
 if [ -n "$pak" ]; then
 	mkdir -p "$SD/.unslot-update"
 	zip="$SD/.unslot-update/pak.zip"
@@ -78,17 +78,21 @@ echo "|/bin/sh $SYS/coresave.sh %p %s %e %t" > /proc/sys/kernel/core_pattern 2>/
 # governor never raises; the driver's performance scene holds it at 648 MHz.
 echo 1 > /sys/class/devfreq/gpu/device/scenectrl/command 2>/dev/null
 
-# A port slot quit for, from the Apps page: it runs from its own folder with slot gone, and slot
-# starts once it ends. The note goes first, so a port that hangs the device is not run again.
+# A port slot quit for, from the Apps page, or DraStic for a DS game: it runs from its own folder
+# with slot gone, and slot starts once it ends. The note's second line, when it has one, is what
+# to hand it. The note goes first, so a port that hangs the device is not run again.
 if [ -f "$SD/.unslot-port" ]; then
-	port="$(cat "$SD/.unslot-port")"
+	port="$(sed -n 1p "$SD/.unslot-port")"
+	arg="$(sed -n 2p "$SD/.unslot-port")"
 	rm -f "$SD/.unslot-port"
 	sync
 	if [ -f "$port" ]; then
 		run=sh
 		head -n 1 "$port" | grep -q bash && command -v bash > /dev/null && run=bash
-		log "port $port"
-		(cd "$(dirname "$port")" && $run "$port") >> "$LOGS/ports.log" 2>&1
+		set --
+		[ -n "$arg" ] && set -- "$arg"
+		log "port $port $*"
+		(cd "$(dirname "$port")" && $run "$port" "$@") >> "$LOGS/ports.log" 2>&1
 		log "port ended $?"
 	fi
 fi

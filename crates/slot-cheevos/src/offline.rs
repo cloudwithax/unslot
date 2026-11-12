@@ -8,7 +8,7 @@
 //! On the card, under the folder it is given:
 //!   cache/<request>-<key>.json   the last answer to each read
 //!   queue/<when>-<n>.txt         an unsent request: the time it was queued, its URL and body
-//!   unlocks/<user>.txt           achievements unlocked here, one "id when" a line
+//!   unlocks/<user>.txt           achievements unlocked here, "id when" or "id when h" for hardcore
 
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::c_int;
@@ -324,14 +324,18 @@ impl Offline {
     }
 
     /// Notes an unlock only after it was accepted or safely queued.
-    fn remember_unlock(&self, user: &str, id: &str) -> Result<(), String> {
+    fn remember_unlock(&self, user: &str, id: &str, hardcore: bool) -> Result<(), String> {
         let _held = self.locks.files.lock().unwrap_or_else(|e| e.into_inner());
         let path = self.unlocks_file(user);
         let mut text = std::fs::read_to_string(&path).unwrap_or_default();
-        if text.lines().any(|l| l.split(' ').next() == Some(id)) {
+        if text.lines().any(|l| {
+            let mut fields = l.split(' ');
+            fields.next() == Some(id) && (!hardcore || fields.nth(1) == Some("h"))
+        }) {
             return Ok(());
         }
-        text.push_str(&format!("{id} {}\n", (self.clock)()));
+        let mode = if hardcore { " h" } else { "" };
+        text.push_str(&format!("{id} {}{mode}\n", (self.clock)()));
         durable_write(&path, text.as_bytes()).map_err(|e| format!("offline unlock: {e}"))
     }
 
@@ -364,12 +368,22 @@ impl Offline {
         if !data.get("Unlocks").is_some_and(|v| v.is_array()) {
             data["Unlocks"] = serde_json::json!([]);
         }
-        let Some(unlocks) = data["Unlocks"].as_array_mut() else {
-            return cached.to_string();
-        };
         let mine = std::fs::read_to_string(self.unlocks_file(user)).unwrap_or_default();
-        for (id, when) in mine.lines().filter_map(|l| l.split_once(' ')) {
+        for line in mine.lines() {
+            let mut fields = line.split(' ');
+            let (Some(id), Some(when)) = (fields.next(), fields.next()) else {
+                continue;
+            };
             if let (Ok(id), Ok(when)) = (id.parse::<u64>(), when.parse::<u64>()) {
+                let key = if fields.next() == Some("h") {
+                    "HardcoreUnlocks"
+                } else {
+                    "Unlocks"
+                };
+                if !data.get(key).is_some_and(|v| v.is_array()) {
+                    data[key] = serde_json::json!([]);
+                }
+                let unlocks = data[key].as_array_mut().unwrap();
                 if !unlocks.iter().any(|v| v["ID"].as_u64() == Some(id)) {
                     unlocks.push(serde_json::json!({"ID": id, "When": when}));
                 }
@@ -395,7 +409,9 @@ impl Http for Offline {
                     && r == "awardachievement"
                 {
                     if let Some(id) = param(&ps, "a") {
-                        if let Err(e) = self.remember_unlock(&user, id) {
+                        if let Err(e) =
+                            self.remember_unlock(&user, id, param(&ps, "h") == Some("1"))
+                        {
                             eprintln!("slot: cheevos: {e}");
                         }
                     }
@@ -405,7 +421,7 @@ impl Http for Offline {
             self.queue(request, &body)?;
             if r == "awardachievement" {
                 if let Some(id) = param(&ps, "a") {
-                    self.remember_unlock(&user, id)?;
+                    self.remember_unlock(&user, id, param(&ps, "h") == Some("1"))?;
                 }
             }
             eprintln!("slot: cheevos: offline, queued {r}");
@@ -438,7 +454,22 @@ impl Http for Offline {
             return reply;
         }
         if cacheable {
-            if let Ok(cached) = std::fs::read_to_string(self.cache_file(&r, &ps)) {
+            let cached = std::fs::read_to_string(self.cache_file(&r, &ps)).or_else(|e| {
+                if r != "startsession" {
+                    return Err(e);
+                }
+                let mut other = ps.clone();
+                let Some((_, mode)) = other.iter_mut().find(|(key, _)| key == "h") else {
+                    return Err(e);
+                };
+                *mode = match mode.as_str() {
+                    "0" => "1".into(),
+                    "1" => "0".into(),
+                    _ => return Err(e),
+                };
+                std::fs::read_to_string(self.cache_file(&r, &other))
+            });
+            if let Ok(cached) = cached {
                 eprintln!("slot: cheevos: offline, {r} from the card");
                 let text = match r.as_str() {
                     "startsession" => self.session(&cached, &user),

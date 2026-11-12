@@ -103,6 +103,7 @@ pub fn source(platform: Platform, rom: &Path) -> (Vec<&'static str>, u32) {
         Platform::Pico8 => (vec!["PICO-8"], 234),
         Platform::Tic80 => (vec!["TIC-80"], 222),
         Platform::Psp => (vec!["Sony - PlayStation Portable"], 61),
+        Platform::Nds => (vec!["Nintendo - Nintendo DS"], 15),
         // Not games: nothing to look up.
         Platform::Apps => (vec![], 0),
     }

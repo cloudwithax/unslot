@@ -34,7 +34,6 @@ pub struct Session {
     /// The menus' nudge of the motor, run alongside whatever the game asks.
     buzz: Option<Buzz>,
     prefetch: Prefetch,
-    reloading: bool,
     driven: bool,
 }
 
@@ -58,7 +57,6 @@ impl Session {
             pulse: None,
             buzz: None,
             prefetch: Prefetch::default(),
-            reloading: false,
             driven: false,
         };
         // A game left running comes straight back. Its core loads on its own thread, so start it
@@ -504,7 +502,7 @@ impl Session {
             }
             Phase::Inserting { cart, .. } => cart.clone(),
             Phase::Playing { .. } => {
-                let died = !self.reloading
+                let died = !self.app.link_reloading()
                     && self
                         .emu
                         .as_ref()
@@ -610,21 +608,18 @@ impl Session {
         }
         self.emu = None;
         self.spawn_core(stem, serial);
-        self.reloading = true;
     }
 
     fn sync_reload(&mut self) {
-        if !self.reloading {
+        if !self.app.link_reloading() {
             return;
         }
         match self.emu.as_ref().map(EmuHandle::state) {
             Some(CoreState::Loading) => {}
             Some(CoreState::Ready) => {
-                self.reloading = false;
                 self.app.link_reload_done();
             }
             Some(CoreState::Failed) | None => {
-                self.reloading = false;
                 self.emu = None;
                 self.app.link_reload_failed();
                 if let Some((stem, serial)) = self.app.take_link_reload() {

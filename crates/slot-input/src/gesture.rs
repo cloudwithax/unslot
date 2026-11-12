@@ -65,25 +65,55 @@ enum Select {
     ReleaseDue(Millis),
 }
 
+/// The Menu button: let go (and when it last tapped), held, held long enough to eject, or held
+/// while a display chord was made.
+#[derive(Copy, Clone)]
+enum Menu {
+    Idle { last_tap: Option<Millis> },
+    Held(Millis),
+    Ejected,
+    Chorded,
+}
+
+impl Default for Menu {
+    fn default() -> Self {
+        Menu::Idle { last_tap: None }
+    }
+}
+
+/// The Power button: let go, held since a time, or held long enough to fire its hold.
+#[derive(Copy, Clone, Default)]
+enum PowerKey {
+    #[default]
+    Up,
+    Held(Millis),
+    Fired,
+}
+
+/// Fast forward: off, held on R2, latched on, or latched by the second press of a double tap
+/// that is still down.
+#[derive(Copy, Clone, Default, PartialEq)]
+enum Ff {
+    #[default]
+    Off,
+    Held,
+    Latching,
+    Latched,
+}
+
 #[derive(Default)]
 pub struct Gestures {
     select: Select,
     menu_dpad_display: bool,
     chord_held: u16,
-    menu_down_at: Option<Millis>,
-    menu_last_tap: Option<Millis>,
-    eject_fired: bool,
-    menu_display_chorded: bool,
-    power_down_at: Option<Millis>,
-    power_hold_fired: bool,
+    menu: Menu,
+    power: PowerKey,
     vol_up_at: Option<Millis>,
     vol_down_at: Option<Millis>,
     vol_up_ramp: Option<Millis>,
     vol_down_ramp: Option<Millis>,
     mute_fired: bool,
-    ff_on: bool,
-    ff_latched: bool,
-    ff_latching_press: bool,
+    ff: Ff,
     r2_refused: bool,
     r2_last_release: Option<Millis>,
     rewinding: bool,
@@ -120,11 +150,11 @@ impl Gestures {
     }
 
     pub fn ff_latched(&self) -> bool {
-        self.ff_latched
+        matches!(self.ff, Ff::Latching | Ff::Latched)
     }
 
     pub fn drop_ff_latch(&mut self) -> Vec<Action> {
-        if !self.ff_latched {
+        if !self.ff_latched() {
             return Vec::new();
         }
         self.ff_clear()
@@ -155,15 +185,15 @@ impl Gestures {
                 out.extend(self.hand_over_select(now));
             }
         }
-        if let Some(d) = self.menu_down_at {
-            if !self.eject_fired && now.saturating_sub(d) >= MENU_HOLD_MS {
-                self.eject_fired = true;
+        if let Menu::Held(d) = self.menu {
+            if now.saturating_sub(d) >= MENU_HOLD_MS {
+                self.menu = Menu::Ejected;
                 out.push(Action::Eject);
             }
         }
-        if let Some(d) = self.power_down_at {
-            if !self.power_hold_fired && now.saturating_sub(d) >= POWER_HOLD_MS {
-                self.power_hold_fired = true;
+        if let PowerKey::Held(d) = self.power {
+            if now.saturating_sub(d) >= POWER_HOLD_MS {
+                self.power = PowerKey::Fired;
                 out.push(Action::PowerHold);
             }
         }
@@ -182,10 +212,7 @@ impl Gestures {
 
     fn down(&mut self, b: Btn, now: Millis) -> Vec<Action> {
         if let Some((bit, action)) = self.menu_display_chord(b) {
-            self.menu_display_chorded = true;
-            self.menu_down_at = None;
-            self.menu_last_tap = None;
-            self.eject_fired = false;
+            self.menu = Menu::Chorded;
             self.chord_held |= bit;
             return vec![action];
         }
@@ -200,8 +227,7 @@ impl Gestures {
             Btn::Select => self.select_down(now),
             Btn::Menu => self.menu_down(now),
             Btn::Power => {
-                self.power_down_at = Some(now);
-                self.power_hold_fired = false;
+                self.power = PowerKey::Held(now);
                 vec![Action::PowerPress]
             }
             Btn::Lid => vec![Action::LidClose],
@@ -301,40 +327,37 @@ impl Gestures {
     }
 
     fn menu_down(&mut self, now: Millis) -> Vec<Action> {
-        self.menu_display_chorded = false;
         if self.chording(now) {
             self.mark_chorded();
-            self.menu_down_at = None;
-            self.menu_last_tap = None;
+            self.menu = Menu::Idle { last_tap: None };
             return vec![Action::GameMenu];
         }
-        if let Some(tap) = self.menu_last_tap {
+        if let Menu::Idle {
+            last_tap: Some(tap),
+        } = self.menu
+        {
             if now.saturating_sub(tap) <= MENU_DOUBLE_TAP_MS {
-                self.menu_last_tap = None;
-                self.menu_down_at = None;
+                self.menu = Menu::Idle { last_tap: None };
                 return vec![Action::Polaroids];
             }
         }
-        self.menu_down_at = Some(now);
-        self.eject_fired = false;
+        self.menu = Menu::Held(now);
         Vec::new()
     }
 
     fn menu_up(&mut self, now: Millis) -> Vec<Action> {
-        if self.menu_display_chorded {
-            self.menu_display_chorded = false;
-            self.menu_down_at = None;
-            self.eject_fired = false;
-            return Vec::new();
-        }
-        let d = match self.menu_down_at.take() {
-            Some(d) => d,
-            None => return Vec::new(),
+        let d = match self.menu {
+            Menu::Held(d) => d,
+            Menu::Idle { .. } => return Vec::new(),
+            Menu::Ejected | Menu::Chorded => {
+                self.menu = Menu::Idle { last_tap: None };
+                return Vec::new();
+            }
         };
-        let ejected = self.eject_fired;
-        self.eject_fired = false;
-        let tapped = !ejected && now.saturating_sub(d) < MENU_TAP_MS;
-        self.menu_last_tap = if tapped { Some(now) } else { None };
+        let tapped = now.saturating_sub(d) < MENU_TAP_MS;
+        self.menu = Menu::Idle {
+            last_tap: if tapped { Some(now) } else { None },
+        };
         if tapped {
             vec![Action::QuickMenu]
         } else {
@@ -343,9 +366,8 @@ impl Gestures {
     }
 
     fn power_up(&mut self) -> Vec<Action> {
-        let held = self.power_hold_fired;
-        self.power_down_at = None;
-        self.power_hold_fired = false;
+        let held = matches!(self.power, PowerKey::Fired);
+        self.power = PowerKey::Up;
         vec![if held {
             Action::PowerOff
         } else {
@@ -416,20 +438,19 @@ impl Gestures {
             self.r2_refused = true;
             return Vec::new();
         }
-        if self.ff_latched {
-            self.ff_latching_press = false;
-        } else {
-            let double = match self.r2_last_release {
-                Some(rel) => now.saturating_sub(rel) <= FF_DOUBLE_TAP_MS,
-                None => false,
-            };
-            self.ff_latched = double;
-            self.ff_latching_press = double;
-        }
-        if self.ff_on {
+        if self.ff_latched() {
+            self.ff = Ff::Latched;
             return Vec::new();
         }
-        self.ff_on = true;
+        let double = match self.r2_last_release {
+            Some(rel) => now.saturating_sub(rel) <= FF_DOUBLE_TAP_MS,
+            None => false,
+        };
+        let on = self.ff != Ff::Off;
+        self.ff = if double { Ff::Latching } else { Ff::Held };
+        if on {
+            return Vec::new();
+        }
         vec![Action::FfStart]
     }
 
@@ -439,30 +460,25 @@ impl Gestures {
             return Vec::new();
         }
         self.r2_last_release = Some(now);
-        if self.ff_latching_press {
-            self.ff_latching_press = false;
+        if self.ff == Ff::Latching {
+            self.ff = Ff::Latched;
             return Vec::new();
         }
         self.ff_clear()
     }
 
     fn ff_clear(&mut self) -> Vec<Action> {
-        self.ff_latched = false;
-        self.ff_latching_press = false;
-        if !self.ff_on {
+        if self.ff == Ff::Off {
             return Vec::new();
         }
-        self.ff_on = false;
+        self.ff = Ff::Off;
         vec![Action::FfStop]
     }
 }
 
 impl Gestures {
     fn menu_display_chord(&self, b: Btn) -> Option<(u16, Action)> {
-        if !self.menu_dpad_display || self.eject_fired {
-            return None;
-        }
-        if self.menu_down_at.is_none() && !self.menu_display_chorded {
+        if !self.menu_dpad_display || !matches!(self.menu, Menu::Held(_) | Menu::Chorded) {
             return None;
         }
         display_chord(b)

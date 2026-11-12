@@ -853,6 +853,11 @@ def umd_ink(m: Medium) -> None:
     ink_text(m, "UNIVERSAL MEDIA DISC", cx, cy + 3.6, 19.5, m.depth + 0.06, hub)
 
 
+def nds_ink(m: Medium) -> None:
+    """The NINTENDO DS mark, moulded into the strip under the label."""
+    ink_text(m, "NINTENDO DS", 17.5, 29.4, 16.0, m.depth + 0.02, ink_material(0.2))
+
+
 def new_media() -> list[Medium]:
     out = [pcb()]
 
@@ -1264,6 +1269,25 @@ def new_media() -> list[Medium]:
             knobs=[(*UMD_C, UMD_R[0], 0.05)],
             round_shades=[(*UMD_C, UMD_R[0], 1.6)],
             ink=umd_ink,
+        )
+    )
+
+    # DS Game Card: the corner cut at its top right, the label over most of the face and the
+    # NINTENDO DS mark on the strip below it.
+    nds = Box(2.6, 2.6, 29.8, 23.4)
+    out.append(
+        cart(
+            "nds",
+            35,
+            33,
+            3.8,
+            300,
+            nds,
+            Box(4, 30.6, 27, 1.2),
+            outline=rounded([(0, 0), (32, 0), (35, 3), (35, 33), (0, 33)], 1.0),
+            corner=1.0,
+            bevel=0.4,
+            ink=nds_ink,
         )
     )
 

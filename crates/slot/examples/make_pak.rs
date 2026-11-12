@@ -39,7 +39,7 @@ fn main() -> ExitCode {
     };
     let pak = slot::pak::build::signed(version, &bytes, seed);
     // What goes out is checked the way the device checks it.
-    if let Err(e) = slot::pak::check(&pak, &slot::pak::RELEASE_KEY) {
+    if let Err(e) = slot::pak::check(&mut std::io::Cursor::new(&pak), &slot::pak::RELEASE_KEY) {
         eprintln!("make_pak: the pack does not check out: {e}");
         return ExitCode::FAILURE;
     }

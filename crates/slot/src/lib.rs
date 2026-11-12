@@ -21,6 +21,7 @@ pub mod crash;
 pub mod crash {
     pub fn install() {}
 }
+pub mod drastic;
 pub mod drc;
 pub mod emu;
 pub mod face_builder;

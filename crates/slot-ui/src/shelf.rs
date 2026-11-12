@@ -33,6 +33,8 @@ const OMEGA: f32 = 16.0;
 const PART: f32 = 130.0;
 
 const SLOTS: i32 = 3;
+/// How many carts a walk along the shelf measures one by one before it counts the rest by width.
+const FAR: i32 = 8;
 
 pub const REPEAT_DELAY_MS: Millis = 400;
 
@@ -315,6 +317,12 @@ impl Shelf {
         };
         self.index = target;
         self.ride += delta as f32;
+        // Only the carts about the target are drawn, so the shelf glides the last few rather
+        // than flying the whole letter past an empty canvas.
+        let lag = self.scroll_target() - self.scroll;
+        if lag.abs() > SLOTS as f32 {
+            self.scroll += lag - lag.signum() * SLOTS as f32;
+        }
     }
 
     pub fn hold_left(&mut self, now: Millis) {
@@ -415,12 +423,18 @@ impl Shelf {
         let u = self.scroll - self.scroll_target();
         let a = u.floor() as i32;
         let mut c = canvas.w / 2.0 - (u - a as f32) * self.pitch(a, u);
+        // Carts more than FAR from `slot` are off the canvas and all at the side scale, so each
+        // is a cart's width and need not be measured.
+        let far = ((slot - a).abs() - FAR).max(0);
+        let skipped = far as f32 * CART_W as f32;
         if slot >= a {
-            for s in a..slot {
+            c += skipped;
+            for s in a + far..slot {
                 c += self.pitch(s, u);
             }
         } else {
-            for s in (slot..a).rev() {
+            c -= skipped;
+            for s in (slot..a - far).rev() {
                 c -= self.pitch(s, u);
             }
         }

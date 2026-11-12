@@ -1,10 +1,14 @@
 ## Changes
 
-- Hardcore achievements: no save states and no rewind. Toggle it in Settings → Gameplay.
-- Region fallback: a disc or ROM whose hash RA doesn't know loads the achievement set of the same game from another region, in softcore.
-- Hardcore pause limiting, same rule as RetroArch: rapid re-pauses are refused until enough frames have played.
-- The states page hides Load in hardcore.
-- RetroAchievements now accepts hardcore unlocks from unslot (identified as a libretro frontend).
+- Nintendo DS, in `Games/NDS`, run by DraStic. No BIOS needed; saves, states and settings stay in `Saves/NDS`. DraStic's menu is on Select + X.
+- Menu in a DS game opens unslot's menu over it (Resume, Exit Game), and the volume keys and mute work as in any other game.
+- DS games show on the shelf as DS Game Cards, and Game Art fetches their art.
+- Letter jumps stay smooth on shelves of thousands of games, and no longer wait for the labels they land on.
+- Ejecting a game, or its core dying, closes its Core Options and Controls pages.
+- Offline achievements survive switching between softcore and hardcore, and offline hardcore unlocks stay earned.
+- With several update packs on the card, the newest version installs, not the last by name.
+- Update packs are checked and unpacked a piece at a time, so larger future updates still install on 1 GB handhelds.
+- rcheevos's MIT notice, DraStic's readme and SDL's licence now ship in `System/licenses`.
 
 ## New card: flash the image
 

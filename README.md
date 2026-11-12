@@ -8,7 +8,7 @@
 **A skeuomorphic, multi-system frontend for Anbernic's H700 handhelds, running on [BaseOS](https://github.com/pvaibhav/BaseOS).**
 
 A fork of [slot](https://github.com/BrandonKowalski/slot) that takes its cart shelves far past the
-Game Boy: **fifty-five systems**, from arcade boards to the PSP, with Wi-Fi and Bluetooth, analog
+Game Boy: **fifty-six systems**, from arcade boards to the PSP, with Wi-Fi and Bluetooth, analog
 sticks, search across every shelf, RetroAchievements, bezels, casting to a TV, network services and
 signed updates over the air.
 
@@ -26,7 +26,7 @@ signed updates over the air.
 
 ## What it does
 
-- **Fifty-five systems**, from arcade boards to the PSP, each on its own shelf as the media it came on: carts, cards, discs, floppies and tapes. Nintendo 64, Dreamcast and PSP draw on the GPU.
+- **Fifty-six systems**, from arcade boards to the PSP, each on its own shelf as the media it came on: carts, cards, discs, floppies and tapes. Nintendo 64, Dreamcast and PSP draw on the GPU. The DS runs in DraStic, with unslot's menu on Menu and DraStic's on Select + X.
 - **Wi-Fi** with an on-screen keyboard, and **Bluetooth** controllers and headphones.
 - **Analog sticks** on the models that have them.
 - **Services:** SSH and SFTP, sharing the card over SMB, Syncthing (add the device by scanning its ID), Tailscale (sign in by scanning a code) and WireGuard.
@@ -154,6 +154,7 @@ A `.pak` is the release's `MinUI.zip`, untouched, with its version and checksum 
 | Neo Geo CD | `NEOCD` | `.cue`, `.chd` | NeoCD | in `BIOS/neocd`: one of `neocd_f.rom`, `neocd_sf.rom`, `neocd_t.rom`, `neocd_st.rom`, `neocd_z.rom`, `neocd_sz.rom`, `front-sp1.bin`, `top-sp1.bin`, `neocd.bin`, `uni-bioscd.rom`, and `ng-lo.rom` or `000-lo.lo` (required) |
 | Famicom Disk System | `FDS` | `.fds` | FCEUmm | `disksys.rom` (required) |
 | Nintendo 64 | `N64` | `.n64`, `.v64`, `.z64` | ParaLLEl N64 |  |
+| Nintendo DS | `NDS` | `.nds` | DraStic |  |
 | Virtual Boy | `VB` | `.vb`, `.vboy` | Beetle VB |  |
 | Pokémon mini | `POKEMINI` | `.min` | PokeMini |  |
 | Game & Watch | `GW` | `.mgw` | Game & Watch |  |
@@ -255,7 +256,7 @@ unslot is a fork of **[slot](https://github.com/BrandonKowalski/slot)** by Brand
 | Area | Credit |
 |---|---|
 | Operating system | [BaseOS](https://github.com/pvaibhav/BaseOS) by pvaibhav |
-| Emulation | [mGBA](https://mgba.io), [gpSP](https://github.com/libretro/gpsp), and the libretro cores in the systems table. The Dreamcast's [Nodosumi](https://github.com/cloudwithax/nodosumi) ships with each release, with Flycast as the other choice. |
+| Emulation | [mGBA](https://mgba.io), [gpSP](https://github.com/libretro/gpsp), and the libretro cores in the systems table. The Dreamcast's [Nodosumi](https://github.com/cloudwithax/nodosumi) ships with each release, with Flycast as the other choice. The DS runs in Exophase's [DraStic](https://drastic-ds.com), by way of trngaje's [advanced_drastic](https://github.com/trngaje/advanced_drastic). |
 | Achievements | [rcheevos](https://github.com/RetroAchievements/rcheevos) (MIT), by way of machomano's slot fork (GPL-3.0) |
 | Bezels | [R. Savant's Anbernic H700 Overlays](https://github.com/RighteousSavant/Anbernic-H700-Overlays), free for any H700 handheld. The default bezel is "Perfect GBA SP" by mugwomp93, by way of chrizzo-hb's knulli-bezels (CC BY-SA 4.0). |
 | Apps | [MuPDF](https://mupdf.com)'s `mutool` (AGPL-3.0) reads PDFs and [FFmpeg](https://ffmpeg.org) (GPL) plays video; ports follow [PortMaster](https://portmaster.games)'s layout |

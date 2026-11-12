@@ -337,14 +337,11 @@ fn work(
                 });
                 // A pack is only kept if unslot signed it, as the launcher will not install it else.
                 let fetched = fetched.and_then(|()| match part {
-                    Part::Unslot => {
-                        let bytes = std::fs::read(&dest).map_err(|e| e.to_string())?;
-                        crate::pak::check(&bytes, &backend.release_key())
-                            .map(|_| ())
-                            .inspect_err(|_| {
-                                let _ = std::fs::remove_file(&dest);
-                            })
-                    }
+                    Part::Unslot => crate::pak::check_file(&dest, &backend.release_key())
+                        .map(|_| ())
+                        .inspect_err(|_| {
+                            let _ = std::fs::remove_file(&dest);
+                        }),
                     Part::BaseOs => Ok(()),
                 });
                 if let Err(e) = &fetched {

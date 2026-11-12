@@ -149,16 +149,46 @@ pub enum Notice {
     Softcore,
 }
 
+/// How the game being loaded was identified, when its own release may not be known.
+enum Release {
+    Own,
+    /// The title and console of the game being identified, to look up if its hash is unknown.
+    Identifying(String, u32),
+    /// The hash of the release found under that title, to load next.
+    Queued(String),
+    /// The game loading or loaded is another release's.
+    Borrowed,
+}
+
+impl Release {
+    /// Takes the title being identified, leaving the release as its own.
+    fn take_title(&mut self) -> Option<(String, u32)> {
+        match std::mem::replace(self, Release::Own) {
+            Release::Identifying(title, console) => Some((title, console)),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// Takes the queued hash, leaving the release as borrowed.
+    fn take_queued(&mut self) -> Option<String> {
+        match std::mem::replace(self, Release::Borrowed) {
+            Release::Queued(hash) => Some(hash),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+}
+
 struct State {
     raw: usize,
     inflight: usize,
     closing: bool,
-    /// The title and console of the game being identified, to look up if its hash is unknown.
-    title: Option<(String, u32)>,
-    /// The hash of the release found under that title, to load next.
-    borrow: Option<String>,
-    /// Whether the game loading or loaded is another release's.
-    borrowed: bool,
+    release: Release,
 }
 
 /// What the C callbacks reach through their host pointer.
@@ -303,7 +333,10 @@ unsafe extern "C" fn on_done(
         (1, true) => Notice::LoggedIn(Ok(())),
         (1, false) => Notice::LoggedIn(Err(message)),
         (_, true) => {
-            let message = if s.state.lock().unwrap_or_else(|e| e.into_inner()).borrowed {
+            let message = if matches!(
+                s.state.lock().unwrap_or_else(|e| e.into_inner()).release,
+                Release::Borrowed
+            ) {
                 s.push(Notice::Softcore);
                 format!("{message} (another release's set)")
             } else {
@@ -317,11 +350,11 @@ unsafe extern "C" fn on_done(
                 .state
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .title
-                .take();
+                .release
+                .take_title();
             if let Some(hash) = title.and_then(|(t, c)| other_release(&*s.http, &t, c)) {
                 eprintln!("slot: cheevos: unknown hash, borrowing {hash} by title");
-                s.state.lock().unwrap_or_else(|e| e.into_inner()).borrow = Some(hash);
+                s.state.lock().unwrap_or_else(|e| e.into_inner()).release = Release::Queued(hash);
                 return;
             }
             Notice::GameLoaded(Err(message))
@@ -423,9 +456,7 @@ impl Cheevos {
                 raw: 0,
                 inflight: 0,
                 closing: false,
-                title: None,
-                borrow: None,
-                borrowed: false,
+                release: Release::Own,
             }),
         }));
         let raw = unsafe {
@@ -485,9 +516,10 @@ impl Cheevos {
         {
             let mut st = self.state();
             let stem = rom.file_stem().map(|s| s.to_string_lossy().into_owned());
-            st.title = stem.map(|t| (t, console.id()));
-            st.borrow = None;
-            st.borrowed = false;
+            st.release = match stem {
+                Some(t) => Release::Identifying(t, console.id()),
+                None => Release::Own,
+            };
         }
         unsafe { slot_cheevos_load_game(self.raw, path.as_ptr(), console.id()) };
     }
@@ -503,9 +535,7 @@ impl Cheevos {
     fn borrow(&self) {
         let hash = {
             let mut st = self.state();
-            let hash = st.borrow.take();
-            st.borrowed |= hash.is_some();
-            hash
+            st.release.take_queued()
         };
         let Some(hash) = hash.and_then(|h| CString::new(h).ok()) else {
             return;
@@ -544,7 +574,11 @@ impl Cheevos {
     }
 
     pub fn unload(&self) {
-        self.state().borrow = None;
+        let mut st = self.state();
+        if matches!(st.release, Release::Queued(_)) {
+            st.release = Release::Own;
+        }
+        drop(st);
         unsafe { slot_cheevos_unload(self.raw) }
     }
 

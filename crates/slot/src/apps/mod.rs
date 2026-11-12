@@ -297,7 +297,7 @@ impl Apps {
     }
 
     fn port(&mut self, script: &Path) -> Done {
-        match ports::queue(&self.root, script) {
+        match ports::queue(&self.root, script, None) {
             Ok(()) => Done::Port(script.to_path_buf()),
             Err(e) => {
                 eprintln!("slot: ports: {e}");

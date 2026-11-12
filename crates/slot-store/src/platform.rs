@@ -61,6 +61,8 @@ pub enum Platform {
     Pico8,
     Tic80,
     Psp,
+    /// Run by DraStic, which slot quits for as it does for a port, rather than by a core.
+    Nds,
     /// The built-in apps and the ports in `Ports`, which slot opens itself rather than a core.
     Apps,
 }
@@ -698,6 +700,15 @@ const SPECS: [Spec; Platform::COUNT] = [
         ..HANDHELD
     },
     Spec {
+        name: "Nintendo DS",
+        short: "DS",
+        dir: "NDS",
+        extensions: &["nds"],
+        turbo: false,
+        rewind: false,
+        ..HANDHELD
+    },
+    Spec {
         name: "Apps",
         dir: "APPS",
         turbo: false,
@@ -707,7 +718,7 @@ const SPECS: [Spec; Platform::COUNT] = [
 ];
 
 impl Platform {
-    pub const COUNT: usize = 56;
+    pub const COUNT: usize = 57;
     pub const ALL: [Platform; Platform::COUNT] = [
         Platform::Gba,
         Platform::Gb,
@@ -764,6 +775,7 @@ impl Platform {
         Platform::Pico8,
         Platform::Tic80,
         Platform::Psp,
+        Platform::Nds,
         Platform::Apps,
     ];
 
@@ -835,11 +847,14 @@ mod tests {
 
     #[test]
     fn every_spec_is_complete() {
-        // The apps are opened by slot itself: no core, no files.
+        // The apps are opened by slot itself: no core, no files. DS games are run by DraStic.
         for p in Platform::ALL.into_iter().filter(|p| *p != Platform::Apps) {
             let s = p.spec();
             assert!(!s.name.is_empty() && !s.dir.is_empty(), "{p:?} has no name");
-            assert!(!s.cores.is_empty(), "{p:?} has no core");
+            assert!(
+                p == Platform::Nds || !s.cores.is_empty(),
+                "{p:?} has no core"
+            );
             assert!(
                 s.shaders.contains(&s.shader),
                 "{p:?} defaults to a shader it does not offer"
