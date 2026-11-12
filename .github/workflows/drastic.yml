@@ -1,0 +1,63 @@
+name: drastic
+
+# What the DS runs on, built the way a release builds it: `task drastic` fetches DraStic and its
+# BIOS stand-ins pinned and checked, and builds SDL_drastic with Knulli's H700 patches and
+# tools/drastic/volume.c, on arm64 in the bullseye box the release uses, whose glibc is older
+# than BaseOS's. Run on any change to it, so a release never finds it broken.
+on:
+  push:
+    paths:
+      - tools/drastic/**
+      - card/System/drastic/**
+      - taskfile.yml
+      - .github/workflows/drastic.yml
+  pull_request:
+    paths:
+      - tools/drastic/**
+      - card/System/drastic/**
+      - taskfile.yml
+      - .github/workflows/drastic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    container: rust:1-bullseye
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Task
+        run: curl -fsSL https://taskfile.dev/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Build
+        run: task drastic
+
+      - name: Check what a release would ship
+        run: |
+          set -eu
+          d=vendor/drastic
+          for f in drastic libs/libSDL2-2.0.so.0 libs/libunslot-drastic.so; do
+            file "$d/$f" | grep -q aarch64
+          done
+          test -x "$d/drastic"
+          test -s "$d/game_database.xml"
+          test -n "$(ls -A "$d/system")"
+          for f in drastic.manifest drastic_readme.txt SDL-LICENSE.txt; do
+            test -s "$d/$f"
+          done
+          # BaseOS has bullseye's glibc or newer; nothing built here may want more.
+          for f in libs/libSDL2-2.0.so.0 libs/libunslot-drastic.so; do
+            want="$(objdump -T "$d/$f" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n 1)"
+            echo "$f wants $want"
+            [ "$(printf '%s\nGLIBC_2.31\n' "$want" | sort -V | tail -n 1)" = GLIBC_2.31 ]
+          done
+          cat "$d/drastic.manifest"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: drastic
+          path: vendor/drastic
+          if-no-files-found: error

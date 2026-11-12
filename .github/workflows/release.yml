@@ -86,6 +86,16 @@ jobs:
           for p in cores/mgba/*.patch; do
             test -f "$out/System/licenses/mgba-$(basename "$p")"
           done
+          # The DS: DraStic, its SDL and slot's volume hook beside the launcher, with their notes.
+          for f in drastic libs/libSDL2-2.0.so.0 libs/libunslot-drastic.so; do
+            file "$out/System/drastic/$f" | grep -q aarch64
+          done
+          test -f "$out/System/drastic/launch.sh"
+          test -f "$out/System/drastic/drastic.cfg"
+          test -s "$out/System/drastic/game_database.xml"
+          for f in drastic.manifest drastic_readme.txt SDL-LICENSE.txt; do
+            test -s "$out/System/licenses/$f"
+          done
 
       - name: Package
         id: package
