@@ -94,13 +94,11 @@ Bezels are hidden while a game is stretched.
 Some games flicker sprites on and off every other frame to fake see-through effects. The original screens were slow
 enough to blur that into a steady image. On a modern screen you see the flicker.
 
-| Frame Blending | Does                                                        |
-|----------------|-------------------------------------------------------------|
-| Off            | Shows every frame as it is (default)                        |
-| Mix            | Blends each frame with the one before                       |
-| Ghosting       | Leaves a fading trail, like the original screens. mGBA only |
-
-A game on gpSP set to Ghosting gets Mix.
+| Frame Blending | Does                                                                  |
+|----------------|-----------------------------------------------------------------------|
+| Off            | Shows every frame as it is (default)                                  |
+| Mix            | Blends each frame half and half with the one before                   |
+| Ghosting       | Fades each pixel slowly, the way the original screen did              |
 
 ## Bezels
 
