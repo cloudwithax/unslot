@@ -10,6 +10,7 @@ mod draw;
 mod ds;
 mod fbdev;
 mod fbo;
+mod ghost;
 mod gl;
 mod grade;
 #[cfg(target_os = "macos")]
@@ -37,6 +38,7 @@ pub use ds::{
 };
 pub use fbdev::{egl_error, panel_mode, panel_size, FbdevSurface};
 pub use fbo::{canvas_size, Compositor, BACKDROP};
+pub use ghost::{FrameBlend, Lcd};
 pub use grade::{
     blue_light_gain, contrast_boost, dim_gain, saturation_boost, ColorGrade, BLUE_LIGHT_MAX,
     CONTRAST_MAX, SATURATION_MAX,

@@ -9,7 +9,7 @@ pub struct Frames {
 }
 
 struct Inner {
-    ready: Option<Vec<u8>>,
+    ready: Option<(Vec<u8>, u64)>,
     spare: Vec<Vec<u8>>,
     allocated: usize,
 }
@@ -38,19 +38,20 @@ impl Frames {
         }
     }
 
-    pub fn publish(&self, buf: Vec<u8>) {
+    pub fn publish(&self, buf: Vec<u8>, cut: u64) {
         let mut i = self.lock();
-        if let Some(dropped) = i.ready.replace(buf) {
+        if let Some((dropped, _)) = i.ready.replace((buf, cut)) {
             i.spare.push(dropped);
         }
     }
 
     pub fn latest(self: &Arc<Self>) -> Option<FrameRef> {
-        let buf = self.lock().ready.take()?;
+        let (buf, cut) = self.lock().ready.take()?;
         self.taken.fetch_add(1, Ordering::Relaxed);
         Some(FrameRef {
             frames: self.clone(),
             buf,
+            cut,
         })
     }
 
@@ -78,6 +79,13 @@ impl Frames {
 pub struct FrameRef {
     frames: Arc<Frames>,
     buf: Vec<u8>,
+    cut: u64,
+}
+
+impl FrameRef {
+    pub fn cut(&self) -> u64 {
+        self.cut
+    }
 }
 
 impl Deref for FrameRef {

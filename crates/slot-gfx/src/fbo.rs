@@ -132,7 +132,7 @@ impl Compositor {
     }
 
     pub fn upload_game(&mut self, xrgb8888: &[u8]) {
-        self.game.upload(xrgb8888);
+        self.game.upload(xrgb8888, &self.quad);
     }
 
     pub fn draw_game(&mut self) {
@@ -220,6 +220,18 @@ impl Compositor {
 
     pub fn set_screen_effect(&mut self, effect: crate::ScreenEffect) {
         self.game.set_effect(effect);
+    }
+
+    pub fn set_frame_blend(&mut self, blend: crate::FrameBlend) {
+        self.game.set_blend(blend, &self.quad);
+    }
+
+    pub fn set_lcd(&mut self, lcd: crate::Lcd) {
+        self.game.set_lcd(lcd, &self.quad);
+    }
+
+    pub fn cut_frame_blend(&mut self) {
+        self.game.cut();
     }
 
     pub fn set_picture(&mut self, rect: [f32; 4]) {

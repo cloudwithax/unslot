@@ -103,6 +103,7 @@ struct Shared {
     fast_quarters: AtomicU32,
     ff_sound: AtomicBool,
     published: AtomicU64,
+    cuts: AtomicU64,
     resume_refused: AtomicBool,
     sav_refused: AtomicBool,
     link_lost: AtomicBool,
@@ -206,6 +207,7 @@ impl EmuHandle {
             fast_quarters: AtomicU32::new(FAST_STEPS * 4),
             ff_sound: AtomicBool::new(false),
             published: AtomicU64::new(0),
+            cuts: AtomicU64::new(0),
             resume_refused: AtomicBool::new(false),
             sav_refused: AtomicBool::new(false),
             link_lost: AtomicBool::new(false),
@@ -379,6 +381,10 @@ impl EmuHandle {
 
     pub fn frames_taken(&self) -> u64 {
         self.frames.taken()
+    }
+
+    pub fn cuts(&self) -> u64 {
+        self.shared.cuts.load(Ordering::Relaxed)
     }
 
     pub fn published_count(&self) -> u64 {
@@ -673,6 +679,7 @@ impl Worker {
                             } else {
                                 match core.unserialize(&state) {
                                     Ok(()) => {
+                                        self.shared.cuts.fetch_add(1, Ordering::Relaxed);
                                         eprintln!(
                                         "slot: cable: restored {} bytes, running the host's game",
                                         state.len()
@@ -998,9 +1005,11 @@ impl Worker {
                 if let Err(e) = core.unserialize(&self.for_core(state)) {
                     eprintln!("slot: {e}");
                 }
+                self.shared.cuts.fetch_add(1, Ordering::Relaxed);
             }
             Cmd::Refresh => match core.serialize() {
                 Ok(state) => {
+                    self.shared.cuts.fetch_add(1, Ordering::Relaxed);
                     core.set_frame_skip(true);
                     core.run_frame(ButtonMask(0));
                     core.set_frame_skip(false);
@@ -1052,7 +1061,10 @@ impl Worker {
             Cmd::SetOption(key, value) => {
                 core.set_option(&key, &value);
             }
-            Cmd::Reset => core.reset(),
+            Cmd::Reset => {
+                core.reset();
+                self.shared.cuts.fetch_add(1, Ordering::Relaxed);
+            }
             Cmd::EndLink => {
                 self.shared.link_lost.store(false, Ordering::Relaxed);
                 self.shared.peer_ended.store(false, Ordering::Relaxed);
@@ -1089,7 +1101,8 @@ impl Worker {
         let mut buf = self.frames.take_write();
         buf.clear();
         buf.extend_from_slice(video);
-        self.frames.publish(buf);
+        self.frames
+            .publish(buf, self.shared.cuts.load(Ordering::Relaxed));
         self.shared.published.fetch_add(1, Ordering::Relaxed);
         crate::latency::published();
     }

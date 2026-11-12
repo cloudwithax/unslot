@@ -645,7 +645,6 @@ pub struct App {
     snapshot: Option<Box<dyn Snapshot>>,
     core: Core,
     colour_pending: Option<bool>,
-    blending_pending: Option<Blending>,
     palette_live: bool,
     palette_pending: Option<GbColors>,
     sunlight_manual: Option<u8>,
@@ -1143,7 +1142,6 @@ impl App {
             snapshot: None,
             core: Core::default(),
             colour_pending: None,
-            blending_pending: None,
             palette_live: false,
             palette_pending: None,
             sunlight_manual: None,
@@ -4805,7 +4803,23 @@ impl App {
     }
 
     pub fn blending_in_play(&self) -> Blending {
-        self.blending_for(self.playing_platform()).on(self.core)
+        self.blending_for(self.playing_platform())
+    }
+
+    pub fn frame_blend(&self) -> slot_gfx::FrameBlend {
+        match self.blending_in_play() {
+            Blending::Off => slot_gfx::FrameBlend::Off,
+            Blending::Mix => slot_gfx::FrameBlend::Mix,
+            Blending::Ghosting => slot_gfx::FrameBlend::Ghosting,
+        }
+    }
+
+    pub fn lcd(&self) -> slot_gfx::Lcd {
+        match self.playing_platform().hardware() {
+            Platform::Gb => slot_gfx::Lcd::Dmg,
+            Platform::Gbc => slot_gfx::Lcd::Gbc,
+            _ => slot_gfx::Lcd::Gba,
+        }
     }
 
     pub fn light(&self) -> bool {
@@ -4912,10 +4926,6 @@ impl App {
 
     pub fn take_colour_correction(&mut self) -> Option<bool> {
         self.colour_pending.take()
-    }
-
-    pub fn take_blending(&mut self) -> Option<Blending> {
-        self.blending_pending.take()
     }
 
     pub fn sunlight(&self) -> Option<u8> {
@@ -5717,7 +5727,6 @@ impl App {
                 Platform::Gbc => self.state.blending_gbc = to,
                 _ => self.state.blending_gba = to,
             }
-            self.blending_pending = Some(self.blending_in_play());
             self.persist();
             return;
         }
@@ -5896,16 +5905,13 @@ impl App {
             QuickRow::ResumePowerOn => s.resume_power_on = !s.resume_power_on,
             QuickRow::Rewind => s.rewind = !s.rewind,
             QuickRow::GbaBlending => {
-                s.blending_gba = s.blending_gba.step(&Blending::MGBA, right);
-                self.blending_pending = Some(self.blending_in_play());
+                s.blending_gba = s.blending_gba.step(&Blending::ALL, right);
             }
             QuickRow::GbcBlending => {
-                s.blending_gbc = s.blending_gbc.step(&Blending::MGBA, right);
-                self.blending_pending = Some(self.blending_in_play());
+                s.blending_gbc = s.blending_gbc.step(&Blending::ALL, right);
             }
             QuickRow::GbBlending => {
-                s.blending_gb = s.blending_gb.step(&Blending::MGBA, right);
-                self.blending_pending = Some(self.blending_in_play());
+                s.blending_gb = s.blending_gb.step(&Blending::ALL, right);
             }
             QuickRow::Theme => s.appearance = s.appearance.toggle(),
             QuickRow::BatteryDisplay => s.battery_display = s.battery_display.step(right),
