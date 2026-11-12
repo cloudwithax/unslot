@@ -46,7 +46,6 @@ locks again.
 | Fast Forward | Off, 1.5x, 2x, 3x, 4x, 6x | 6x | The top speed when fast-forwarding |
 | Fast Forward Sound | On, Off | Off | Sound while fast-forwarding |
 | Rewind | On, Off | On | Hold <kbd>L2</kbd> to go back |
-| Turbo Buttons | On, Off | On | Turbo A and Turbo B |
 | Rumble | On, Off | On | For games with a rumble pak |
 | Left Stick as D-Pad | On, Off | On | Only on devices with a left stick |
 | Resume on Insert | On, Off | On | Inserting a cart picks up where you left off |
