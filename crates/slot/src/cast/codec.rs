@@ -78,8 +78,19 @@ pub fn widescreen(w: u32, h: u32) -> (u32, u32) {
     }
 }
 
+/// A Cast stream kept within a 480-line encoder budget. A native square 720-line canvas
+/// otherwise becomes 1280x720, which software x264 on H700 cannot encode at 60 fps.
+pub fn cast_size(w: u32, h: u32) -> (u32, u32) {
+    let native = widescreen(w, h);
+    if native.0 <= 854 && native.1 <= 480 {
+        native
+    } else {
+        fit(native, (854, 480))
+    }
+}
+
 /// An H.264 encoder for `w` by `h` frames, each converted with `fill` then encoded, a 16:9
-/// picture with the frame in the middle and black either side.
+/// picture no larger than 480 lines, with the frame centred and its shape kept.
 pub struct H264 {
     codecs: Arc<Codecs>,
     enc: Ptr,
@@ -104,7 +115,7 @@ impl H264 {
         kbps: u32,
         threads: u32,
     ) -> Result<H264, String> {
-        H264::open_at(codecs, w, h, widescreen(w, h), fps, kbps, threads)
+        H264::open_at(codecs, w, h, cast_size(w, h), fps, kbps, threads)
     }
 
     /// As `open`, but `out` in size, the frame scaled to fit it, as large as it goes keeping
@@ -349,8 +360,8 @@ impl Scaled {
 
 /// The top-left `w` by `h` of `bgrx`, `stride` pixels to a row, into the middle of `out`, an I420
 /// picture `ow` by `oh` with its planes one after another: BT.601's limited range, each chroma
-/// sample the average of four pixels. The top and bottom halves are done at once, on this thread
-/// and another.
+/// sample the average of four pixels. AArch64 uses NEON on this thread; the scalar fallback
+/// splits the top and bottom halves between two threads.
 pub fn bgrx_to_i420(
     bgrx: &[u8],
     stride: u32,
@@ -369,17 +380,22 @@ pub fn bgrx_to_i420(
         &mut u_plane[y0 / 2 * (ow / 2)..(y0 + h) / 2 * (ow / 2)],
         &mut v_plane[y0 / 2 * (ow / 2)..(y0 + h) / 2 * (ow / 2)],
     );
-    // Whole pairs of rows to each half.
-    let top = h / 4 * 2;
-    let (luma_top, luma_bottom) = luma.split_at_mut(top * ow);
-    let (u_top, u_bottom) = u_plane.split_at_mut(top / 2 * (ow / 2));
-    let (v_top, v_bottom) = v_plane.split_at_mut(top / 2 * (ow / 2));
-    let below = &bgrx[(top * stride).min(bgrx.len())..];
     let place = Place { stride, w, ow, x0 };
-    std::thread::scope(|s| {
-        s.spawn(|| rows_to_i420(below, &place, luma_bottom, u_bottom, v_bottom));
-        rows_to_i420(bgrx, &place, luma_top, u_top, v_top);
-    });
+    #[cfg(target_arch = "aarch64")]
+    rows_to_i420(bgrx, &place, luma, u_plane, v_plane);
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        // Whole pairs of rows to each half.
+        let top = h / 4 * 2;
+        let (luma_top, luma_bottom) = luma.split_at_mut(top * ow);
+        let (u_top, u_bottom) = u_plane.split_at_mut(top / 2 * (ow / 2));
+        let (v_top, v_bottom) = v_plane.split_at_mut(top / 2 * (ow / 2));
+        let below = &bgrx[(top * stride).min(bgrx.len())..];
+        std::thread::scope(|s| {
+            s.spawn(|| rows_to_i420(below, &place, luma_bottom, u_bottom, v_bottom));
+            rows_to_i420(bgrx, &place, luma_top, u_top, v_top);
+        });
+    }
 }
 
 /// Where rows go: `w` pixels of rows `stride` bytes apart, to `x0` along rows `ow` wide.
@@ -401,9 +417,23 @@ fn rows_to_i420(bgrx: &[u8], at: &Place, luma: &mut [u8], u: &mut [u8], v: &mut 
         let (l0, l1) = l.split_at_mut(ow);
         let (l0, l1) = (&mut l0[x0..x0 + w], &mut l1[x0..x0 + w]);
         let (u, v) = (&mut u[x0 / 2..(x0 + w) / 2], &mut v[x0 / 2..(x0 + w) / 2]);
-        let pixels = r0.chunks_exact(8).zip(r1.chunks_exact(8));
-        let lumas = l0.chunks_exact_mut(2).zip(l1.chunks_exact_mut(2));
-        for (((p0, p1), (y0, y1)), (u, v)) in pixels.zip(lumas).zip(u.iter_mut().zip(v)) {
+        // Eight pixels per row at a time; leave the even tail to the scalar conversion.
+        // SAFETY: the rows have w luma samples, w*4 source bytes and w/2 chroma samples;
+        // neon_rows reads and writes only complete eight-pixel blocks.
+        #[cfg(target_arch = "aarch64")]
+        let done = unsafe { neon_rows(r0, r1, l0, l1, u, v) };
+        #[cfg(not(target_arch = "aarch64"))]
+        let done = 0;
+        let pixels = r0[done * 4..]
+            .chunks_exact(8)
+            .zip(r1[done * 4..].chunks_exact(8));
+        let lumas = l0[done..]
+            .chunks_exact_mut(2)
+            .zip(l1[done..].chunks_exact_mut(2));
+        for (((p0, p1), (y0, y1)), (u, v)) in pixels
+            .zip(lumas)
+            .zip(u[done / 2..].iter_mut().zip(&mut v[done / 2..]))
+        {
             let px =
                 |p: &[u8], i: usize| (i32::from(p[i + 2]), i32::from(p[i + 1]), i32::from(p[i]));
             let quad = [px(p0, 0), px(p0, 4), px(p1, 0), px(p1, 4)];
@@ -422,9 +452,125 @@ fn rows_to_i420(bgrx: &[u8], at: &Place, luma: &mut [u8], u: &mut [u8], v: &mut 
     }
 }
 
+/// The same integer BT.601 arithmetic as the scalar tail, including rounding before the
+/// shifts. All slices cover a whole row, with four BGRX bytes per luma and one U/V per pair.
+#[cfg(target_arch = "aarch64")]
+unsafe fn neon_rows(
+    r0: &[u8],
+    r1: &[u8],
+    y0: &mut [u8],
+    y1: &mut [u8],
+    u: &mut [u8],
+    v: &mut [u8],
+) -> usize {
+    use std::arch::aarch64::*;
+    let y = |p: uint8x8x4_t| {
+        let sum = vmlal_u8(
+            vmlal_u8(vmull_u8(p.2, vdup_n_u8(66)), p.1, vdup_n_u8(129)),
+            p.0,
+            vdup_n_u8(25),
+        );
+        vadd_u8(
+            vshrn_n_u16::<8>(vaddq_u16(sum, vdupq_n_u16(128))),
+            vdup_n_u8(16),
+        )
+    };
+    let chroma = |sum: int32x4_t| {
+        let val = vadd_s16(
+            vshrn_n_s32::<10>(vaddq_s32(sum, vdupq_n_s32(512))),
+            vdup_n_s16(128),
+        );
+        let bytes = vmovn_u16(vreinterpretq_u16_s16(vcombine_s16(val, vdup_n_s16(0))));
+        vget_lane_u32::<0>(vreinterpret_u32_u8(bytes)).to_le_bytes()
+    };
+    let mut x = 0;
+    while x + 8 <= y0.len() {
+        let a = vld4_u8(r0.as_ptr().add(x * 4));
+        let b = vld4_u8(r1.as_ptr().add(x * 4));
+        vst1_u8(y0.as_mut_ptr().add(x), y(a));
+        vst1_u8(y1.as_mut_ptr().add(x), y(b));
+        let blue = vreinterpret_s16_u16(vadd_u16(vpaddl_u8(a.0), vpaddl_u8(b.0)));
+        let green = vreinterpret_s16_u16(vadd_u16(vpaddl_u8(a.1), vpaddl_u8(b.1)));
+        let red = vreinterpret_s16_u16(vadd_u16(vpaddl_u8(a.2), vpaddl_u8(b.2)));
+        let us = vmlsl_n_s16(vmlsl_n_s16(vmull_n_s16(blue, 112), green, 74), red, 38);
+        let vs = vmlsl_n_s16(vmlsl_n_s16(vmull_n_s16(red, 112), green, 94), blue, 18);
+        u[x / 2..x / 2 + 4].copy_from_slice(&chroma(us));
+        v[x / 2..x / 2 + 4].copy_from_slice(&chroma(vs));
+        x += 8;
+    }
+    x
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conversion_matches_scalar_math_across_vector_tails_stride_and_padding() {
+        let mut seed = 42u32;
+        for w in [2, 6, 8, 10, 14, 16, 18, 30, 64] {
+            for h in [2, 6, 10] {
+                let (stride, ow, oh) = (w + 3, w + 6, h + 4);
+                let mut src = vec![0u8; stride * h * 4];
+                for byte in &mut src {
+                    seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    *byte = (seed >> 24) as u8;
+                }
+                let mut want = vec![128; ow * oh * 3 / 2];
+                want[..ow * oh].fill(16);
+                let mut got = want.clone();
+                let px = |x: usize, y: usize| {
+                    let i = (y * stride + x) * 4;
+                    (
+                        i32::from(src[i + 2]),
+                        i32::from(src[i + 1]),
+                        i32::from(src[i]),
+                    )
+                };
+                let (dx, dy) = ((ow - w) / 4 * 2, (oh - h) / 4 * 2);
+                for y in (0..h).step_by(2) {
+                    for x in (0..w).step_by(2) {
+                        let mut sum = (0, 0, 0);
+                        for yy in 0..2 {
+                            for xx in 0..2 {
+                                let (r, g, b) = px(x + xx, y + yy);
+                                want[(y + yy + dy) * ow + x + xx + dx] =
+                                    (((66 * r + 129 * g + 25 * b + 128) >> 8) + 16) as u8;
+                                sum = (sum.0 + r, sum.1 + g, sum.2 + b);
+                            }
+                        }
+                        let (r, g, b) = sum;
+                        let i = (y + dy) / 2 * (ow / 2) + (x + dx) / 2;
+                        want[ow * oh + i] =
+                            (((-38 * r - 74 * g + 112 * b + 512) >> 10) + 128) as u8;
+                        want[ow * oh * 5 / 4 + i] =
+                            (((112 * r - 94 * g - 18 * b + 512) >> 10) + 128) as u8;
+                    }
+                }
+                bgrx_to_i420(
+                    &src,
+                    stride as u32,
+                    (w as u32, h as u32),
+                    (ow as u32, oh as u32),
+                    &mut got,
+                );
+                assert_eq!(got, want, "{w}x{h}");
+            }
+        }
+    }
+
+    #[test]
+    fn large_canvases_stay_within_the_realtime_encoder_budget() {
+        for input in [(720, 720), (1280, 720), (1920, 1080), (640, 480)] {
+            let (w, h) = cast_size(input.0, input.1);
+            assert!(w <= 854 && h <= 480);
+            assert_eq!((w % 2, h % 2), (0, 0));
+            // At most a pixel of rounding from 16:9.
+            assert!(w.abs_diff(h * 16 / 9) <= 2);
+        }
+        // Don't upscale an already small canvas just to fill the encoder budget.
+        assert_eq!(cast_size(320, 240), widescreen(320, 240));
+    }
 
     #[test]
     fn colours_come_out_as_bt601_says() {

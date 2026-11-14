@@ -638,11 +638,12 @@ impl Compositor {
     /// for it and it is passed over; false when frames must be read back here.
     #[cfg(target_os = "linux")]
     fn lend_canvas(&mut self, tap: &crate::cast_tap::FrameTap, now: std::time::Instant) -> bool {
-        let ((w, h), fbo) = (self.size, self.fbo);
+        let ((iw, ih), fbo) = (self.size, self.fbo);
+        let (w, h) = tap.capture_size((iw, ih));
         let Some(ion) = self.cast_ion().filter(|ion| ion.can_lend()) else {
             return false;
         };
-        match ion.lend(fbo, w, h, true) {
+        match ion.lend(fbo, iw, ih, (w, h), true) {
             Ok(Some(lent)) => tap.lend(w, h, now, Box::new(lent), now.elapsed()),
             Ok(None) => {}
             Err(()) => self.cast_ion = None,

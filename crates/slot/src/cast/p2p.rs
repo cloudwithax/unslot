@@ -81,7 +81,16 @@ impl Radio {
     /// The TVs that answer within `wait`, by name.
     pub fn sinks(&self, wait: Duration) -> Result<Vec<Receiver>, String> {
         self.ok("P2P_FIND")?;
-        std::thread::sleep(wait);
+        // Drain discovery events as they arrive; a full monitor socket can lose its
+        // subscription before the same radio is handed to a connection.
+        let end = Instant::now() + wait;
+        loop {
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            self.event(left.min(Duration::from_secs(1)));
+        }
         let _ = self.ok("P2P_STOP_FIND");
         // The peers one after another, each answer starting with its address, FAIL after the
         // last; P2P_PEERS is wpa_cli's own, not the supplicant's.

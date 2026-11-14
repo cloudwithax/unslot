@@ -18,14 +18,16 @@ use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver as Jobs, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub use mdns::{Addr, Receiver};
 
-/// How long a search listens for answers, and looks for Miracast TVs: a fresh Wi-Fi Direct
-/// supplicant takes some 6 s to hear its first.
+/// A standalone Cast browse; Wi-Fi Direct needs longer. On H700 both interfaces share the
+/// radio, so Cast must keep listening throughout that scan rather than quit after its first
+/// off-channel queries are lost.
 const SEARCH: Duration = Duration::from_secs(3);
 const SEARCH_P2P: Duration = Duration::from_secs(10);
+const SEARCH_KEEP: Duration = Duration::from_secs(60);
 
 /// Congestion loses a datagram rather than holding the encoder and its stream lock. The
 /// per-call flag leaves Chromecast's blocking RTCP receive and its timeout unchanged.
@@ -63,6 +65,7 @@ pub trait CastBackend: Send {
     fn start(&mut self, to: &Receiver) -> Result<(), String>;
     fn stop(&mut self);
     /// Why the cast ended, once it has; empty when stopped from here.
+    /// Also polled while idle, so unused discovery resources can be released.
     fn ended(&mut self) -> Option<String>;
 }
 
@@ -101,6 +104,7 @@ impl Cast {
                 lib: codec::library(root),
                 p2p: cfg!(feature = "device"),
                 session: None,
+                radio: None,
             })),
             false => Cast::spawn(Box::new(SimCast::default())),
         }
@@ -130,7 +134,7 @@ fn work(mut backend: Box<dyn CastBackend>, jobs: Jobs<Job>, view: Arc<Mutex<Cast
             Ok(job) => job,
             Err(RecvTimeoutError::Timeout) => {
                 let casting = view().casting.is_some();
-                if let Some(why) = casting.then(|| backend.ended()).flatten() {
+                if let Some(why) = backend.ended().filter(|_| casting) {
                     let mut v = view();
                     v.casting = None;
                     v.error = (!why.is_empty()).then_some(why);
@@ -188,6 +192,8 @@ struct NetCast {
     /// Whether to look for Miracast TVs too, which takes the handheld's second radio.
     p2p: bool,
     session: Option<Live>,
+    /// Keep the supplicant's peer cache until a TV is picked, or the browse expires.
+    radio: Option<(p2p::Radio, Instant)>,
 }
 
 enum Live {
@@ -209,15 +215,25 @@ impl CastBackend for NetCast {
         let root = self.root.clone();
         // The radio a Miracast in progress is on is left to it.
         let free = !matches!(self.session, Some(Live::Miracast(_)));
-        let p2p = (self.p2p && free)
-            .then(|| std::thread::spawn(move || p2p::Radio::up(&root)?.sinks(SEARCH_P2P)));
-        let cast = mdns::search(SEARCH).map_err(|e| e.to_string());
+        let radio = self.radio.take().map(|(radio, _)| radio);
+        let p2p = (self.p2p && free).then(|| {
+            std::thread::spawn(move || -> Result<_, String> {
+                let radio = radio.map_or_else(|| p2p::Radio::up(&root), Ok)?;
+                let tvs = radio.sinks(SEARCH_P2P)?;
+                Ok((radio, tvs))
+            })
+        });
+        let cast_wait = if p2p.is_some() { SEARCH_P2P } else { SEARCH };
+        let cast = mdns::search(cast_wait).map_err(|e| e.to_string());
         let tvs = p2p.map(|t| {
             t.join()
                 .unwrap_or_else(|_| Err("Wi-Fi Direct failed".into()))
         });
         let tvs = match tvs {
-            Some(Ok(tvs)) => Some(tvs),
+            Some(Ok((radio, tvs))) => {
+                self.radio = Some((radio, Instant::now()));
+                Some(tvs)
+            }
             Some(Err(e)) => {
                 eprintln!("slot: cast: miracast: {e}");
                 None
@@ -239,7 +255,11 @@ impl CastBackend for NetCast {
         let started = match to.addr {
             Addr::Cast(_) => session::Session::start(&self.lib, to).map(Live::Cast),
             Addr::Miracast(_) => {
-                miracast::Session::start(&self.root, &self.lib, to).map(Live::Miracast)
+                let radio = self.radio.take().map(|(radio, _)| radio);
+                radio
+                    .map_or_else(|| p2p::Radio::up(&self.root), Ok)
+                    .and_then(|radio| miracast::Session::start(&self.lib, to, radio))
+                    .map(Live::Miracast)
             }
         };
         let s = started.map_err(|e| {
@@ -256,6 +276,13 @@ impl CastBackend for NetCast {
     }
 
     fn ended(&mut self) -> Option<String> {
+        if self
+            .radio
+            .as_ref()
+            .is_some_and(|(_, found)| found.elapsed() >= SEARCH_KEEP)
+        {
+            self.radio = None;
+        }
         let why = self.session.as_ref()?.ended()?;
         self.session = None;
         Some(why)

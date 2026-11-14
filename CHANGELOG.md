@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.13.1
+
+- Google Cast discovery listens for multicast and unicast DNS-SD replies, collects records split across packets, and asks for missing service and host records. It keeps listening throughout a simultaneous Wi-Fi Direct search: the two handheld interfaces share a radio, and the old three-second Cast search could finish before replies got through.
+- Miracast keeps the discovery supplicant and its peer cache for up to a minute while a TV is picked, then hands it directly to the connection. Previously connecting restarted discovery and could report that a TV just listed was gone.
+- Google Cast uses a 480-line stream budget instead of growing a square 720-line canvas to 1280x720, which H700's software encoder could not keep up with at 60 fps. Cast and Miracast scale the capture on the GPU before reading it back, and convert its colours with NEON on AArch64 without starting a conversion thread for every frame.
+- GPU readback now runs ahead of encoding, so waiting for the next GPU copy overlaps the current encode instead of adding the two times together. Each stage keeps only the latest frame; a slow encoder cannot build a queue of old pictures.
+- Google Cast and Miracast ask for 50 ms of receiver buffering instead of 100 ms.
+
 ## v2.13.0
 
 - Casting returns capture buffers as soon as conversion finishes, instead of holding them through encoding and sending. Scaled frames reuse their pixel lookup tables, and a congested network drops outgoing packets instead of blocking the media threads. Receiver buffering and codec quality settings are unchanged.

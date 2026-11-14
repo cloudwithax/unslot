@@ -81,12 +81,17 @@ Settings → Gameplay → Controls. Maps live in `Config/Remaps`, which an updat
 analog stick.
 
 **Cast to a TV**, under Settings → Network → Cast, or from the menu over a game. Chromecasts and
-Google TVs are listed with TVs and projectors that take Miracast over Wi-Fi Direct, which are
-marked Miracast; the handheld's screen goes over at 640 by 480 and up to 60 fps, less in the
-heaviest games, with the sound as AAC to a TV that takes it and LPCM to the rest. Wi-Fi Direct uses
-the second radio, so the home Wi-Fi stays connected. A TV that insists on the handheld leading the
-Wi-Fi Direct group is not cast to. The footer shows a cast icon while the screen is on a TV, and
-**Sound on TV** under Settings → General decides whether the sound follows the picture.
+Google TVs are listed with TVs and projectors that take Miracast over Wi-Fi Direct, marked
+Miracast. Google Cast sends a 16:9 picture up to 480 lines high; Miracast sends 640 by 480. Both
+aim for 60 fps, less in the heaviest games, keeping the handheld picture's shape. Capture is
+scaled on the GPU before encoding; the next readback overlaps the current encode without a
+growing frame queue. Both protocols request 50 ms of receiver buffering.
+Miracast sends AAC to a TV that takes it and LPCM to the rest; Google Cast uses Opus.
+Wi-Fi Direct uses `wlan1` alongside the home Wi-Fi on `wlan0`, on the same physical radio.
+The search keeps listening for Google Cast throughout the Wi-Fi Direct scan and collects split
+service replies, rather than needing every record in one packet. A TV that insists on the
+handheld leading the Wi-Fi Direct group is not cast to. The footer shows a cast icon while the
+screen is on a TV, and **Sound on TV** under Settings → General decides whether sound follows it.
 
 **The SP's slot** comes in Graphite, Platinum, Pearl Pink, Pearl Blue and Pearl Blue Dark, and
 slots of your own can be added to the card.

@@ -262,10 +262,11 @@ impl IonFrames {
         from: u32,
         w: u32,
         h: u32,
+        out: (u32, u32),
         flip: bool,
     ) -> Result<Option<LentFrame>, ()> {
         let sync = self.sync.ok_or(())?;
-        if !self.ready_for(w, h) {
+        if !self.ready_for(out.0, out.1) {
             return Err(());
         }
         let Some(i) = self
@@ -371,7 +372,7 @@ impl IonFrames {
         true
     }
 
-    /// Has the GPU copy the `w` by `h` frame in framebuffer `from` into buffer `i`.
+    /// Copies `w` by `h` pixels from `from` into buffer `i`, scaling to the buffer's size.
     fn copy_in(&self, from: u32, i: usize, w: u32, h: u32, flip: bool) {
         let f = &self.fns;
         unsafe {
@@ -383,8 +384,9 @@ impl IonFrames {
                 (f.disable)(GL_SCISSOR_TEST);
             }
             let (w, h) = (w as i32, h as i32);
-            let (y0, y1) = if flip { (h, 0) } else { (0, h) };
-            (f.blit)(0, 0, w, h, 0, y0, w, y1, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            let (ow, oh) = (self.size.0 as i32, self.size.1 as i32);
+            let (y0, y1) = if flip { (oh, 0) } else { (0, oh) };
+            (f.blit)(0, 0, w, h, 0, y0, ow, y1, GL_COLOR_BUFFER_BIT, GL_NEAREST);
             if scissor {
                 (f.enable)(GL_SCISSOR_TEST);
             }

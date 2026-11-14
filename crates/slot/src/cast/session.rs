@@ -25,10 +25,10 @@ use super::tls::Tls;
 const FPS: u32 = 60;
 const VIDEO_KBPS: u32 = 5000;
 /// Threads x264 cuts each frame between, for it to be sent sooner.
-const VIDEO_THREADS: u32 = 2;
+const VIDEO_THREADS: u32 = 3;
 const AUDIO_BPS: u32 = 128_000;
 /// How long the receiver holds each frame before showing it, to have time to ask for what it lost.
-const DELAY_MS: u16 = 100;
+const DELAY_MS: u16 = 50;
 const AUDIO_PT: u8 = 96;
 const VIDEO_PT: u8 = 101;
 
@@ -150,7 +150,7 @@ pub struct Session {
 impl Session {
     /// Casts to `to` with the encoders in `lib`, returning once the receiver has agreed to it.
     pub fn start(lib: &Path, to: &Receiver) -> Result<Session, String> {
-        let tap = FrameTap::new(FPS);
+        let tap = FrameTap::new(FPS, (854, 480));
         set_frame_tap(Some(tap.clone()));
         let started = Session::begin(lib, to, tap);
         if started.is_err() {
@@ -312,7 +312,7 @@ fn agree(
     // The picture's size, from a frame of it.
     let size = match tap.take(Duration::from_secs(2)) {
         Some(f) => {
-            let size = codec::widescreen(f.w & !1, f.h & !1);
+            let size = codec::cast_size(f.w & !1, f.h & !1);
             tap.give_back(f);
             size
         }
@@ -440,7 +440,15 @@ impl Spread {
 }
 
 /// Encodes and sends each frame the compositor leaves.
-fn video(s: &Shared, tap: &FrameTap, codecs: &Arc<Codecs>, ended: &Mutex<Option<String>>) {
+fn video(s: &Shared, tap: &Arc<FrameTap>, codecs: &Arc<Codecs>, ended: &Mutex<Option<String>>) {
+    let tap = match tap.reader() {
+        Ok(tap) => tap,
+        Err(e) => {
+            lock(ended).get_or_insert_with(|| e.to_string());
+            s.stop.store(true, Ordering::Relaxed);
+            return;
+        }
+    };
     let mut enc: Option<H264> = None;
     let mut stats = VideoStats::default();
     let (mut since, mut dropped) = (Instant::now(), 0);
@@ -481,13 +489,12 @@ fn video(s: &Shared, tap: &FrameTap, codecs: &Arc<Codecs>, ended: &Mutex<Option<
         }
         let e = enc.as_mut().expect("opened above");
         let key = s.want_key.swap(false, Ordering::Relaxed);
-        let start = Instant::now();
         let stride = f.w;
         let pixels = f.pixels();
         let ready = Instant::now();
         e.fill(pixels, stride);
         let filled = Instant::now();
-        let (at, read) = (f.at, f.read);
+        let (at, read, waited) = (f.at, f.read, f.read_wait);
         // Conversion owns the pixels now; let the compositor reuse its buffer while encoding.
         tap.give_back(f);
         if let Some((data, is_key)) = e.encode(key) {
@@ -500,7 +507,7 @@ fn video(s: &Shared, tap: &FrameTap, codecs: &Arc<Codecs>, ended: &Mutex<Option<
             drop(v);
             stats.frames += 1;
             stats.read.add(read);
-            stats.wait.add(ready - start);
+            stats.wait.add(waited);
             stats.convert.add(filled - ready);
             stats.age.add(at.elapsed());
         }

@@ -27,7 +27,7 @@ const VIDEO_KBPS: u32 = 6000;
 const VIDEO_THREADS: u32 = 3;
 const AAC_BPS: u32 = 192_000;
 /// How far ahead of the clock each frame and sound is to be shown, for the TV to buffer.
-const DELAY: Duration = Duration::from_millis(100);
+const DELAY: Duration = Duration::from_millis(50);
 /// A key frame this often, nothing being sent again that is lost.
 const KEY_EVERY: Duration = Duration::from_secs(2);
 /// The access unit delimiter put before each frame, which some TVs need to find them.
@@ -67,9 +67,9 @@ pub struct Session {
 }
 
 impl Session {
-    /// Casts to the Miracast TV `to` with the encoders in `lib`, from `root`'s card, returning
-    /// once it plays.
-    pub fn start(root: &Path, lib: &Path, to: &Receiver) -> Result<Session, String> {
+    /// Casts to the Miracast TV `to` with the encoders in `lib`, reusing the discovery radio,
+    /// returning once it plays.
+    pub fn start(lib: &Path, to: &Receiver, radio: Radio) -> Result<Session, String> {
         let Addr::Miracast(mac) = &to.addr else {
             return Err("not a Miracast TV".into());
         };
@@ -78,10 +78,9 @@ impl Session {
         let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, wfd::PORT))
             .and_then(|l| l.set_nonblocking(true).map(|()| l))
             .map_err(|e| format!("port {}: {e}", wfd::PORT))?;
-        let radio = Radio::up(root)?;
         let group = radio.join(mac)?;
         let begun = begin(&listener, &group).and_then(|(rtsp, agreed, udp)| {
-            let tap = FrameTap::new(agreed.mode.fps);
+            let tap = FrameTap::new(agreed.mode.fps, (agreed.mode.w, agreed.mode.h));
             set_frame_tap(Some(tap.clone()));
             spawn(to, radio, group, rtsp, agreed, udp, codecs, tap)
         });
@@ -245,11 +244,19 @@ fn keep_up(
 /// Encodes and sends each frame the compositor leaves, fitted to `mode`.
 fn video(
     s: &Shared,
-    tap: &FrameTap,
+    tap: &Arc<FrameTap>,
     codecs: &Arc<Codecs>,
     mode: Mode,
     ended: &Mutex<Option<String>>,
 ) {
+    let tap = match tap.reader() {
+        Ok(tap) => tap,
+        Err(e) => {
+            lock(ended).get_or_insert_with(|| e.to_string());
+            s.stop.store(true, Ordering::Relaxed);
+            return;
+        }
+    };
     let mut enc: Option<H264> = None;
     let mut keyed = Instant::now();
     let (mut frames, mut bytes, mut since) = (0u32, 0usize, Instant::now());

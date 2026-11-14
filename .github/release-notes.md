@@ -1,12 +1,11 @@
 ## Changes
 
-- PortMaster ports now run from `Ports`: put the port's `.sh` and its folder there, with any game data it requires. unslot includes PortMaster's script helpers, gptokeyb, bash, zip, LÖVE, patching tools and the libraries they need on H700.
-- Missing Godot, Mono, .NET and other downloadable runtimes get an on-screen download prompt with their size and progress. Downloads are checksum-checked and kept through updates; cancelling returns to unslot.
-- Smaller fullscreen pictures scale up, centred and aspect-correct, with sharp-bilinear filtering. The handheld's buttons map as printed; Select + Start quits ports using gptokeyb.
-- Ports use unslot's saved volume and volume keys. The mixer is restored before unslot returns, even if a port exits immediately or cannot start.
-- Casting releases capture buffers before encoding and sending, reuses scaling lookup tables, and drops outgoing packets rather than blocking when the network is congested. Receiver buffering and codec quality settings are unchanged.
+- Google Cast discovery now receives multicast replies, assembles service records split across packets, and retries missing records. It keeps listening throughout a simultaneous Miracast search, since both Wi-Fi interfaces share the handheld's radio.
+- Casting scales down on the GPU and overlaps readback with encoding instead of making each frame wait for both. Google Cast uses a 480-line stream budget; on RG CubeXX it measured 59.8 fps in menus and about 58 fps in GBA gameplay, with no capture drops in steady-state measurement windows. Heavier games can still fall below 60 fps.
+- Google Cast and Miracast request 50 ms of receiver buffering instead of 100 ms. This is not a measurement of controller-to-TV latency.
+- Miracast retains the discovery radio and peer cache while a TV is picked, avoiding a fresh search at connection time. Live Miracast playback remains unverified: the test TCL TV did not admit the connection.
 
-Verified on RG CubeXX with th06, a Godot/FRT port and a LÖVE port. Some ports still need additional libraries or platform-specific fixes.
+Verified on RG CubeXX with Google Cast to an onn. 4K Streaming Box. All three local Cast endpoints were found in each of five combined discovery scans.
 
 ## New card: flash the image
 
