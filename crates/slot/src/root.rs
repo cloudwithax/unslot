@@ -38,6 +38,13 @@ pub fn ensure(root: &Path) {
     }
 }
 
+/// Clears what a run that went down mid-write left in the folders slot writes to.
+pub fn sweep_temps(root: &Path) {
+    for sub in ["Config", "Saves", "States"] {
+        slot_store::sweep_temps(&root.join(sub));
+    }
+}
+
 pub fn bios_dir(root: &Path) -> PathBuf {
     root.join("BIOS")
 }

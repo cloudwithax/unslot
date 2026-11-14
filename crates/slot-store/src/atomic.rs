@@ -55,3 +55,35 @@ fn temp_path(path: &Path) -> PathBuf {
         None => PathBuf::from(tmp),
     }
 }
+
+/// Removes the temporary files a run that went down mid-write left in `dir` and below.
+pub fn sweep_temps(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        match entry.file_type() {
+            Ok(t) if t.is_dir() => sweep_temps(&path),
+            Ok(t) if t.is_file() && left_by_another_run(&entry.file_name().to_string_lossy()) => {
+                if let Err(e) = std::fs::remove_file(&path) {
+                    eprintln!("slot: temp sweep: {}: {e}", path.display());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Whether a name is one of `temp_path`'s from another process: this one's may be in use.
+fn left_by_another_run(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix('.').and_then(|n| n.strip_suffix(".tmp")) else {
+        return false;
+    };
+    let mut parts = rest.rsplitn(3, '.');
+    let (Some(seq), Some(pid), Some(_)) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    digits(seq) && digits(pid) && pid != std::process::id().to_string()
+}

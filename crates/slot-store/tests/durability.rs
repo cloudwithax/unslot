@@ -734,3 +734,30 @@ fn an_unknown_look_falls_back_to_dark() {
     assert_eq!(slot_store::Appearance::parse("tangerine"), None);
     assert_eq!(slot_store::Appearance::parse("own:"), None);
 }
+
+#[test]
+fn a_temp_left_by_an_interrupted_write_is_swept_and_nothing_else() {
+    let d = tempdir().unwrap();
+    let deep = d.path().join("States/GBA/mgba/Emerald");
+    std::fs::create_dir_all(&deep).unwrap();
+    let stray = deep.join(".resume.state.4242.7.tmp");
+    let mine = deep.join(format!(".resume.state.{}.0.tmp", std::process::id()));
+    let keep = [
+        deep.join("resume.state"),
+        deep.join(".hidden.tmp"),
+        deep.join("notes.4242.7.tmp"),
+        d.path().join(".x.y.tmp"),
+    ];
+    for p in keep.iter().chain([&stray, &mine]) {
+        std::fs::write(p, b"bytes").unwrap();
+    }
+    slot_store::sweep_temps(d.path());
+    assert!(
+        !stray.exists(),
+        "a temp from an earlier run was left behind"
+    );
+    assert!(mine.exists(), "swept a temp this run may still be writing");
+    for p in &keep {
+        assert!(p.exists(), "swept {}", p.display());
+    }
+}
