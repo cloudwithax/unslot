@@ -87,6 +87,10 @@ impl Session {
         self.sink.ring()
     }
 
+    pub fn close_audio(&mut self) {
+        self.sink.close();
+    }
+
     pub fn rumble(&mut self, strength: u16) {
         if strength == self.motor {
             return;
@@ -263,6 +267,7 @@ impl Session {
         let app_update = ft::span(ev::SESSION_APP_UPDATE, 0);
         self.bridge_link(|app| app.update(dt));
         drop(app_update);
+        self.sink.hold_open(self.app.headphones());
         if let Some(emu) = &self.emu {
             emu.set_volume(self.app.output_volume());
         }

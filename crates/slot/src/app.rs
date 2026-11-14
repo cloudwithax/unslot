@@ -2321,6 +2321,10 @@ impl App {
         self.state.rumble
     }
 
+    pub fn headphones(&self) -> bool {
+        self.headphones
+    }
+
     pub fn dpad_stick(&self) -> bool {
         self.state.dpad_stick
     }

@@ -175,6 +175,8 @@ impl Alsa {
 
 pub struct AlsaSink {
     ring: Arc<Ring>,
+    /// Whether headphones are in: closing the device then leaves them buzzing.
+    held: Arc<AtomicBool>,
     device: Option<Device>,
 }
 
@@ -187,14 +189,8 @@ impl AlsaSink {
     pub fn new() -> Self {
         AlsaSink {
             ring: Arc::new(Ring::new(0)),
+            held: Arc::new(AtomicBool::new(false)),
             device: None,
-        }
-    }
-
-    fn close(&mut self) {
-        if let Some(d) = self.device.take() {
-            d.stop.store(true, Ordering::Relaxed);
-            let _ = d.join.join();
         }
     }
 }
@@ -217,13 +213,14 @@ impl AudioSink for AlsaSink {
         let ring = self.ring.clone();
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
+        let held = self.held.clone();
         let (ready_tx, ready_rx) = mpsc::channel();
         let join = std::thread::Builder::new()
             .name("slot-audio".into())
             .spawn(move || match play(&ring, sample_rate) {
                 Ok(mut device) => {
                     let _ = ready_tx.send(Ok(()));
-                    device.run(&ring, &flag);
+                    device.run(&ring, &flag, &held);
                 }
                 Err(e) => {
                     let _ = ready_tx.send(Err(e));
@@ -249,6 +246,17 @@ impl AudioSink for AlsaSink {
     fn ring(&self) -> Arc<Ring> {
         self.ring.clone()
     }
+
+    fn close(&mut self) {
+        if let Some(d) = self.device.take() {
+            d.stop.store(true, Ordering::Relaxed);
+            let _ = d.join.join();
+        }
+    }
+
+    fn hold_open(&self, held: bool) {
+        self.held.store(held, Ordering::Relaxed);
+    }
 }
 
 struct Playback {
@@ -261,28 +269,22 @@ struct Playback {
 
 fn play(ring: &Arc<Ring>, sample_rate: u32) -> Result<Playback, AudioError> {
     let alsa = Alsa::load()?;
-    let pcm = match alsa.open_pcm(sample_rate) {
-        Ok(pcm) => Some(pcm),
-        Err(e) => {
-            eprintln!("slot: audio: {e}, retrying");
-            None
-        }
-    };
     ring.reopen(sample_rate);
+    // Opened at the first sound, so BaseOS's startup sound plays out first.
     Ok(Playback {
         alsa,
-        pcm,
+        pcm: None,
         rate: sample_rate,
-        failing: pcm.is_none(),
+        failing: false,
         route: ROUTE_CHANGES.load(Ordering::Relaxed),
     })
 }
 
 impl Playback {
-    fn run(&mut self, ring: &Ring, stop: &AtomicBool) {
+    fn run(&mut self, ring: &Ring, stop: &AtomicBool, held: &AtomicBool) {
         let mut buf = vec![0i16; PERIOD_FRAMES * CHANNELS as usize];
         let span = Duration::from_secs_f64(PERIOD_FRAMES as f64 / self.rate as f64);
-        let mut silence = Silence::new(RELEASE_AFTER);
+        let mut silence = Silence::quiet(RELEASE_AFTER);
         let mut pace = Pacer::new(span);
         while !stop.load(Ordering::Relaxed) {
             let filled = ft::span(ev::AUDIO_FILL, 0);
@@ -295,7 +297,7 @@ impl Playback {
             }
             let hold = silence.hear(&buf, span);
             match (self.pcm, hold) {
-                (Some(_), false) => {
+                (Some(_), false) if !held.load(Ordering::Relaxed) => {
                     self.release();
                     eprintln!("slot: audio released after silence");
                 }
