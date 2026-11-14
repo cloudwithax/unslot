@@ -35,6 +35,7 @@ use crate::link_kind::{link_carried, link_kind, serial_option, LinkKind};
 use crate::link_radio::{radio_jobs, LinkRole, RadioJob, RadioJobs};
 use crate::link_screen::LinkSprites;
 use crate::link_start::{link_port, LinkFail, LinkProgress, LinkStarter, LinkStep};
+use crate::loading_mark::LoadingMark;
 use crate::persist::{self, Snapshot};
 use crate::scrape::{ScrapeView, Scraper, SsState};
 use crate::services::{Services, ServicesView, SyncProgress, Tailnet, Wanted};
@@ -46,6 +47,8 @@ use crate::wifi::{Busy, Network, Security, Wifi, WifiView};
 pub const INSERT_S: f32 = 0.73;
 /// How long an achievement's line stays up, and how long it takes to fade in and out.
 const CHEEVO_MS: Millis = 4000;
+/// How long a cart plays before its loading mark is let go.
+const SETTLED_MS: Millis = 10_000;
 const CHEEVO_FADE_MS: Millis = 250;
 const INSERT_HOLD_S: f32 = 0.28;
 
@@ -528,6 +531,10 @@ enum Rescan {
 
 pub struct App {
     phase: Phase,
+    /// Set while a cart loads, so a cart that takes slot down is not seated again at boot.
+    loading: Option<LoadingMark>,
+    marked: bool,
+    playing_since: Option<Millis>,
     shelves: Vec<(Rack, Shelf)>,
     shelf_at: usize,
     orphaned: Vec<TexId>,
@@ -967,10 +974,17 @@ impl App {
             cheevo_since: 0,
             cheevo_face: None,
             ra_sign_in: None,
+            loading: None,
+            marked: false,
+            playing_since: None,
         }
     }
 
     pub fn boot(root: &Path) -> Self {
+        Self::boot_marked(root, LoadingMark::from_env())
+    }
+
+    pub fn boot_marked(root: &Path, loading: Option<LoadingMark>) -> Self {
         crate::root::ensure(root);
         crate::boot_time::mark("root");
         let mut carts = scan(root).unwrap_or_default();
@@ -978,6 +992,7 @@ impl App {
         crate::boot_time::mark("scan");
         let mut app = App::new(carts);
         app.root = Some(root.to_path_buf());
+        app.loading = loading;
         app.state = read_slot_state(root);
         let wifi = Wifi::for_card(root);
         if app.state.wifi {
@@ -1016,6 +1031,9 @@ impl App {
     }
 
     fn start(&mut self) {
+        if let Some(stem) = self.loading.as_ref().and_then(LoadingMark::left) {
+            return self.start_after_a_crash(&stem);
+        }
         let seated = if self.single_cart() {
             Some((self.shelf_at, 0))
         } else {
@@ -1055,6 +1073,62 @@ impl App {
                 self.slot_name = SlotName::Waiting;
             }
         }
+    }
+
+    fn start_after_a_crash(&mut self, stem: &str) {
+        eprintln!("slot: {stem} took slot down while it was loading, starting on the shelf");
+        if let Some(mark) = &self.loading {
+            mark.clear();
+        }
+        self.phase = Phase::Shelf;
+        let platform = self.state.cart_platform.or_else(|| {
+            self.shelves
+                .iter()
+                .flat_map(|(_, s)| &s.carts)
+                .find(|c| c.stem == stem)
+                .map(|c| c.platform)
+        });
+        self.state.cart = None;
+        self.state.cart_platform = None;
+        self.slot_name = SlotName::Waiting;
+        self.persist_soon();
+        let (Some(root), Some(platform)) = (&self.root, platform) else {
+            return;
+        };
+        // The state it went down on would take it down again.
+        let core = slot_store::core_for_platform(root, stem, platform);
+        let ring = StateRing::new(root, platform, core, stem);
+        match ring.retire_resume(&format_stamp(self.wall_secs())) {
+            Ok(Some(to)) => eprintln!("slot: resume: moved {stem}'s state to {}", to.display()),
+            Ok(None) => {}
+            Err(e) => eprintln!("slot: resume: could not move {stem}'s state aside: {e}"),
+        }
+    }
+
+    /// Lets the mark go once the cart has played a while, or went back to the shelf.
+    fn settle_loading_mark(&mut self) {
+        if !self.marked {
+            return;
+        }
+        let settled = match self.phase {
+            Phase::Playing { .. } => {
+                let since = *self.playing_since.get_or_insert(self.now());
+                self.now().saturating_sub(since) >= SETTLED_MS
+            }
+            Phase::Shelf => true,
+            _ => false,
+        };
+        if settled {
+            self.clear_loading_mark();
+        }
+    }
+
+    pub fn clear_loading_mark(&mut self) {
+        if let Some(mark) = &self.loading {
+            mark.clear();
+        }
+        self.marked = false;
+        self.playing_since = None;
     }
 
     fn shelf(&self) -> &Shelf {
@@ -5345,6 +5419,7 @@ impl App {
     }
 
     fn timers(&mut self) {
+        self.settle_loading_mark();
         crate::audio::set_tv_sound(self.state.tv_sound);
         if let Some(wifi) = &self.wifi {
             self.wifi_view = wifi.view();
@@ -6857,6 +6932,11 @@ impl App {
         self.play_held = None;
         self.refusal = None;
         self.refused_from = None;
+        if let Some(mark) = &self.loading {
+            mark.set(&cart);
+            self.marked = true;
+            self.playing_since = None;
+        }
         self.phase = Phase::Inserting {
             cart,
             t: 0.0,

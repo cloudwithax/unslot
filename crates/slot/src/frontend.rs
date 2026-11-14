@@ -990,6 +990,7 @@ impl Frontend {
 
     pub fn restart(&mut self) {
         self.session.close_audio();
+        self.session.app_mut().clear_loading_mark();
         self.session.app_mut().restart();
     }
 
@@ -998,11 +999,13 @@ impl Frontend {
     }
 
     pub fn reload(&mut self) {
+        self.session.app_mut().clear_loading_mark();
         self.session.app_mut().reload();
     }
 
     pub fn poweroff(&mut self) {
         self.session.close_audio();
+        self.session.app_mut().clear_loading_mark();
         self.session.app_mut().poweroff();
     }
 
