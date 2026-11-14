@@ -372,6 +372,8 @@ pub struct SlotState {
     pub haptics: bool,
     /// Whether the sound goes to the TV with the picture, or stays on the speaker or headphones.
     pub tv_sound: bool,
+    /// Whether the left stick presses the d-pad, on a handheld that has one.
+    pub left_stick_dpad: bool,
     /// Whether the Wi-Fi is meant to be on, so it comes back on at boot.
     pub wifi: bool,
     /// Whether Bluetooth is meant to be on, likewise.
@@ -532,6 +534,7 @@ impl Default for SlotState {
             menu_sounds: true,
             haptics: true,
             tv_sound: true,
+            left_stick_dpad: true,
             show_titles: false,
             battery_display: BatteryDisplay::Both,
             wifi: false,
@@ -645,6 +648,7 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     text.push_str(&format!("art_asleep={}\n", s.art_asleep as u8));
     text.push_str(&format!("hardcore={}\n", s.hardcore as u8));
     text.push_str(&format!("tv_sound={}\n", s.tv_sound as u8));
+    text.push_str(&format!("left_stick_dpad={}\n", s.left_stick_dpad as u8));
     text.push_str(&format!("wifi={}\n", s.wifi as u8));
     text.push_str(&format!("bluetooth={}\n", s.bluetooth as u8));
     text.push_str(&format!("ssh={}\n", s.ssh as u8));
@@ -707,6 +711,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut art_asleep = None;
     let mut hardcore = None;
     let mut tv_sound = None;
+    let mut left_stick_dpad = None;
     let mut show_titles = None;
     let mut battery_display = None;
     let mut wifi = None;
@@ -771,6 +776,7 @@ fn parse(text: &str) -> Option<SlotState> {
             "art_asleep" => art_asleep = flag(value),
             "hardcore" => hardcore = flag(value),
             "tv_sound" => tv_sound = flag(value),
+            "left_stick_dpad" => left_stick_dpad = flag(value),
             "show_titles" => show_titles = flag(value),
             "battery_display" => battery_display = BatteryDisplay::parse(value),
             "wifi" => wifi = flag(value),
@@ -838,6 +844,7 @@ fn parse(text: &str) -> Option<SlotState> {
         menu_sounds: menu_sounds.unwrap_or(fallback.menu_sounds),
         haptics: haptics.unwrap_or(fallback.haptics),
         tv_sound: tv_sound.unwrap_or(fallback.tv_sound),
+        left_stick_dpad: left_stick_dpad.unwrap_or(fallback.left_stick_dpad),
         show_titles: show_titles.unwrap_or(fallback.show_titles),
         battery_display: battery_display.unwrap_or(fallback.battery_display),
         wifi: wifi.unwrap_or(fallback.wifi),

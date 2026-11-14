@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -10,7 +11,7 @@ use slot_retro::Sticks;
 
 use super::evdev::{
     decode, device_name, is_pad, pad_to_raw, pick_devices, to_raw, Ev, Hat, Triggers, ABS_BRAKE,
-    ABS_GAS, EVENT_BYTES, EV_ABS, EV_KEY, EV_SYN,
+    ABS_GAS, ABS_LSX, ABS_LSY, EVENT_BYTES, EV_ABS, EV_KEY, EV_SYN,
 };
 use super::stick::{layout, Range, StickNode};
 use super::trace;
@@ -24,6 +25,7 @@ const LID_POLL_MS: Millis = 150;
 pub struct DeviceInput {
     pending: Arc<Mutex<Vec<RawEvent>>>,
     sticks: Arc<Mutex<Sticks>>,
+    steers: Arc<AtomicBool>,
     hall: Option<PathBuf>,
     lid_shut: Option<bool>,
     next_lid_poll: Millis,
@@ -48,6 +50,7 @@ impl DeviceInput {
             sys: sys.to_path_buf(),
             pending: Arc::new(Mutex::new(Vec::new())),
             sticks: Arc::new(Mutex::new([0; 4])),
+            steers: Arc::new(AtomicBool::new(false)),
             open: Arc::new(Mutex::new(HashSet::new())),
             right_stick: right_stick(target.as_deref()),
             trace,
@@ -68,6 +71,7 @@ impl DeviceInput {
         DeviceInput {
             pending: readers.pending,
             sticks: readers.sticks,
+            steers: readers.steers,
             hall: find_hall(Path::new(PSY)),
             lid_shut: None,
             next_lid_poll: 0,
@@ -86,6 +90,7 @@ struct Readers {
     sys: PathBuf,
     pending: Arc<Mutex<Vec<RawEvent>>>,
     sticks: Arc<Mutex<Sticks>>,
+    steers: Arc<AtomicBool>,
     open: Arc<Mutex<HashSet<PathBuf>>>,
     right_stick: bool,
     trace: Option<Arc<Trace>>,
@@ -122,7 +127,14 @@ impl Readers {
                     // A pad has both its sticks, whichever model it is paired with.
                     let right = shared.right_stick || pad;
                     let sticks = axes.map(|axes| (axes, right, shared.sticks.clone()));
-                    read_node(&node, pad, &shared.pending, sticks, shared.trace.as_deref());
+                    read_node(
+                        &node,
+                        pad,
+                        &shared.pending,
+                        sticks,
+                        &shared.steers,
+                        shared.trace.as_deref(),
+                    );
                     // The node went away, a pad switched off say; it is opened afresh if it
                     // comes back.
                     shared
@@ -176,6 +188,7 @@ fn read_node(
     pad: bool,
     queue: &Mutex<Vec<RawEvent>>,
     sticks: Option<StickOut>,
+    steers: &AtomicBool,
     trace: Option<&Trace>,
 ) {
     let label = node
@@ -221,7 +234,17 @@ fn read_node(
             }
             if let Some((node, out)) = sticks.as_mut() {
                 if node.feed(ev) {
-                    *out.lock().unwrap_or_else(|e| e.into_inner()) = node.values();
+                    let values = node.values();
+                    *out.lock().unwrap_or_else(|e| e.into_inner()) = values;
+                    // The left stick also stands in for the d-pad while that is on.
+                    hat.steer_with_stick(steers.load(Ordering::Relaxed));
+                    for (code, value) in [(ABS_LSX, values[0]), (ABS_LSY, values[1])] {
+                        events.extend(hat.feed(Ev {
+                            kind: EV_ABS,
+                            code,
+                            value: i32::from(value),
+                        }));
+                    }
                     continue;
                 }
             }
@@ -284,6 +307,11 @@ impl Trace {
 }
 
 impl DeviceInput {
+    /// Whether the left stick presses the d-pad as well.
+    pub fn steer_with_stick(&self, on: bool) {
+        self.steers.store(on, Ordering::Relaxed);
+    }
+
     fn read_lid(&self) -> Option<bool> {
         let raw = std::fs::read_to_string(self.hall.as_ref()?).ok()?;
         match raw.trim() {
@@ -415,6 +443,7 @@ mod tests {
             sys: sys.clone(),
             pending: Arc::new(Mutex::new(Vec::new())),
             sticks: Arc::new(Mutex::new([0; 4])),
+            steers: Arc::new(AtomicBool::new(false)),
             open: Arc::new(Mutex::new(HashSet::new())),
             right_stick: true,
             trace: None,
@@ -446,6 +475,7 @@ mod tests {
             sys,
             pending: Arc::new(Mutex::new(Vec::new())),
             sticks: Arc::new(Mutex::new([0; 4])),
+            steers: Arc::new(AtomicBool::new(false)),
             open: Arc::new(Mutex::new(HashSet::new())),
             right_stick: true,
             trace: None,

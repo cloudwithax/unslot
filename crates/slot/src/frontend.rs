@@ -963,6 +963,10 @@ impl Frontend {
         self.session.app()
     }
 
+    pub fn set_left_stick(&mut self, present: bool) {
+        self.session.app_mut().set_left_stick(present);
+    }
+
     pub fn core_settling(&self) -> bool {
         self.session.core_settling()
     }

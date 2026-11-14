@@ -39,6 +39,8 @@ pub enum QuickRow {
     Recents,
     ShowTitles,
     BatteryDisplay,
+    /// Whether the left stick presses the d-pad.
+    LeftStick,
     WallpaperTint,
     Resume,
     States,
@@ -95,7 +97,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 57] = [
+const GENERIC: [QuickRow; 58] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -153,6 +155,7 @@ const GENERIC: [QuickRow; 57] = [
     QuickRow::ArtAsleep,
     QuickRow::Hardcore,
     QuickRow::BatteryDisplay,
+    QuickRow::LeftStick,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -288,7 +291,7 @@ impl QuickRow {
         QuickRow::TvSound,
     ];
 
-    pub const GAME: [QuickRow; 11] = [
+    pub const GAME: [QuickRow; 12] = [
         QuickRow::Disc,
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
@@ -297,6 +300,7 @@ impl QuickRow {
         QuickRow::Turbo,
         QuickRow::Rumble,
         QuickRow::DpadStick,
+        QuickRow::LeftStick,
         QuickRow::Controls,
         QuickRow::EjectSave,
         QuickRow::Hardcore,
@@ -385,6 +389,7 @@ impl QuickRow {
             | QuickRow::Turbo
             | QuickRow::Rumble
             | QuickRow::DpadStick
+            | QuickRow::LeftStick
             | QuickRow::Controls
             | QuickRow::EjectSave
             | QuickRow::Hardcore => QuickRow::GAME.to_vec(),
@@ -513,6 +518,7 @@ impl QuickRow {
             QuickRow::Recents => "Recents",
             QuickRow::ShowTitles => "Game Titles",
             QuickRow::BatteryDisplay => "Battery Display",
+            QuickRow::LeftStick => "Left Stick as D-Pad",
             QuickRow::WallpaperTint => "Wallpaper Tint",
             QuickRow::Resume => "Resume",
             QuickRow::States => "States",

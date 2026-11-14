@@ -535,6 +535,8 @@ pub struct App {
     loading: Option<LoadingMark>,
     marked: bool,
     playing_since: Option<Millis>,
+    /// Whether this handheld has a left stick to steer the d-pad with.
+    left_stick: bool,
     shelves: Vec<(Rack, Shelf)>,
     shelf_at: usize,
     orphaned: Vec<TexId>,
@@ -977,6 +979,7 @@ impl App {
             loading: None,
             marked: false,
             playing_since: None,
+            left_stick: false,
         }
     }
 
@@ -1407,6 +1410,7 @@ impl App {
             QuickRow::ShaderOf(p) => Some(shader_value(self.state.screen(p).shader)),
             QuickRow::Rumble => Some(QuickValue::flag(self.state.rumble)),
             QuickRow::DpadStick => Some(QuickValue::flag(self.state.dpad_stick)),
+            QuickRow::LeftStick => Some(QuickValue::flag(self.state.left_stick_dpad)),
             QuickRow::Controls => None,
             QuickRow::AutoCores => Some(QuickValue::flag(self.state.auto_cores)),
             QuickRow::ArtAsleep => Some(QuickValue::flag(self.state.art_asleep)),
@@ -1743,6 +1747,9 @@ impl App {
         }
         if !own {
             hidden.push(QuickRow::WallpaperTint);
+        }
+        if !self.left_stick {
+            hidden.push(QuickRow::LeftStick);
         }
         if !self.external_display {
             hidden.push(QuickRow::TvSound);
@@ -2107,6 +2114,15 @@ impl App {
 
     pub fn set_platform(&mut self, platform: Platform) {
         self.platform = platform;
+    }
+
+    pub fn set_left_stick(&mut self, present: bool) {
+        self.left_stick = present;
+    }
+
+    /// Whether the left stick presses the d-pad now.
+    pub fn left_stick_dpad(&self) -> bool {
+        self.left_stick && self.state.left_stick_dpad
     }
 
     pub fn set_named_core(&mut self, named: bool) {
@@ -4750,6 +4766,7 @@ impl App {
             | QuickRow::RunAhead
             | QuickRow::Rumble
             | QuickRow::DpadStick
+            | QuickRow::LeftStick
             | QuickRow::AutoCores
             | QuickRow::ArtAsleep
             | QuickRow::Hardcore
@@ -4869,6 +4886,7 @@ impl App {
             }
             QuickRow::Rumble => s.rumble = !s.rumble,
             QuickRow::DpadStick => s.dpad_stick = !s.dpad_stick,
+            QuickRow::LeftStick => s.left_stick_dpad = !s.left_stick_dpad,
             QuickRow::AutoCores => s.auto_cores = !s.auto_cores,
             QuickRow::ArtAsleep => s.art_asleep = !s.art_asleep,
             QuickRow::Hardcore => {

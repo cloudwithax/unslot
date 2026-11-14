@@ -167,6 +167,8 @@ pub fn run() {
     frontend.upload_bezel(&mut compositor, window);
     slot::boot_time::mark("bezel");
     let mut input = DeviceInput::open(&root);
+    let target = slot::baseos::var("BASEOS_TARGET").unwrap_or_default();
+    frontend.set_left_stick(slot::input::evdev::has_left_stick(&target));
     slot::boot_time::mark("input");
     let card = root.clone();
     let _ = std::thread::Builder::new()
@@ -189,6 +191,7 @@ pub fn run() {
         }
         let began = Instant::now();
         let advance = ft::span(ev::PRESENT_ADVANCE, 0);
+        input.steer_with_stick(frontend.app().left_stick_dpad());
         frontend.advance(&mut input);
         drop(advance);
         if frontend.restarting() {
