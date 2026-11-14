@@ -191,6 +191,53 @@ impl WallpaperTint {
     }
 }
 
+/// What the battery in the corners shows: its icon, its percentage, or both.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum BatteryDisplay {
+    #[default]
+    Both,
+    Icon,
+    Percent,
+}
+
+impl BatteryDisplay {
+    pub const ALL: [BatteryDisplay; 3] = [
+        BatteryDisplay::Both,
+        BatteryDisplay::Icon,
+        BatteryDisplay::Percent,
+    ];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            BatteryDisplay::Both => "both",
+            BatteryDisplay::Icon => "icon",
+            BatteryDisplay::Percent => "percent",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<BatteryDisplay> {
+        BatteryDisplay::ALL.into_iter().find(|d| d.key() == value)
+    }
+
+    pub fn icon(self) -> bool {
+        self != BatteryDisplay::Percent
+    }
+
+    pub fn percent(self) -> bool {
+        self != BatteryDisplay::Icon
+    }
+
+    pub fn step(self, right: bool) -> BatteryDisplay {
+        let n = BatteryDisplay::ALL.len();
+        let at = BatteryDisplay::ALL
+            .iter()
+            .position(|d| *d == self)
+            .unwrap_or(0);
+        let next = if right { at + 1 } else { at + n - 1 };
+        BatteryDisplay::ALL[next % n]
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub enum WallpaperPick {
     None,
@@ -316,6 +363,7 @@ pub struct SlotState {
     pub wallpaper_tint: WallpaperTint,
     pub show_recents: bool,
     pub show_titles: bool,
+    pub battery_display: BatteryDisplay,
     /// Whether the clock reads 7:05 PM rather than 19:05.
     pub clock_12h: bool,
     /// Whether the menus play their button sounds.
@@ -485,6 +533,7 @@ impl Default for SlotState {
             haptics: true,
             tv_sound: true,
             show_titles: false,
+            battery_display: BatteryDisplay::Both,
             wifi: false,
             bluetooth: false,
             ssh: true,
@@ -587,6 +636,7 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     text.push_str(&format!("wallpaper_tint={}\n", s.wallpaper_tint.key()));
     text.push_str(&format!("show_recents={}\n", s.show_recents as u8));
     text.push_str(&format!("show_titles={}\n", s.show_titles as u8));
+    text.push_str(&format!("battery_display={}\n", s.battery_display.key()));
     text.push_str(&format!("clock_12h={}\n", s.clock_12h as u8));
     text.push_str(&format!("menu_sounds={}\n", s.menu_sounds as u8));
     text.push_str(&format!("haptics={}\n", s.haptics as u8));
@@ -658,6 +708,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut hardcore = None;
     let mut tv_sound = None;
     let mut show_titles = None;
+    let mut battery_display = None;
     let mut wifi = None;
     let mut bluetooth = None;
     let mut ssh = None;
@@ -721,6 +772,7 @@ fn parse(text: &str) -> Option<SlotState> {
             "hardcore" => hardcore = flag(value),
             "tv_sound" => tv_sound = flag(value),
             "show_titles" => show_titles = flag(value),
+            "battery_display" => battery_display = BatteryDisplay::parse(value),
             "wifi" => wifi = flag(value),
             "bluetooth" => bluetooth = flag(value),
             "ssh" => ssh = flag(value),
@@ -787,6 +839,7 @@ fn parse(text: &str) -> Option<SlotState> {
         haptics: haptics.unwrap_or(fallback.haptics),
         tv_sound: tv_sound.unwrap_or(fallback.tv_sound),
         show_titles: show_titles.unwrap_or(fallback.show_titles),
+        battery_display: battery_display.unwrap_or(fallback.battery_display),
         wifi: wifi.unwrap_or(fallback.wifi),
         bluetooth: bluetooth.unwrap_or(fallback.bluetooth),
         ssh: ssh.unwrap_or(fallback.ssh),

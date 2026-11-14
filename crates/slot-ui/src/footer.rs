@@ -1,7 +1,6 @@
 use slot_gfx::{Canvas, Draw, TexId, OUT_H};
-use slot_power::Battery;
 
-use crate::battery::{draw_gauge, GAUGE_H};
+use crate::battery::{draw_gauge, Gauge, GAUGE_H};
 use crate::draw::shift_down;
 use crate::hud::{HUD_INK, PLATE_H};
 use crate::plate::HINT_H;
@@ -32,11 +31,9 @@ const NET_GAP: f32 = 8.0;
 
 /// The battery on the left; on the right the clock, and left of it an icon for each network
 /// that is up, Wi-Fi then Bluetooth.
-#[allow(clippy::too_many_arguments)]
 pub fn draw_footer(
     canvas: Canvas,
-    battery: Option<Battery>,
-    percent: Printed,
+    gauge: Gauge,
     bolt: Option<TexId>,
     clock: Printed,
     net: &[TexId],
@@ -45,7 +42,7 @@ pub fn draw_footer(
 ) {
     let start = out.len();
     let y = FOOTER_Y + (HINT_H as f32 - GAUGE_H) / 2.0;
-    draw_gauge(FOOTER_MARGIN, y, battery, percent, bolt, ink, out);
+    draw_gauge(FOOTER_MARGIN, y, gauge, bolt, ink, out);
     let clock_x = canvas.w - FOOTER_MARGIN - clock.w as f32;
     printed(clock_x, clock, out);
     let mut x = clock_x - NET_GAP;
@@ -66,14 +63,13 @@ pub fn draw_footer(
 
 pub fn draw_corners(
     canvas: Canvas,
-    battery: Option<Battery>,
-    percent: Printed,
+    gauge: Gauge,
     bolt: Option<TexId>,
     clock: Printed,
     out: &mut Vec<Draw>,
 ) {
     let y = (PLATE_H - GAUGE_H) / 2.0;
-    draw_gauge(CORNER_MARGIN, y, battery, percent, bolt, HUD_INK, out);
+    draw_gauge(CORNER_MARGIN, y, gauge, bolt, HUD_INK, out);
     let x = canvas.w - CORNER_MARGIN - clock.w as f32;
     draw_printed(x, (PLATE_H - HINT_H as f32) / 2.0, clock, out);
 }

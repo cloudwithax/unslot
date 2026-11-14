@@ -117,11 +117,14 @@ fn the_gauge_stays_clear_of_the_title_on_the_left() {
     let p = switcher();
     let mut out = Vec::new();
     p.draw(
-        Some(Battery {
-            percent: 68,
-            charge: Charge::Charging,
-        }),
-        Printed { face: None, w: 30 },
+        slot_ui::Gauge {
+            battery: Some(Battery {
+                percent: 68,
+                charge: Charge::Charging,
+            }),
+            percent: Printed { face: None, w: 30 },
+            display: Default::default(),
+        },
         Some(TexId::from_raw(7)),
         Printed::default(),
         &mut out,
@@ -152,8 +155,11 @@ fn the_clock_stays_clear_of_the_title_on_the_right() {
     let p = switcher();
     let mut out = Vec::new();
     p.draw(
-        None,
-        Printed::default(),
+        slot_ui::Gauge {
+            battery: None,
+            percent: Printed::default(),
+            display: Default::default(),
+        },
         None,
         Printed { face: None, w: 40 },
         &mut out,
@@ -182,8 +188,11 @@ fn a_switcher_with_no_gauge_still_shows_its_clock() {
     let p = switcher();
     let mut out = Vec::new();
     p.draw(
-        None,
-        Printed::default(),
+        slot_ui::Gauge {
+            battery: None,
+            percent: Printed::default(),
+            display: Default::default(),
+        },
         None,
         Printed { face: None, w: 40 },
         &mut out,
@@ -202,22 +211,28 @@ fn nothing_on_the_plate_moves_when_the_charge_state_changes() {
     let clock = Printed { face: None, w: 40 };
     let mut idle = Vec::new();
     p.draw(
-        Some(Battery {
-            percent: 68,
-            charge: Charge::Discharging,
-        }),
-        percent,
+        slot_ui::Gauge {
+            battery: Some(Battery {
+                percent: 68,
+                charge: Charge::Discharging,
+            }),
+            percent,
+            display: Default::default(),
+        },
         None,
         clock,
         &mut idle,
     );
     let mut charging = Vec::new();
     p.draw(
-        Some(Battery {
-            percent: 68,
-            charge: Charge::Charging,
-        }),
-        percent,
+        slot_ui::Gauge {
+            battery: Some(Battery {
+                percent: 68,
+                charge: Charge::Charging,
+            }),
+            percent,
+            display: Default::default(),
+        },
         Some(TexId::from_raw(7)),
         clock,
         &mut charging,

@@ -43,7 +43,7 @@ pub use backdrop::{
     draw_ground, wallpaper_face,
 };
 pub use barcode::{code39, CODE39_NARROW, CODE39_WIDE};
-pub use battery::{draw_gauge, BOLT_PX, GAUGE_H, GAUGE_W, WALL};
+pub use battery::{draw_gauge, Gauge, BOLT_PX, GAUGE_H, GAUGE_W, WALL};
 pub use bitmaps::ButtonLegend;
 pub use board::{
     board_at, board_face, board_from, board_in, board_x, board_zoom, chip_face, chip_shadow_face,

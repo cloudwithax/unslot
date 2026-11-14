@@ -7,8 +7,8 @@ use slot_input::{Action, Btn, MENU_DOUBLE_TAP_MS, MUTE_CHORD_MS};
 use slot_power::{Battery, Charge, LedState, LidPolicy, Power};
 use slot_retro::{CoreOption, LinkChannel};
 use slot_store::{
-    format_stamp, parse_stamp, read_slot_state, scan, write_slot_state, Appearance, BezelPick,
-    Cart, Core, GbPalette, Platform, Recent, Shader, SlotState, StateEntry, StateRing,
+    format_stamp, parse_stamp, read_slot_state, scan, write_slot_state, Appearance, BatteryDisplay,
+    BezelPick, Cart, Core, GbPalette, Platform, Recent, Shader, SlotState, StateEntry, StateRing,
     WallpaperPick, WallpaperTint, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, RING_MAX,
     RUN_AHEAD_MAX, VOLUME_MAX,
 };
@@ -1358,6 +1358,11 @@ impl App {
             } else {
                 QuickValue::Hide
             }),
+            QuickRow::BatteryDisplay => Some(match self.state.battery_display {
+                BatteryDisplay::Both => QuickValue::Both,
+                BatteryDisplay::Icon => QuickValue::Icon,
+                BatteryDisplay::Percent => QuickValue::Percentage,
+            }),
             QuickRow::WallpaperTint => Some(match self.state.wallpaper_tint {
                 WallpaperTint::Off => QuickValue::Off,
                 WallpaperTint::Low => QuickValue::Low,
@@ -2319,6 +2324,15 @@ impl App {
 
     pub fn rumble_enabled(&self) -> bool {
         self.state.rumble
+    }
+
+    /// The battery as the corners draw it, with the percentage the card asks for.
+    fn gauge(&self) -> slot_ui::Gauge {
+        slot_ui::Gauge {
+            battery: self.battery,
+            percent: self.battery_percent,
+            display: self.state.battery_display,
+        }
     }
 
     pub fn headphones(&self) -> bool {
@@ -4674,6 +4688,7 @@ impl App {
             | QuickRow::ShowTitles
             | QuickRow::Wallpaper
             | QuickRow::WallpaperTint
+            | QuickRow::BatteryDisplay
             | QuickRow::Resume
             | QuickRow::States
             | QuickRow::PlayCast
@@ -4802,6 +4817,7 @@ impl App {
             QuickRow::Haptics => s.haptics = !s.haptics,
             QuickRow::TvSound => s.tv_sound = !s.tv_sound,
             QuickRow::WallpaperTint => s.wallpaper_tint = s.wallpaper_tint.step(right),
+            QuickRow::BatteryDisplay => s.battery_display = s.battery_display.step(right),
             QuickRow::Wallpaper
             | QuickRow::Recents
             | QuickRow::ShowTitles
@@ -6103,8 +6119,7 @@ impl App {
                 }
                 draw_footer(
                     self.canvas(),
-                    self.battery,
-                    self.battery_percent,
+                    self.gauge(),
                     self.bolt,
                     self.shelf_clock,
                     &self.net_icons(),
@@ -6196,13 +6211,7 @@ impl App {
             Phase::Polaroids { .. } => {
                 self.push_game(out);
                 if let Some(p) = &self.polaroids {
-                    p.draw(
-                        self.battery,
-                        self.battery_percent,
-                        self.hud_bolt,
-                        self.shelf_clock,
-                        out,
-                    );
+                    p.draw(self.gauge(), self.hud_bolt, self.shelf_clock, out);
                 }
             }
             Phase::Doze { .. } => {
@@ -6242,8 +6251,7 @@ impl App {
             if row.page() != QuickRow::PLAY_SCREEN {
                 slot_ui::draw_corners(
                     self.canvas(),
-                    self.battery,
-                    self.battery_percent,
+                    self.gauge(),
                     self.hud_bolt,
                     self.shelf_clock,
                     out,
@@ -6361,8 +6369,7 @@ impl App {
         }
         draw_footer(
             self.canvas(),
-            self.battery,
-            self.battery_percent,
+            self.gauge(),
             self.bolt,
             self.shelf_clock,
             &self.net_icons(),

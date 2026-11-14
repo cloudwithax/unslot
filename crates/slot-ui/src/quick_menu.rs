@@ -38,6 +38,7 @@ pub enum QuickRow {
     General,
     Recents,
     ShowTitles,
+    BatteryDisplay,
     WallpaperTint,
     Resume,
     States,
@@ -94,7 +95,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 56] = [
+const GENERIC: [QuickRow; 57] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -151,6 +152,7 @@ const GENERIC: [QuickRow; 56] = [
     QuickRow::Online,
     QuickRow::ArtAsleep,
     QuickRow::Hardcore,
+    QuickRow::BatteryDisplay,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -272,12 +274,13 @@ impl QuickRow {
         QuickRow::AutoCores,
     ];
 
-    pub const GENERAL: [QuickRow; 10] = [
+    pub const GENERAL: [QuickRow; 11] = [
         QuickRow::Wallpaper,
         QuickRow::WallpaperTint,
         QuickRow::Theme,
         QuickRow::Recents,
         QuickRow::ShowTitles,
+        QuickRow::BatteryDisplay,
         QuickRow::DateTime,
         QuickRow::Clock,
         QuickRow::MenuSounds,
@@ -394,7 +397,8 @@ impl QuickRow {
             | QuickRow::TvSound
             | QuickRow::Theme
             | QuickRow::Recents
-            | QuickRow::ShowTitles => QuickRow::GENERAL.to_vec(),
+            | QuickRow::ShowTitles
+            | QuickRow::BatteryDisplay => QuickRow::GENERAL.to_vec(),
             QuickRow::Resume
             | QuickRow::States
             | QuickRow::Settings
@@ -508,6 +512,7 @@ impl QuickRow {
             QuickRow::General => "General",
             QuickRow::Recents => "Recents",
             QuickRow::ShowTitles => "Game Titles",
+            QuickRow::BatteryDisplay => "Battery Display",
             QuickRow::WallpaperTint => "Wallpaper Tint",
             QuickRow::Resume => "Resume",
             QuickRow::States => "States",
@@ -618,10 +623,13 @@ pub enum QuickValue {
     Disc5,
     Hours24,
     Hours12,
+    Both,
+    Icon,
+    Percentage,
 }
 
 impl QuickValue {
-    pub const ALL: [QuickValue; 26] = [
+    pub const ALL: [QuickValue; 29] = [
         QuickValue::Speed1_5,
         QuickValue::Speed2,
         QuickValue::Speed3,
@@ -648,6 +656,9 @@ impl QuickValue {
         QuickValue::Disc5,
         QuickValue::Hours24,
         QuickValue::Hours12,
+        QuickValue::Both,
+        QuickValue::Icon,
+        QuickValue::Percentage,
     ];
 
     pub fn index(self) -> usize {
@@ -682,6 +693,9 @@ impl QuickValue {
             QuickValue::Disc5 => "Disc 5",
             QuickValue::Hours24 => "24-Hour",
             QuickValue::Hours12 => "12-Hour",
+            QuickValue::Both => "Both",
+            QuickValue::Icon => "Icon",
+            QuickValue::Percentage => "Percentage",
         }
     }
 

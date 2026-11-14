@@ -106,6 +106,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Theme",
             "Recents",
             "Game Titles",
+            "Battery Display",
             "Date & Time",
             "Clock",
             "Menu Sounds",
@@ -279,6 +280,9 @@ fn the_values_read_as_the_menu_prints_them() {
             "Disc 5",
             "24-Hour",
             "12-Hour",
+            "Both",
+            "Icon",
+            "Percentage",
         ]
     );
     assert_eq!(QuickValue::disc(0), Some(QuickValue::Disc1));

@@ -2,8 +2,9 @@ mod common;
 
 use common::tmp_root;
 use slot_store::{
-    atomic_write, read_slot_state, write_slot_state, Appearance, BezelPick, GbPalette, Platform,
-    Recent, Screen, Shader, SlotState, WallpaperPick, WallpaperTint, FF_SPEEDS, FF_SPEED_DEFAULT,
+    atomic_write, read_slot_state, write_slot_state, Appearance, BatteryDisplay, BezelPick,
+    GbPalette, Platform, Recent, Screen, Shader, SlotState, WallpaperPick, WallpaperTint,
+    FF_SPEEDS, FF_SPEED_DEFAULT,
 };
 use tempfile::tempdir;
 
@@ -246,6 +247,7 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             wallpaper_tint: WallpaperTint::Off,
             show_recents: false,
             show_titles: false,
+            battery_display: BatteryDisplay::Both,
             clock_12h: false,
             menu_sounds: true,
             haptics: true,
@@ -305,6 +307,7 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
         gb_palettes: true,
         gb_palette: GbPalette::parse("GBC Dark Green →A").unwrap(),
         wallpaper_tint: WallpaperTint::Medium,
+        battery_display: BatteryDisplay::Percent,
         clock_12h: true,
         menu_sounds: false,
         haptics: false,
@@ -350,6 +353,7 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
         "gb_palette=GBC Dark Green →A",
         "appearance=dark",
         "wallpaper_tint=medium",
+        "battery_display=percent",
         "wifi=1",
         "bluetooth=1",
         "bezel_gba=none",

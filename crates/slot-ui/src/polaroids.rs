@@ -1,8 +1,8 @@
 use slot_gfx::{Draw, TexId, OUT_H, OUT_W};
-use slot_power::Battery;
 use slot_store::{parse_stamp, StateEntry};
 
 use crate::art;
+use crate::battery::Gauge;
 use crate::footer::{draw_corners, Printed};
 use crate::hud::{PLATE, PLATE_H};
 use crate::plate::{hint_quad, hint_row, hint_width, Hint, HINT_GAP, HINT_H, TITLE_H, TITLE_W};
@@ -142,16 +142,9 @@ impl Polaroids {
         self.index = (self.index + 1).min(self.entries.len().saturating_sub(1));
     }
 
-    pub fn draw(
-        &self,
-        battery: Option<Battery>,
-        battery_percent: Printed,
-        bolt: Option<TexId>,
-        clock: Printed,
-        out: &mut Vec<Draw>,
-    ) {
+    pub fn draw(&self, gauge: Gauge, bolt: Option<TexId>, clock: Printed, out: &mut Vec<Draw>) {
         self.draw_photo(out);
-        self.draw_top(battery, battery_percent, bolt, clock, out);
+        self.draw_top(gauge, bolt, clock, out);
         self.draw_bottom(out);
     }
 
@@ -174,14 +167,7 @@ impl Polaroids {
         });
     }
 
-    fn draw_top(
-        &self,
-        battery: Option<Battery>,
-        battery_percent: Printed,
-        bolt: Option<TexId>,
-        clock: Printed,
-        out: &mut Vec<Draw>,
-    ) {
+    fn draw_top(&self, gauge: Gauge, bolt: Option<TexId>, clock: Printed, out: &mut Vec<Draw>) {
         out.push(plate(0.0));
         if let Some(tex) = self.title {
             out.push(Draw::Tex {
@@ -194,14 +180,7 @@ impl Polaroids {
             });
         }
 
-        draw_corners(
-            slot_gfx::Canvas::FRAMED,
-            battery,
-            battery_percent,
-            bolt,
-            clock,
-            out,
-        );
+        draw_corners(slot_gfx::Canvas::FRAMED, gauge, bolt, clock, out);
     }
 
     fn draw_bottom(&self, out: &mut Vec<Draw>) {
