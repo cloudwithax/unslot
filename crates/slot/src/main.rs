@@ -51,6 +51,55 @@ fn main() {
                 std::path::Path::new(&frame),
             ));
         }
+        // Owns a port process and its volume keys, restoring the mixer before slot restarts.
+        Some("--port-volume") => {
+            use std::os::unix::process::ExitStatusExt;
+            let mut command = std::env::args_os().skip(2);
+            let Some(program) = command.next() else {
+                eprintln!("slot: --port-volume needs a command");
+                std::process::exit(2);
+            };
+            let root = std::env::var_os("SLOT_ROOT").unwrap_or_else(|| "/mnt/sdcard".into());
+            let status = slot::port_volume::run(
+                std::path::Path::new(&root),
+                std::process::Command::new(program).args(command),
+            );
+            match status {
+                Ok(s) => {
+                    std::process::exit(s.code().unwrap_or_else(|| 128 + s.signal().unwrap_or(0)))
+                }
+                Err(e) => {
+                    eprintln!("slot: port volume: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        // Before a port runs, for launch_frontend.sh with the port's script, and from its script
+        // through PortMaster's harbourmaster with the runtime it asks for: the PortMaster
+        // runtimes it needs that the card has not got, offered for download. Fails while one
+        // is still missing.
+        Some(flag @ ("--port-runtimes" | "--port-runtime")) => {
+            let root = std::env::var_os("SLOT_ROOT").unwrap_or_else(|| "/mnt/sdcard".into());
+            let root = std::path::Path::new(&root);
+            let Some(arg) = std::env::args_os().nth(2) else {
+                eprintln!("slot: {flag} needs a port's script or a runtime");
+                std::process::exit(2);
+            };
+            let (files, strict) = match flag {
+                "--port-runtimes" => (
+                    slot::port_runtime::wanted(
+                        &root.join(slot::apps::ports::DIR),
+                        std::path::Path::new(&arg),
+                    ),
+                    false,
+                ),
+                _ => (
+                    vec![slot::port_runtime::file_name(&arg.to_string_lossy())],
+                    true,
+                ),
+            };
+            std::process::exit(slot::port_runtime::run(root, &files, strict));
+        }
         #[cfg(feature = "device")]
         Some("--core-host") => {
             let args: Vec<String> = args.collect();

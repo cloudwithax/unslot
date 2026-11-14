@@ -52,10 +52,22 @@ keep_bundled() {
 	done
 }
 
+# The PortMaster runtimes ports downloaded into System/PortMaster/libs are the user's, and some
+# hundreds of MB, so they are moved into the new System rather than copied; if the update never
+# starts, launch_frontend.sh moves them back.
+keep_runtimes() {
+	for f in "$UPD/System.old/PortMaster/libs"/*.squashfs; do
+		[ -e "$f" ] && [ ! -e "$SD/System/PortMaster/libs/$(basename "$f")" ] || continue
+		/bin/mkdir -p "$SD/System/PortMaster/libs"
+		/bin/mv "$f" "$SD/System/PortMaster/libs/" || say "$(basename "$f") could not be kept"
+	done
+}
+
 # Power went after the new System was moved in but before the pack was cleared.
 if [ ! -d "$PACK/System" ]; then
 	say "the pack is already installed; clearing it"
 	keep_bundled
+	keep_runtimes
 	/bin/rm -f "$SD/MinUI.zip"
 	clear_pack
 	exit 0
@@ -88,6 +100,7 @@ fi
 }
 [ -d "$UPD/System.old" ] && echo 0 > "$UPD/trial"
 keep_bundled
+keep_runtimes
 /bin/rm -f "$SD/MinUI.zip"
 say "installed $version"
 clear_pack

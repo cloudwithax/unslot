@@ -92,6 +92,22 @@ install || fail "the install with bundled wallpapers failed"
 	fail "a slot the old System shipped was lost"
 [ "$(cat "$CARD/Wallpapers/mine.png")" = "mine" ] || fail "your own wallpaper was touched"
 
+# PortMaster runtimes downloaded into the old System go into the new one; one the new System
+# ships under the same name is the new one's.
+card
+mkdir -p "$CARD/System/PortMaster/libs"
+echo "godot" > "$CARD/System/PortMaster/libs/frt_3.5.2.squashfs"
+echo "old mono" > "$CARD/System/PortMaster/libs/mono.squashfs"
+unpack
+mkdir -p "$CARD/.tmp_update/unslot/System/PortMaster/libs"
+echo "new mono" > "$CARD/.tmp_update/unslot/System/PortMaster/libs/mono.squashfs"
+(cd "$CARD/.tmp_update/unslot" && find System -type f -exec sha256sum {} + > System.sha256)
+install || fail "the install with runtimes failed"
+[ "$(cat "$CARD/System/PortMaster/libs/frt_3.5.2.squashfs" 2>/dev/null)" = "godot" ] ||
+	fail "a downloaded runtime was lost in the update"
+[ "$(cat "$CARD/System/PortMaster/libs/mono.squashfs")" = "new mono" ] ||
+	fail "an old runtime beat the one the update ships"
+
 # Power lost with the old System moved aside but the new one not yet in.
 card
 unpack

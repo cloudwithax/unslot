@@ -1,0 +1,20 @@
+--- a/src/video/mali-fbdev/SDL_malivideo.c
++++ b/src/video/mali-fbdev/SDL_malivideo.c
+@@ -231,8 +231,16 @@
+ void
+ MALI_GetDisplayModes(_THIS, SDL_VideoDisplay * display)
+ {
+-    /* Only one display mode available, the current one */
++    /* The panel's own mode, and one of no size, which SDL takes for any size up to the panel's:
++       a game that asks for fullscreen at its own size keeps that size, and the blitter scales
++       it up to fill the panel, rather than the game drawing that size in a corner of a window
++       the panel's size. */
++    SDL_DisplayMode any = display->current_mode;
++
+     SDL_AddDisplayMode(display, &display->current_mode);
++    any.w = 0;
++    any.h = 0;
++    SDL_AddDisplayMode(display, &any);
+ }
+ 
+ int

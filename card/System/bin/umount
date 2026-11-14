@@ -1,0 +1,28 @@
+#!/bin/sh
+# BaseOS's umount, BusyBox's, as a port's script expects util-linux's. Handed the squashfs file a
+# runtime was mounted from, rather than where it went, util-linux's unmounts it wherever it is;
+# BusyBox's refuses, which left the runtime mounted after the port, and mounted again over itself
+# each time the port started. So for a file, each place it is mounted is unmounted here; anything
+# else goes to BusyBox. launch_frontend.sh puts this folder first on a port's PATH. SLOT_FS moves
+# /sys and /proc, for the tests.
+FS="${SLOT_FS:-}"
+
+last=""
+for a; do last="$a"; done
+if [ -f "$last" ]; then
+	file="$(readlink -f "$last")"
+	places=""
+	for loop in "$FS"/sys/block/loop*; do
+		[ "$(cat "$loop/loop/backing_file" 2>/dev/null)" = "$file" ] || continue
+		dev="/dev/${loop##*/}"
+		places="$places$(while read -r src at _; do [ "$src" = "$dev" ] && echo "$at"; done < "$FS/proc/mounts")
+"
+	done
+	[ -n "$(echo "$places" | tr -d '\n')" ] || { echo "umount: $last: not mounted" >&2; exit 1; }
+	rc=0
+	echo "$places" | while read -r at; do
+		[ -z "$at" ] || busybox umount "$at" || exit 1
+	done || rc=1
+	exit "$rc"
+fi
+exec busybox umount "$@"

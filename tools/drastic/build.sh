@@ -8,7 +8,8 @@
 #   game_database.xml  DraStic's per-game fixes, from the same commit
 #   libs/libSDL2-2.0.so.0
 #                      SDL 2.30 as trngaje's SDL_drastic has it, with Knulli's H700 patches for
-#                      the Mali's fbdev, built against nothing but glibc so it runs on BaseOS
+#                      the Mali's fbdev and mali-any-size.patch, built against nothing but glibc
+#                      so it runs on BaseOS; PortMaster's ports run on it too
 #   libs/libunslot-drastic.so
 #                      tools/drastic/volume.c, preloaded into DraStic for slot's volume keys
 #   drastic_readme.txt DraStic's readme, for System/licenses
@@ -88,6 +89,9 @@ cb6157c177faa5364a4193c6dfec735bc4d209fe82cdcf009d31bc7550ec5471 0004-Rework-bli
 f2b501c92146a5d51b727489622d6e4b2e42d91b6035d63e9b0ef6703675a978 0009-memleak-fix.patch
 fab5eef5d01b3212e6518f7c9e946925e5e7b3110aa4208f7d78dd32a942497f 0010-blitter-only-with-rotation.patch
 EOF
+# Then unslot's: a fullscreen window keeps the size it asked for, which the blitter scales to the
+# panel, so a port that asks for 640x480 fills the screen instead of a corner of it.
+patch -d "$src" -p1 -s < "$here/mali-any-size.patch"
 
 # ALSA's headers, and the library configure links its check against; SDL itself opens
 # BaseOS's libasound when it starts.

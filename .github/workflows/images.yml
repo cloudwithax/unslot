@@ -1,8 +1,8 @@
 name: images
 
 # Card images to flash, one a model BaseOS has a release for: BaseOS with a release's unslot
-# already on its BASEOS partition (tools/image/build.sh). Runs after a release is published, and
-# can be run by hand to add images to one that already is.
+# already on its BASEOS partition (tools/image/build.sh). Runs after release assets are staged,
+# and can be run by hand to add images to an existing release, including a draft.
 on:
   workflow_call:
     inputs:

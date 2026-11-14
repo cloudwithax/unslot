@@ -51,8 +51,7 @@ impl Shared {
         let pts = at.saturating_duration_since(self.t0) + DELAY;
         let now = self.t0.elapsed();
         for p in lock(&self.mux).packets(es, unit, pts, now) {
-            // A packet the network would not take is lost; the next key frame mends it.
-            let _ = self.udp.send(&p);
+            super::send_packet(&self.udp, &p);
         }
     }
 }
@@ -295,6 +294,9 @@ fn video(
         e.fill(f.pixels(), stride);
         let filled = Instant::now();
         convert += filled - start;
+        let at = f.at;
+        // Conversion owns the pixels now; let the compositor reuse its buffer while encoding.
+        tap.give_back(f);
         if let Some((data, is_key)) = e.encode(key) {
             encode += filled.elapsed();
             if is_key {
@@ -303,11 +305,10 @@ fn video(
             unit.clear();
             unit.extend_from_slice(&AUD);
             unit.extend_from_slice(data);
-            s.send(Es::Video, &unit, f.at);
+            s.send(Es::Video, &unit, at);
             frames += 1;
             bytes += unit.len();
         }
-        tap.give_back(f);
     }
 }
 

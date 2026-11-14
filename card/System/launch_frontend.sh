@@ -59,7 +59,14 @@ if [ -f "$UPD/trial" ] && [ -d "$UPD/System.old" ]; then
 	if [ "$n" -gt "${AGS_UPDATE_TRIES:-3}" ]; then
 		echo "$(date '+%F %T') the update never started; putting the old System back" >> "$LOGS/update.log"
 		rm -rf "$UPD/System.failed"
-		mv "$SYS" "$UPD/System.failed" && mv "$UPD/System.old" "$SYS" && rm -rf "$UPD/System.failed"
+		if mv "$SYS" "$UPD/System.failed" && mv "$UPD/System.old" "$SYS"; then
+			# The runtimes ports downloaded since are the user's, not the update's.
+			for f in "$UPD/System.failed/PortMaster/libs"/*.squashfs; do
+				[ -e "$f" ] && [ ! -e "$SYS/PortMaster/libs/${f##*/}" ] || continue
+				mkdir -p "$SYS/PortMaster/libs" && mv "$f" "$SYS/PortMaster/libs/"
+			done
+			rm -rf "$UPD/System.failed"
+		fi
 		rm -f "$UPD/trial"
 	else
 		echo "$n" > "$UPD/trial"
@@ -83,19 +90,62 @@ echo 1 > /sys/class/devfreq/gpu/device/scenectrl/command 2>/dev/null
 # A port slot quit for, from the Apps page, or DraStic for a DS game: it runs from its own folder
 # with slot gone, and slot starts once it ends. The note's second line, when it has one, is what
 # to hand it. The note goes first, so a port that hangs the device is not run again.
+#
+# A port's script from PortMaster looks for PortMaster at /opt/tools/PortMaster and for its own
+# files under /roms/ports, and is written for bash, whose >(tee log.txt) needs /dev/fd; BaseOS
+# has none of them, so the runtime in System/PortMaster, the card's Ports, bash and /proc's fd
+# links are put there, and System/bin, with bash, goes on the PATH. A real folder or file
+# already at one of those places is left alone. SLOT_FS moves the root filesystem, for the tests.
+#
+# Before such a port runs, slot offers the PortMaster runtimes its port.json names and the card
+# has not got for download, on screen, and the port is not run without them. While it runs, slot
+# reads the volume keys and sets the codec's volume by them, as ports play through ALSA alone.
+FS="${SLOT_FS:-}"
+
+# link TARGET AT: AT made a link to TARGET, unless something other than a link is there.
+link() {
+	[ -e "$2" ] && [ ! -L "$2" ] && return 0
+	mkdir -p "$(dirname "$2")" && ln -sfn "$1" "$2"
+}
+
 if [ -f "$SD/.unslot-port" ]; then
 	port="$(sed -n 1p "$SD/.unslot-port")"
 	arg="$(sed -n 2p "$SD/.unslot-port")"
 	rm -f "$SD/.unslot-port"
 	sync
 	if [ -f "$port" ]; then
+		case "$port" in
+		"$SD/Ports/"*)
+			link "$SYS/PortMaster" "$FS/opt/tools/PortMaster"
+			link "$SD/Ports" "$FS/roms/ports"
+			[ -e "$FS/bin/bash" ] || link "$SYS/bin/bash" "$FS/bin/bash"
+			[ -e "$FS/dev/fd" ] || link /proc/self/fd "$FS/dev/fd"
+			for i in 0:stdin 1:stdout 2:stderr; do
+				[ -e "$FS/dev/${i#*:}" ] || link "/proc/self/fd/${i%%:*}" "$FS/dev/${i#*:}"
+			done
+			export PATH="$SYS/bin:$PATH"
+			portmaster=1
+			;;
+		esac
 		run=sh
 		head -n 1 "$port" | grep -q bash && command -v bash > /dev/null && run=bash
 		set --
 		[ -n "$arg" ] && set -- "$arg"
 		log "port $port $*"
-		(cd "$(dirname "$port")" && $run "$port" "$@") >> "$LOGS/ports.log" 2>&1
-		log "port ended $?"
+		if [ -n "${portmaster:-}" ] && ! $SLOT_BIN --port-runtimes "$port" >> "$LOGS/ports.log" 2>&1; then
+			log "port not run: a runtime it needs is not on the card"
+		else
+			(
+				cd "$(dirname "$port")" || exit
+				# The foreground supervisor owns the port and restores the mixer before returning.
+				if [ -n "${portmaster:-}" ]; then
+					$SLOT_BIN --port-volume "$run" "$port" "$@"
+				else
+					$run "$port" "$@"
+				fi
+			) >> "$LOGS/ports.log" 2>&1
+			log "port ended $?"
+		fi
 	fi
 fi
 

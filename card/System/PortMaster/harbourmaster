@@ -1,0 +1,18 @@
+#!/bin/sh
+# What a port's script runs as PortMaster's harbourmaster, which needs Python and so is not here,
+# for a runtime it needs that the card has not got:
+#
+#   harbourmaster [--quiet] [--no-check] runtime_check NAME.squashfs
+#
+# slot asks on screen whether to download it from PortMaster, into libs/ beside this. Nothing
+# else harbourmaster does is done here. The port's own libraries are not slot's, so they are
+# left out of its environment.
+while [ $# -gt 0 ]; do
+	if [ "$1" = runtime_check ] && [ -n "${2:-}" ]; then
+		exec env -u LD_LIBRARY_PATH -u LD_PRELOAD /lib/ld-linux-aarch64.so.1 \
+			"${SLOT_ROOT:-/mnt/sdcard}/System/slot" --port-runtime "$2"
+	fi
+	shift
+done
+echo "harbourmaster: unslot's only fetches runtimes" >&2
+exit 1

@@ -1,0 +1,106 @@
+#!/bin/bash
+#
+# What a PortMaster port's script sources to run on unslot, in place of PortMaster's own
+# control.txt, which looks for other firmwares. PortMaster's device_info.txt and funcs.txt do
+# the rest. Before a port runs, launch_frontend.sh puts this folder at /opt/tools/PortMaster and
+# the card's Ports at /roms/ports, where the scripts look, and bash on the PATH.
+
+export controlfolder="/opt/tools/PortMaster"
+export directory="roms"
+CUR_TTY=/dev/tty0
+
+# Ports run as root already.
+export ESUDO=""
+export ESUDOKILL="-1"
+export ESUDOKILL2="-1"
+
+# BaseOS has no udev, so SDL finds the handheld's pad only through the kernel's joystick node.
+export SDL_LINUX_JOYSTICK_CLASSIC=1
+export SDL_GAMECONTROLLERCONFIG_FILE="/tmp/gamecontrollerdb.txt"
+# A port's picture is scaled to the screen by the SDL in libs.aarch64, sharp bilinear: whole
+# pixels kept square, their edges blended, where nearest would double every eighth row of 640x480.
+export SDL_HQ_SCALER="${SDL_HQ_SCALER:-2}"
+
+# The SDL controller mapping for the handheld's own pad, with each button as printed on it. The
+# joystick node numbers buttons and axes in the order of their codes, which models have more or
+# fewer of, so the numbers are worked out from the pad's capabilities, in SYS (by default
+# /sys/class/input). SDL gives the pad no GUID through that node, so the mapping is SDL's
+# default one, used for any pad without its own.
+unslot_pad_mapping() {
+  local sys="${1:-/sys/class/input}" dev="" d code n i
+  for d in "$sys"/event*; do
+    if [ "$(cat "$d/device/name" 2>/dev/null)" = "ANBERNIC-keys" ]; then
+      dev="$d/device"
+      break
+    fi
+  done
+  [ -n "$dev" ] || return 0
+
+  # The bitmaps, most significant word first, 64 bits to a word.
+  local -a key abs
+  read -r -a key < "$dev/capabilities/key"
+  read -r -a abs < "$dev/capabilities/abs"
+  has() {
+    local -n words="$1"
+    local w=$(($2 / 64)) count=${#words[@]}
+    (( w < count )) && (( (16#${words[count - 1 - w]} >> ($2 % 64)) & 1 ))
+  }
+
+  # Buttons: the node counts from BTN_JOYSTICK to the last key, then BTN_MISC up to it.
+  local -A button
+  n=0
+  for ((code = 0x120; code <= 0x2ff; code++)); do
+    has key $code && button[$code]=$((n++))
+  done
+  for ((code = 0x100; code < 0x120; code++)); do
+    has key $code && button[$code]=$((n++))
+  done
+
+  local mapping="default,ANBERNIC-keys"
+  local -a names=(a b x y leftshoulder rightshoulder back start guide leftstick lefttrigger righttrigger rightstick)
+  local -a codes=(0x130 0x131 0x133 0x132 0x134 0x135 0x136 0x137 0x138 0x139 0x13a 0x13b 0x13c)
+  for i in "${!names[@]}"; do
+    code=$((codes[i]))
+    [ -n "${button[$code]}" ] && mapping+=",${names[i]}:b${button[$code]}"
+  done
+
+  # The d-pad: a hat, or four buttons.
+  if has abs 0x10 && has abs 0x11; then
+    mapping+=",dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2"
+  else
+    names=(dpup dpdown dpleft dpright)
+    for i in 0 1 2 3; do
+      code=$((0x220 + i))
+      [ -n "${button[$code]}" ] && mapping+=",${names[i]}:b${button[$code]}"
+    done
+  fi
+
+  # Sticks: the axes other than the hats, in order, left then right.
+  n=0
+  for ((code = 0; code < 0x40; code++)); do
+    (( code >= 0x10 && code <= 0x17 )) && continue
+    has abs $code && n=$((n + 1))
+  done
+  (( n >= 2 )) && mapping+=",leftx:a0,lefty:a1"
+  (( n >= 4 )) && mapping+=",rightx:a2,righty:a3"
+
+  echo "$mapping,platform:Linux,"
+}
+
+get_controls() {
+  ANALOGSTICKS="${ANALOG_STICKS:-0}"
+  LOWRES="N"
+  DEVICE="default"
+  param_device="unslot"
+  sdl_controllerconfig="$(unslot_pad_mapping)"
+  # PortMaster's database for other pads, the handheld's last, so it wins.
+  { cat "$controlfolder/gamecontrollerdb.txt"; echo "$sdl_controllerconfig"; } > /tmp/gamecontrollerdb.txt
+}
+
+source "$controlfolder/device_info.txt"
+export CFW_NAME="unslot"
+export CFW_VERSION="$(cat "$controlfolder/../version" 2> /dev/null || echo Unknown)"
+source "$controlfolder/funcs.txt"
+
+export GPTOKEYB2="$ESUDO env LD_PRELOAD=$controlfolder/libinterpose.aarch64.so $controlfolder/gptokeyb2 $ESUDOKILL2"
+export GPTOKEYB="$ESUDO $controlfolder/gptokeyb $ESUDOKILL"

@@ -96,6 +96,24 @@ jobs:
           for f in drastic.manifest drastic_readme.txt SDL-LICENSE.txt; do
             test -s "$out/System/licenses/$f"
           done
+          # PortMaster's ports: unslot's control.txt and harbourmaster beside PortMaster's
+          # runtime, tools and LÖVE, the H700 SDL they run on and the libraries BaseOS lacks, and
+          # bash and zip for their scripts, with where each came from.
+          for f in control.txt device_info.txt funcs.txt PortMasterDialog.txt gamecontrollerdb.txt version \
+            harbourmaster utils/patcher.txt runtimes/love_11.5/love.txt; do
+            test -s "$out/System/PortMaster/$f"
+          done
+          for f in gptokeyb gptokeyb2 libinterpose.aarch64.so portmsg.aarch64 7zzs.aarch64 xdelta3 \
+            runtimes/love_11.5/love.aarch64 libs.aarch64/libSDL2-2.0.so.0 libs.aarch64/libopenal.so.1 \
+            libs.aarch64/libvorbisfile.so.3 libs.aarch64/libmpg123.so.0; do
+            file "$out/System/PortMaster/$f" | grep -q aarch64
+          done
+          file "$out/System/bin/bash" | grep -q 'aarch64.*statically linked'
+          file "$out/System/bin/zip" | grep -q aarch64
+          for f in portmaster.manifest portmaster-MIT.txt portmaster-gptokeyb-LICENSE.txt portmaster-gptokeyb2-LICENSE.txt \
+            portmaster-love-LICENSE.txt libopenal1-copyright.txt bash-copyright.txt zip-copyright.txt; do
+            test -s "$out/System/licenses/$f"
+          done
 
       - name: Package
         id: package
@@ -144,7 +162,8 @@ jobs:
         with:
           name: release-files
 
-      - name: Create the release
+      # Keep the assets out of the public updater until the signed pack has been checked on-device.
+      - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
           ZIP: ${{ needs.build.outputs.zip }}
@@ -154,7 +173,7 @@ jobs:
           # What the release is and how to install it, from .github/release-notes.md.
           sed "s/\$TAG/$GITHUB_REF_NAME/g" .github/release-notes.md > notes.md
           gh release create "$GITHUB_REF_NAME" "$ZIP" "$PAK" MinUI.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" --notes-file notes.md
+            --title "$GITHUB_REF_NAME" --notes-file notes.md --draft
 
   images:
     name: card images

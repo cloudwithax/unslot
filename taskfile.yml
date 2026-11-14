@@ -129,6 +129,7 @@ tasks:
       - sh card/test-slotbt.sh
       - sh card/test-slotservices.sh
       - sh card/test-update.sh
+      - sh card/test-portmaster.sh
 
   core:
     desc: >-
@@ -347,6 +348,16 @@ tasks:
     vars:
       UID: {sh: id -u}
       GID: {sh: id -g}
+
+  portmaster:
+    desc: >-
+      Fetch what PortMaster's ports run on into vendor/portmaster: PortMaster's runtime, tools
+      and LÖVE from its pinned release, and Ubuntu 22.04's static bash, zip and the libraries
+      BaseOS lacks, noting where each came from in portmaster.manifest
+    status:
+      - test -f vendor/portmaster/portmaster.manifest
+    cmds:
+      - sh tools/portmaster/fetch.sh vendor/portmaster
 
   core:fetch:update:
     desc: Re-fetch the buildbot cores even if every one is already in vendor/
@@ -592,7 +603,7 @@ tasks:
 
   dist:device:
     desc: Build the SD2 tree for an H700 device, OUT defaults to ./dist-device
-    deps: [core:device, core:gpsp, core:fetch, core:gles, core:nodosumi, cast:lib, services, media, overlays, drastic, build:device]
+    deps: [core:device, core:gpsp, core:fetch, core:gles, core:nodosumi, cast:lib, services, media, overlays, drastic, portmaster, build:device]
     vars:
       OUT: '{{.OUT | default "dist-device"}}'
       UID: {sh: id -u}
@@ -641,6 +652,17 @@ tasks:
         mkdir -p "{{.OUT}}/System/drastic"
         cp -R vendor/drastic/drastic vendor/drastic/libs vendor/drastic/system vendor/drastic/game_database.xml "{{.OUT}}/System/drastic/"
         cp vendor/drastic/drastic.manifest vendor/drastic/drastic_readme.txt vendor/drastic/SDL-LICENSE.txt "{{.OUT}}/System/licenses/"
+      - |
+        set -eu
+        # PortMaster's runtime and tools beside the control.txt and harbourmaster
+        # card/System/PortMaster gave it, for ports from PortMaster, with the H700 SDL DraStic runs
+        # on, which they run on too, and the libraries BaseOS lacks; bash and zip for their
+        # scripts; and where each came from.
+        cp -R vendor/portmaster/PortMaster/. "{{.OUT}}/System/PortMaster/"
+        mkdir -p "{{.OUT}}/System/PortMaster/libs.aarch64"
+        cp vendor/drastic/libs/libSDL2-2.0.so.0 "{{.OUT}}/System/PortMaster/libs.aarch64/"
+        cp vendor/portmaster/bin/bash vendor/portmaster/bin/zip "{{.OUT}}/System/bin/"
+        cp vendor/portmaster/licenses/* vendor/portmaster/portmaster.manifest "{{.OUT}}/System/licenses/"
       - |
         set -eu
         # R. Savant's overlays, free for any H700 handheld, with where they came from.
@@ -737,7 +759,7 @@ tasks:
 
   deploy:device:
     desc: Build and push onto a device over adb, then restart it. SD defaults to /mnt/sdcard
-    deps: [core:device, core:gpsp, core:fetch, services, drastic, build:device]
+    deps: [core:device, core:gpsp, core:fetch, services, drastic, portmaster, build:device]
     vars:
       SD: '{{.SD | default "/mnt/sdcard"}}'
     cmds:
@@ -752,6 +774,10 @@ tasks:
       - adb push licenses '{{.SD}}/System/'
       - adb push vendor/services '{{.SD}}/System/'
       - for f in drastic libs system game_database.xml; do adb push "vendor/drastic/$f" '{{.SD}}/System/drastic/'; done
+      - adb push vendor/portmaster/PortMaster/. '{{.SD}}/System/PortMaster/'
+      - adb shell 'mkdir -p {{.SD}}/System/PortMaster/libs.aarch64 {{.SD}}/System/bin'
+      - adb push vendor/drastic/libs/libSDL2-2.0.so.0 '{{.SD}}/System/PortMaster/libs.aarch64/'
+      - adb push vendor/portmaster/bin/bash vendor/portmaster/bin/zip '{{.SD}}/System/bin/'
       - adb shell 'mkdir -p {{.SD}}/System/Wallpapers {{.SD}}/System/Slots'
       - |
         for f in assets/wallpapers/*; do

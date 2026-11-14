@@ -13,6 +13,8 @@ mod tls;
 pub mod ts;
 pub mod wfd;
 
+use std::net::UdpSocket;
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver as Jobs, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
@@ -24,6 +26,20 @@ pub use mdns::{Addr, Receiver};
 /// supplicant takes some 6 s to hear its first.
 const SEARCH: Duration = Duration::from_secs(3);
 const SEARCH_P2P: Duration = Duration::from_secs(10);
+
+/// Congestion loses a datagram rather than holding the encoder and its stream lock. The
+/// per-call flag leaves Chromecast's blocking RTCP receive and its timeout unchanged.
+fn send_packet(socket: &UdpSocket, packet: &[u8]) {
+    // SAFETY: the connected socket and the packet's memory stay live for the call.
+    unsafe {
+        libc::send(
+            socket.as_raw_fd(),
+            packet.as_ptr().cast(),
+            packet.len(),
+            libc::MSG_DONTWAIT,
+        );
+    }
+}
 
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub enum CastBusy {

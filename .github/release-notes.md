@@ -1,20 +1,12 @@
 ## Changes
 
-- Frame Blending on each system's Screen page and in-game: Mix averages consecutive frames, and Ghosting follows the Game Boy family's LCD response. GPU blending works under every core.
-- Saturation and Contrast, under General and on the in-game Screen page, plus six software dim steps below the backlight's lowest brightness.
-- Left Stick as D-Pad on handhelds with a left stick, on by default. Fast Forward gains 1.5× and Off, with 6× the default. Battery Display can show the icon, percentage, or both.
-- A game that crashes while loading no longer loops at boot: unslot starts on the shelf and moves its resume state aside. RetroArch compressed saves load correctly, and unreadable saves are not overwritten.
-- Crashed runs' temporary files are cleared at boot. Shutdown syncs the card around a bounded Wi-Fi unload and releases the log; audio opens only when needed and closes before power-off or restart.
-- Gambatte boots the card's Game Boy BIOS when present. Upstream mGBA fixes cover MBC2 saves, flash-bank switching, centred Game Boy audio and the first frame after the LCD comes on.
-- Nintendo DS, in `Games/NDS`, run by DraStic. No BIOS needed; saves, states and settings stay in `Saves/NDS`. DraStic's menu is on Select + X.
-- Menu in a DS game opens unslot's menu over it (Resume, Exit Game), and the volume keys and mute work as in any other game.
-- DS games show on the shelf as DS Game Cards, and Game Art fetches their art.
-- Letter jumps stay smooth on shelves of thousands of games, and no longer wait for the labels they land on.
-- Ejecting a game, or its core dying, closes its Core Options and Controls pages.
-- Offline achievements survive switching between softcore and hardcore, and offline hardcore unlocks stay earned.
-- With several update packs on the card, the newest version installs, not the last by name.
-- Update packs are checked and unpacked a piece at a time, so larger future updates still install on 1 GB handhelds.
-- rcheevos's MIT notice, DraStic's readme and SDL's licence now ship in `System/licenses`.
+- PortMaster ports now run from `Ports`: put the port's `.sh` and its folder there, with any game data it requires. unslot includes PortMaster's script helpers, gptokeyb, bash, zip, LÖVE, patching tools and the libraries they need on H700.
+- Missing Godot, Mono, .NET and other downloadable runtimes get an on-screen download prompt with their size and progress. Downloads are checksum-checked and kept through updates; cancelling returns to unslot.
+- Smaller fullscreen pictures scale up, centred and aspect-correct, with sharp-bilinear filtering. The handheld's buttons map as printed; Select + Start quits ports using gptokeyb.
+- Ports use unslot's saved volume and volume keys. The mixer is restored before unslot returns, even if a port exits immediately or cannot start.
+- Casting releases capture buffers before encoding and sending, reuses scaling lookup tables, and drops outgoing packets rather than blocking when the network is congested. Receiver buffering and codec quality settings are unchanged.
+
+Verified on RG CubeXX with th06, a Godot/FRT port and a LÖVE port. Some ports still need additional libraries or platform-specific fixes.
 
 ## New card: flash the image
 

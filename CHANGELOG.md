@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.13.0
+
+- Casting returns capture buffers as soon as conversion finishes, instead of holding them through encoding and sending. Scaled frames reuse their pixel lookup tables, and a congested network drops outgoing packets instead of blocking the media threads. Receiver buffering and codec quality settings are unchanged.
+- Ports from PortMaster run. Their scripts quit straight back to unslot looking for PortMaster's `control.txt`, which unslot did not have. unslot now brings the parts of PortMaster a port's script uses, with gptokeyb, PortMaster's patcher and the LÖVE it runs on, the tools ports unpack their games with, bash and `zip`, the OpenAL, Vorbis and mpg123 that BaseOS has none of, and the SDL the H700 needs, and puts them, and `Ports`, where those scripts look. The handheld's buttons are mapped to SDL's controller as printed, worked out from each model's buttons and sticks. Select + Start quits a port that runs gptokeyb.
+- A port that needs one of PortMaster's runtimes, such as Godot, Mono or .NET, asks before it starts whether to download it, saying how big it is, and shows the download going. There are some 2 GB of them, too many to bring in every update, so each comes from PortMaster's releases the first time a port needs it, checked against PortMaster's checksum, and goes in `System/PortMaster/libs`, which updates keep.
+- A port's picture fills the screen. One that asked for a fullscreen window smaller than the screen, such as 640x480, was drawn that size in a corner; SDL now keeps the size it asked for and scales it to the screen, sharp bilinear, keeping its shape.
+- The volume keys work in ports, at unslot's own level, which they move as they do in unslot. A port plays through ALSA, which unslot cannot scale, so while one runs the level goes on the codec's volume, which is put back when it ends.
+- A port that exits quickly cannot leave its volume handler running behind unslot. The handler now owns the port process and restores the mixer before unslot starts again, including when the port cannot start.
+
 ## v2.12.0
 
 - Frame Blending, on each system's Screen settings and the Screen page in the menu over a game: Mix averages each frame with the last, as flickering transparency was drawn for, and Ghosting fades like the Game Boy, Game Boy Color or Game Boy Advance LCD. It is done on the GPU, so it works under every core.

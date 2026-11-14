@@ -14,9 +14,14 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 [ -s "$TREE/System/version" ] || { echo "$TREE has no System/version" >&2; exit 1; }
 version="$(cat "$TREE/System/version")"
 # FAT makes every file executable, but a flashed image's ext4 keeps the zip's modes, and Services
-# runs these directly.
-for bin in syncthing tailscaled wireguard-go samba/bin/smbd samba/bin/smbpasswd; do
-	f="$TREE/System/services/$bin"
+# runs these directly, as launch_frontend.sh does bash and ports do the rest.
+for bin in services/syncthing services/tailscaled services/wireguard-go services/samba/bin/smbd \
+	services/samba/bin/smbpasswd bin/bash bin/zip bin/umount PortMaster/gptokeyb PortMaster/gptokeyb2 \
+	PortMaster/portmsg.aarch64 PortMaster/harbourmaster PortMaster/7zzs.aarch64 \
+	PortMaster/innoextract.aarch64 PortMaster/xdelta3 PortMaster/astcenc.aarch64 \
+	PortMaster/sdl_resolution.aarch64 \
+	PortMaster/runtimes/love_11.5/love.aarch64; do
+	f="$TREE/System/$bin"
 	[ ! -e "$f" ] || [ -x "$f" ] || { echo "$f is not executable" >&2; exit 1; }
 done
 # wpa_cli runs this itself as the link comes and goes, to start DHCP.

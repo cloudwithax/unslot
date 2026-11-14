@@ -87,8 +87,8 @@ pub struct H264 {
     pub h: u32,
     i420: Vec<u8>,
     out: (u32, u32),
-    /// The size the frame is scaled to first, and the room it is scaled into, when it is.
-    scaled: Option<((u32, u32), Vec<u8>)>,
+    /// The cached scaling map and picture, when the input must be resized.
+    scaled: Option<Scaled>,
 }
 
 // SAFETY: the encoder is only used by the thread that has it.
@@ -137,16 +137,22 @@ impl H264 {
             out: (ow, oh),
             scaled: Some(fit((w, h), (ow, oh)))
                 .filter(|&s| s != (w, h))
-                .map(|(sw, sh)| ((sw, sh), vec![0; (sw * sh * 4) as usize])),
+                .map(|size| Scaled::new((w, h), size)),
         })
     }
 
     /// Takes `bgrx`, a frame at least `w` by `h` and `stride` pixels wide, as the next to encode.
     pub fn fill(&mut self, bgrx: &[u8], stride: u32) {
         match &mut self.scaled {
-            Some((size, room)) => {
-                scale_bgrx(bgrx, stride, (self.w, self.h), *size, room);
-                bgrx_to_i420(room, size.0, *size, self.out, &mut self.i420);
+            Some(scaled) => {
+                scaled.fill(bgrx, stride);
+                bgrx_to_i420(
+                    &scaled.pixels,
+                    scaled.size.0,
+                    scaled.size,
+                    self.out,
+                    &mut self.i420,
+                );
             }
             None => bgrx_to_i420(bgrx, stride, (self.w, self.h), self.out, &mut self.i420),
         }
@@ -299,33 +305,44 @@ pub fn fit((w, h): (u32, u32), (ow, oh): (u32, u32)) -> (u32, u32) {
     }
 }
 
-/// The top-left `w` by `h` of `bgrx`, `stride` pixels to a row, scaled to `sw` by `sh` into
-/// `out`, each pixel the one of the frame nearest it.
-pub fn scale_bgrx(
-    bgrx: &[u8],
-    stride: u32,
-    (w, h): (u32, u32),
-    (sw, sh): (u32, u32),
-    out: &mut [u8],
-) {
-    let (row_bytes, stride) = (sw as usize * 4, stride as usize * 4);
-    let cols: Vec<usize> = (0..u64::from(sw))
-        .map(|x| (x * u64::from(w) / u64::from(sw)) as usize * 4)
-        .collect();
-    let mut last = None;
-    for y in 0..sh as usize {
-        let from = y * h as usize / sh as usize;
-        let (done, row) = out.split_at_mut(y * row_bytes);
-        let row = &mut row[..row_bytes];
-        if last == Some(from) {
-            // The same row of the frame as the one above it.
-            row.copy_from_slice(&done[(y - 1) * row_bytes..]);
-            continue;
+/// Nearest-neighbour scaling with its pixel map and output allocated once per encoder.
+struct Scaled {
+    size: (u32, u32),
+    cols: Vec<usize>,
+    rows: Vec<usize>,
+    pixels: Vec<u8>,
+}
+
+impl Scaled {
+    fn new((w, h): (u32, u32), (sw, sh): (u32, u32)) -> Self {
+        Self {
+            size: (sw, sh),
+            cols: (0..u64::from(sw))
+                .map(|x| (x * u64::from(w) / u64::from(sw)) as usize * 4)
+                .collect(),
+            rows: (0..u64::from(sh))
+                .map(|y| (y * u64::from(h) / u64::from(sh)) as usize)
+                .collect(),
+            pixels: vec![0; (sw * sh * 4) as usize],
         }
-        last = Some(from);
-        let src = &bgrx[from * stride..];
-        for (d, &c) in row.chunks_exact_mut(4).zip(&cols) {
-            d.copy_from_slice(&src[c..c + 4]);
+    }
+
+    fn fill(&mut self, bgrx: &[u8], stride: u32) {
+        let (row_bytes, stride) = (self.size.0 as usize * 4, stride as usize * 4);
+        let mut last = None;
+        for (y, &from) in self.rows.iter().enumerate() {
+            let (done, row) = self.pixels.split_at_mut(y * row_bytes);
+            let row = &mut row[..row_bytes];
+            if last == Some(from) {
+                // The same row of the frame as the one above it.
+                row.copy_from_slice(&done[(y - 1) * row_bytes..]);
+                continue;
+            }
+            last = Some(from);
+            let src = &bgrx[from * stride..];
+            for (d, &c) in row.chunks_exact_mut(4).zip(&self.cols) {
+                d.copy_from_slice(&src[c..c + 4]);
+            }
         }
     }
 }
@@ -473,10 +490,15 @@ mod tests {
         // Two by two, a row wider, to three by three.
         let px = |v: u8| [v, v, v, 0];
         let bgrx = [px(1), px(2), px(9), px(3), px(4), px(9)].concat();
-        let mut out = vec![0u8; 3 * 3 * 4];
-        scale_bgrx(&bgrx, 3, (2, 2), (3, 3), &mut out);
-        let got: Vec<u8> = out.chunks_exact(4).map(|p| p[0]).collect();
+        let mut scaled = Scaled::new((2, 2), (3, 3));
+        scaled.fill(&bgrx, 3);
+        let got: Vec<u8> = scaled.pixels.chunks_exact(4).map(|p| p[0]).collect();
         assert_eq!(got, [1, 1, 2, 1, 1, 2, 3, 3, 4]);
+        // A second frame may have a different stride; only the pixel map is cached.
+        let bgrx = [px(5), px(6), px(7), px(8)].concat();
+        scaled.fill(&bgrx, 2);
+        let got: Vec<u8> = scaled.pixels.chunks_exact(4).map(|p| p[0]).collect();
+        assert_eq!(got, [5, 5, 6, 5, 5, 6, 7, 7, 8]);
     }
 
     #[test]

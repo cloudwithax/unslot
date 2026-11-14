@@ -51,9 +51,19 @@ Everything slot does is still here: the carts, the shelves, the link cable, the 
 The **Apps** shelf contains Files, Books, Manuals, Gallery and Music, plus ports in `Ports`. Each
 opens directly from its cart and returns to the shelf with B. Books reads text, EPUBs and PDFs and
 keeps your page; Gallery shows the pictures in `Pictures`, and videos play there with L1 and R1
-skipping ten seconds; Music plays on with its page closed and holds while a game runs. Ports are
-laid out as PortMaster does and run with unslot closed, which comes back when they end. PDF reading
+skipping ten seconds; Music plays on with its page closed and holds while a game runs. PDF reading
 and video playback use the bundled `System/bin/mutool` and `System/bin/ffmpeg`.
+
+Ports run with unslot closed, which comes back when they end. Ports from
+[PortMaster](https://portmaster.games) run as they are: put the port's `.sh` and its folder in
+`Ports`, as PortMaster lays them out, with any game files the port asks for. unslot brings the
+parts of PortMaster their scripts use, with bash, `zip`, gptokeyb, LÖVE, PortMaster's patcher and
+the SDL the H700 needs; it maps the handheld's buttons as printed, scales a port's picture to fill
+the screen, and keeps the volume keys working. Select + Start quits a port that takes
+gptokeyb's keys. A port that needs one of PortMaster's runtimes, such as Godot or Mono, asks
+before it starts whether to download it from PortMaster, over Wi-Fi; runtimes are kept in
+`System/PortMaster/libs`, through updates. A port that needs a library unslot does not bring and
+BaseOS has not got may still not start; `Logs/ports.log` says why.
 
 **Settings → Online** holds Upload from Phone, Game Art, Art While Asleep, RetroAchievements,
 Updates, Cores and **Auto-Update Cores**, which fetches new builds of the cores on the card once a
@@ -261,7 +271,7 @@ unslot is a fork of **[slot](https://github.com/BrandonKowalski/slot)** by Brand
 | Emulation | [mGBA](https://mgba.io), [gpSP](https://github.com/libretro/gpsp), and the libretro cores in the systems table. The Dreamcast's [Nodosumi](https://github.com/cloudwithax/nodosumi) ships with each release, with Flycast as the other choice. The DS runs in Exophase's [DraStic](https://drastic-ds.com), by way of trngaje's [advanced_drastic](https://github.com/trngaje/advanced_drastic). |
 | Achievements | [rcheevos](https://github.com/RetroAchievements/rcheevos) (MIT), by way of machomano's slot fork (GPL-3.0) |
 | Bezels | [R. Savant's Anbernic H700 Overlays](https://github.com/RighteousSavant/Anbernic-H700-Overlays), free for any H700 handheld. The default bezel is "Perfect GBA SP" by mugwomp93, by way of chrizzo-hb's knulli-bezels (CC BY-SA 4.0). |
-| Apps | [MuPDF](https://mupdf.com)'s `mutool` (AGPL-3.0) reads PDFs and [FFmpeg](https://ffmpeg.org) (GPL) plays video; ports follow [PortMaster](https://portmaster.games)'s layout |
+| Apps | [MuPDF](https://mupdf.com)'s `mutool` (AGPL-3.0) reads PDFs and [FFmpeg](https://ffmpeg.org) (GPL) plays video. Ports run on [PortMaster](https://portmaster.games)'s runtime (MIT), with its [gptokeyb](https://github.com/PortsMaster/gptokeyb) and [gptokeyb2](https://github.com/PortsMaster/gptokeyb2) (GPL-2.0), [LÖVE](https://love2d.org) (zlib) and the tools it ships under their own licences, and Ubuntu's bash (GPL-3.0), zip, OpenAL Soft and mpg123 (LGPL-2.1), and Vorbis and Ogg (BSD) |
 | Labels | Game Art's style follows [Cart Studio](https://github.com/BrandonKowalski/slot-cart-studio). Names come from [libretro-database](https://github.com/libretro/libretro-database) and art from libretro-thumbnails and [ScreenScraper](https://www.screenscraper.fr). |
 | Services | [Syncthing](https://syncthing.net), [Tailscale](https://github.com/tailscale/tailscale), [wireguard-go](https://git.zx2c4.com/wireguard-go) and [spruceOS](https://github.com/spruceUI/spruceOS)'s Samba build, with glibc's libnsl from Ubuntu |
 | Wallpapers | NASA, ESA, CSA and STScI; Poly Haven; ambientCG; and Luis Zuno. Each is credited in `System/licenses/wallpapers.txt`. |

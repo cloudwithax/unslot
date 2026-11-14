@@ -7,14 +7,24 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
 setup() {
-	rm -rf "$TMP/card" "$TMP/run"
-	mkdir -p "$TMP/card/System" "$TMP/run"
+	rm -rf "$TMP/card" "$TMP/run" "$TMP/fs" "$TMP/asked"
+	mkdir -p "$TMP/card/System" "$TMP/run" "$TMP/fs"
 	: > "$TMP/card/System/led.sh"
 }
 
+# slot stands in as a script that notes what it was asked, and refuses a port's runtimes when
+# REFUSE is there.
 launch() {
-	SLOT_ROOT="$TMP/card" AGS_RUN="$TMP/run" sh "$SCRIPT" 2>/dev/null || true
+	SLOT_ROOT="$TMP/card" AGS_RUN="$TMP/run" SLOT_FS="$TMP/fs" AGS_SLOT="sh $TMP/slot" \
+		sh "$SCRIPT" 2>/dev/null || true
 }
+cat > "$TMP/slot" <<EOF
+#!/bin/sh
+echo "\$*" >> "$TMP/asked"
+[ "\$1" = --port-runtimes ] && [ -e "$TMP/REFUSE" ] && exit 1
+[ "\$1" = --port-volume ] && { shift; exec "\$@"; }
+exit 0
+EOF
 
 fail() {
 	echo "launch: $*" >&2
@@ -79,6 +89,17 @@ launch
 [ ! -e "$TMP/card/.unslot-update/System.failed" ] || fail "the failed System was left on the card"
 grep -q "putting the old System back" "$TMP/card/Logs/update.log" || fail "the rollback was not logged"
 
+# Runtimes ports downloaded while the update was on trial go back with the old System.
+setup
+mkdir -p "$TMP/card/.unslot-update/System.old" "$TMP/card/System/PortMaster/libs"
+echo old > "$TMP/card/.unslot-update/System.old/slot"
+echo godot > "$TMP/card/System/PortMaster/libs/frt_3.5.2.squashfs"
+echo 3 > "$TMP/card/.unslot-update/trial"
+launch
+[ "$(cat "$TMP/card/System/slot")" = old ] || fail "an update that never started was kept"
+[ "$(cat "$TMP/card/System/PortMaster/libs/frt_3.5.2.squashfs" 2>/dev/null)" = godot ] ||
+	fail "a runtime downloaded on trial was lost in the rollback"
+
 # A confirmed update, with no trial left, is started as it is.
 setup
 mkdir -p "$TMP/card/.unslot-update"
@@ -102,12 +123,52 @@ rm "$TMP/card/Ports/ran"
 launch
 [ ! -e "$TMP/card/Ports/ran" ] || fail "the port ran a second time"
 
-# A DS game slot quit for goes to DraStic's script whole, spaces and all.
+# A PortMaster port finds PortMaster, its own files under /roms/ports and bash where it looks,
+# and what is in System/bin on its PATH.
+setup
+mkdir -p "$TMP/card/Ports/game" "$TMP/card/System/PortMaster" "$TMP/card/System/bin"
+printf '#!/bin/sh\necho tool\n' > "$TMP/card/System/bin/unslot-tool"
+chmod +x "$TMP/card/System/bin/unslot-tool"
+printf '#!/bin/bash\nunslot-tool > game/ran\n' > "$TMP/card/Ports/Game.sh"
+printf '%s' "$TMP/card/Ports/Game.sh" > "$TMP/card/.unslot-port"
+launch
+[ "$(readlink "$TMP/fs/opt/tools/PortMaster")" = "$TMP/card/System/PortMaster" ] || fail "PortMaster was not linked where ports look"
+[ "$(readlink "$TMP/fs/roms/ports")" = "$TMP/card/Ports" ] || fail "Ports was not linked at /roms/ports"
+[ "$(readlink "$TMP/fs/bin/bash")" = "$TMP/card/System/bin/bash" ] || fail "bash was not linked"
+[ "$(readlink "$TMP/fs/dev/fd")" = /proc/self/fd ] || fail "/dev/fd was not linked for bash's >(...)"
+[ "$(readlink "$TMP/fs/dev/stderr")" = /proc/self/fd/2 ] || fail "/dev/stderr was not linked"
+[ "$(cat "$TMP/card/Ports/game/ran")" = tool ] || fail "System/bin was not on the port's PATH"
+grep -qx -- "--port-runtimes $TMP/card/Ports/Game.sh" "$TMP/asked" || fail "the port's runtimes were not looked for"
+
+# A port whose runtimes are not on the card, and were not downloaded, is not run.
+setup
+mkdir -p "$TMP/card/Ports"
+printf '#!/bin/bash\necho ran > ran\n' > "$TMP/card/Ports/Game.sh"
+printf '%s' "$TMP/card/Ports/Game.sh" > "$TMP/card/.unslot-port"
+: > "$TMP/REFUSE"
+launch
+rm "$TMP/REFUSE"
+[ ! -e "$TMP/card/Ports/ran" ] || fail "a port without its runtimes ran"
+grep -q "port not run" "$TMP/card/Logs/slot-session.log" || fail "the port not run was not logged"
+
+# What is really at those places is left alone.
+setup
+mkdir -p "$TMP/card/Ports" "$TMP/fs/roms/ports" "$TMP/fs/bin"
+echo mine > "$TMP/fs/bin/bash"
+printf '#!/bin/sh\n' > "$TMP/card/Ports/Game.sh"
+printf '%s' "$TMP/card/Ports/Game.sh" > "$TMP/card/.unslot-port"
+launch
+[ -d "$TMP/fs/roms/ports" ] && [ ! -L "$TMP/fs/roms/ports" ] || fail "a real /roms/ports was replaced"
+[ "$(cat "$TMP/fs/bin/bash")" = mine ] || fail "a bash already there was replaced"
+
+# A DS game slot quit for goes to DraStic's script whole, spaces and all, and nothing is linked.
 setup
 mkdir -p "$TMP/card/System/drastic"
 printf '#!/bin/sh\necho "$#:$1" > ran\n' > "$TMP/card/System/drastic/launch.sh"
 printf '%s\n%s' "$TMP/card/System/drastic/launch.sh" "$TMP/card/Games/NDS/Mario 64 DS.nds" > "$TMP/card/.unslot-port"
 launch
 [ "$(cat "$TMP/card/System/drastic/ran")" = "1:$TMP/card/Games/NDS/Mario 64 DS.nds" ] || fail "DraStic was not handed the game"
+! grep -qs -- --port "$TMP/asked" || fail "DraStic's launch looked for runtimes or read the volume"
+[ ! -e "$TMP/fs/roms" ] || fail "DraStic's launch linked PortMaster's folders"
 
 echo "launch: all passed"

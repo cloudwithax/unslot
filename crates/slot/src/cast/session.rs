@@ -133,8 +133,7 @@ impl Shared {
     }
 
     fn send(&self, packet: &[u8]) {
-        // A packet the network would not take is as good as lost, and asked for again.
-        let _ = self.udp.send(packet);
+        super::send_packet(&self.udp, packet);
     }
 }
 
@@ -488,21 +487,23 @@ fn video(s: &Shared, tap: &FrameTap, codecs: &Arc<Codecs>, ended: &Mutex<Option<
         let ready = Instant::now();
         e.fill(pixels, stride);
         let filled = Instant::now();
+        let (at, read) = (f.at, f.read);
+        // Conversion owns the pixels now; let the compositor reuse its buffer while encoding.
+        tap.give_back(f);
         if let Some((data, is_key)) = e.encode(key) {
             stats.encode.add(filled.elapsed());
             stats.bytes += data.len();
             let mut v = lock(&s.video);
-            for p in v.frame(data, s.rtp(f.at, 90_000), is_key, f.at) {
+            for p in v.frame(data, s.rtp(at, 90_000), is_key, at) {
                 s.send(p);
             }
             drop(v);
             stats.frames += 1;
-            stats.read.add(f.read);
+            stats.read.add(read);
             stats.wait.add(ready - start);
             stats.convert.add(filled - ready);
-            stats.age.add(f.at.elapsed());
+            stats.age.add(at.elapsed());
         }
-        tap.give_back(f);
     }
 }
 
