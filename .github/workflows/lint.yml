@@ -1,0 +1,40 @@
+name: lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clippy:
+    name: clippy, host and device
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Task and the libraries the host build links
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+          curl -fsSL https://taskfile.dev/install.sh | sh -s -- -b /usr/local/bin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: task fmt:check
+        run: task fmt:check
+
+      - name: task lint
+        if: ${{ !cancelled() }}
+        run: task lint
+
+      - name: task lint:device
+        if: ${{ !cancelled() }}
+        run: task lint:device

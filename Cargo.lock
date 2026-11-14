@@ -2312,6 +2312,7 @@ version = "0.1.0"
 name = "slot-store"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "lz4_flex",
  "tempfile",
  "unicode-normalization",

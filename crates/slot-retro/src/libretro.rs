@@ -788,7 +788,8 @@ pub struct LibretroCore {
     need_fullpath: bool,
     extensions: Vec<String>,
     loaded: bool,
-    state_size: Option<usize>,
+    /// The state's size and the save chip's when it was asked.
+    state_size: Option<(usize, usize)>,
     _lib: Library,
 }
 
@@ -1182,11 +1183,17 @@ impl RetroCore for LibretroCore {
     }
 
     fn serialize(&mut self) -> Result<Vec<u8>, CoreError> {
-        if let Some(buf) = self.state_size.and_then(|size| self.serialize_at(size)) {
+        let chip = unsafe { (self.api.get_memory_size)(MEMORY_SAVE_RAM) };
+        // A game that settles on its save chip after boot grows its state: asked again then.
+        if let Some(buf) = self
+            .state_size
+            .filter(|&(_, at)| at == chip)
+            .and_then(|(size, _)| self.serialize_at(size))
+        {
             return Ok(buf);
         }
         let size = unsafe { (self.api.serialize_size)() };
-        self.state_size = (size > 0).then_some(size);
+        self.state_size = (size > 0).then_some((size, chip));
         if size == 0 {
             return Err(CoreError::State("core reports no state".into()));
         }
@@ -1195,11 +1202,12 @@ impl RetroCore for LibretroCore {
     }
 
     fn state_size(&mut self) -> Option<usize> {
-        if self.state_size.is_none() {
+        let chip = unsafe { (self.api.get_memory_size)(MEMORY_SAVE_RAM) };
+        if self.state_size.is_none_or(|(_, at)| at != chip) {
             let size = unsafe { (self.api.serialize_size)() };
-            self.state_size = (size > 0).then_some(size);
+            self.state_size = (size > 0).then_some((size, chip));
         }
-        self.state_size
+        self.state_size.map(|(size, _)| size)
     }
 
     fn serialize_to(&mut self, buf: &mut [u8]) -> Result<(), CoreError> {
@@ -1212,6 +1220,9 @@ impl RetroCore for LibretroCore {
     }
 
     fn unserialize(&mut self, data: &[u8]) -> Result<(), CoreError> {
+        if data.is_empty() {
+            return Err(CoreError::State("empty state".into()));
+        }
         let ok = {
             let _a = Active::bind(&mut self.host);
             unsafe { (self.api.unserialize)(data.as_ptr() as *const c_void, data.len()) }
@@ -1239,6 +1250,14 @@ impl RetroCore for LibretroCore {
         ram[..n].copy_from_slice(&data[..n]);
         let rest = &data[n..];
         if let Some(rtc) = self.memory_mut(MEMORY_RTC) {
+            // A save from another core keeps its clock in that core's form.
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            let converted = (rest.len() != rtc.len())
+                .then(|| crate::rtc::convert(rest, rtc.len(), now))
+                .flatten();
+            let rest = converted.as_deref().unwrap_or(rest);
             let m = rtc.len().min(rest.len());
             rtc[..m].copy_from_slice(&rest[..m]);
         }

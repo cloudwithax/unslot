@@ -9,5 +9,9 @@ license.workspace = true
 unicode-normalization.workspace = true
 lz4_flex.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
+libc.workspace = true

@@ -1,3 +1,10 @@
+macro_rules! eprintln {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stderr(), $($arg)*);
+    }};
+}
+
 mod core;
 mod ffi;
 mod hw;
@@ -5,6 +12,7 @@ mod libretro;
 mod link;
 mod mock;
 mod remote;
+mod rtc;
 mod rumble;
 
 pub use core::{

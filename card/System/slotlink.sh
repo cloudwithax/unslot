@@ -19,6 +19,7 @@ LINK_MARK="$RUN/slotlink.session"
 WPA_SUPPLICANT="${AGS_WPA_SUPPLICANT:-wpa_supplicant}"
 WPA_CLI="${AGS_WPA_CLI:-wpa_cli}"
 IP="${AGS_IP:-ip}"
+RFKILL="${AGS_RFKILL:-rfkill}"
 UPTIME="${AGS_UPTIME:-/proc/uptime}"
 CTRL_DIR="${AGS_CTRL_DIR:-/var/run/wpa_supplicant}"
 
@@ -26,6 +27,27 @@ trace() {
 	[ -n "$LINK_TRACE" ] || return 0
 	echo "slotlink: $(cut -d' ' -f1 "$UPTIME" 2>/dev/null) $*" >> "$LINK_TRACE" 2>/dev/null
 	return 0
+}
+
+LINK_TRACE_KEEP="${AGS_LINK_TRACE_KEEP:-5}"
+
+trace_attempt() {
+	[ -n "$LINK_TRACE" ] || return 0
+	if [ -f "$LINK_TRACE" ]; then
+		from=$(grep -n -E ' (host|join): asked' "$LINK_TRACE" 2>/dev/null \
+			| tail -n $((LINK_TRACE_KEEP - 1)) | head -n 1 | cut -d: -f1)
+		if [ "$LINK_TRACE_KEEP" -le 1 ]; then
+			: > "$LINK_TRACE" 2>/dev/null
+		elif [ -n "$from" ]; then
+			sed -n "$from,\$p" "$LINK_TRACE" > "$LINK_TRACE.tmp" 2>/dev/null \
+				&& /bin/mv -f "$LINK_TRACE.tmp" "$LINK_TRACE"
+		fi
+	fi
+	trace "$1 at $(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
+}
+
+interfaces() {
+	ls "$NET" 2>/dev/null | tr '\n' ' ' | sed 's/ $//'
 }
 
 wait_dev() {
@@ -40,7 +62,7 @@ wait_dev() {
 wifi_up() {
 	wait_dev wlan0 40 || return 0
 	trace "wlan0 present"
-	rfkill unblock wifi 2>/dev/null || true
+	$RFKILL unblock wifi 2>/dev/null || true
 	$IP link set wlan0 up 2>/dev/null || true
 }
 
@@ -95,11 +117,17 @@ link_wait() {
 
 link_host() {
 	echo "$$" > "$LINK_MARK"
-	trace "host: asked"
+	trace_attempt "host: asked"
 	link_clear
 	wifi_up
-	wait_dev wlan1 4 || return 1
-	command -v "$WPA_SUPPLICANT" >/dev/null 2>&1 || return 1
+	wait_dev wlan1 4 || {
+		trace "host: no wlan1, interfaces: $(interfaces)"
+		return 1
+	}
+	command -v "$WPA_SUPPLICANT" >/dev/null 2>&1 || {
+		trace "host: no wpa_supplicant"
+		return 1
+	}
 
 	/bin/mkdir -p "$RUN/wpa_ap"
 	{
@@ -121,8 +149,16 @@ link_host() {
 	/bin/chmod 600 "$RUN/slotlink-ap.conf"
 
 	$IP link set wlan1 up 2>/dev/null || true
-	$WPA_SUPPLICANT -B -i wlan1 -c "$RUN/slotlink-ap.conf" -Dnl80211 >/dev/null 2>&1 || return 1
-	link_wait "$RUN/wpa_ap" wlan1 "$LINK_WAIT_S" 0 "" || return 1
+	if ! $WPA_SUPPLICANT -B -i wlan1 -c "$RUN/slotlink-ap.conf" -Dnl80211 >"$RUN/slotlink-sup.err" 2>&1; then
+		trace "host: wpa_supplicant failed: $(tr '\n' ' ' < "$RUN/slotlink-sup.err" | sed 's/ $//')"
+		/bin/rm -f "$RUN/slotlink-sup.err"
+		return 1
+	fi
+	/bin/rm -f "$RUN/slotlink-sup.err"
+	link_wait "$RUN/wpa_ap" wlan1 "$LINK_WAIT_S" 0 "" || {
+		trace "host: wlan1 never came up in ${LINK_WAIT_S}s"
+		return 1
+	}
 	$IP addr add "$LINK_HOST_IP" dev wlan1 2>/dev/null || true
 	trace "host: addressed"
 }
@@ -145,10 +181,13 @@ link_sta_conf() {
 
 link_join() {
 	echo "$$" > "$LINK_MARK"
-	trace "join: asked"
+	trace_attempt "join: asked"
 	link_clear
 	wifi_up
-	[ -d "$NET/wlan0" ] || return 1
+	[ -d "$NET/wlan0" ] || {
+		trace "join: no wlan0, interfaces: $(interfaces)"
+		return 1
+	}
 	/bin/mkdir -p "$CTRL_DIR"
 	$IP link set wlan0 up 2>/dev/null || true
 
