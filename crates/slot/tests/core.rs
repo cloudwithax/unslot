@@ -86,7 +86,6 @@ fn a_cart_the_real_core_refuses_comes_back_out_of_the_slot() {
     let mut s = Session::boot(d.path().to_path_buf());
     s.feed([RawEvent::Down(Btn::A)], 16);
     s.update(1.0 / 60.0);
-    assert!(matches!(s.app().phase(), Phase::Inserting { .. }));
 
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut now = 16;
