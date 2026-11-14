@@ -1,5 +1,5 @@
 use crate::draw::{Draw, Sprites, TexId};
-use crate::grade::blue_light_gain;
+use crate::grade::{blue_light_gain, dim_gain};
 use crate::pipeline::GamePass;
 use crate::quad::Quad;
 use crate::shaders::{BEZEL_FRAG, BLIT_FRAG, BLIT_VERT, TURN_VERT};
@@ -31,6 +31,7 @@ pub struct Compositor {
     u_gain: gl::types::GLint,
     u_blit_uv: gl::types::GLint,
     gain: [f32; 3],
+    dim: f32,
     shake: f32,
     window: (u32, u32),
     layout: Layout,
@@ -107,6 +108,7 @@ impl Compositor {
                 u_gain,
                 u_blit_uv,
                 gain: blue_light_gain(0),
+                dim: dim_gain(0),
                 shake: 0.0,
                 window: (OUT_W, OUT_H),
                 layout: Layout::Framed,
@@ -207,6 +209,15 @@ impl Compositor {
 
     pub fn set_blue_light(&mut self, step: u8) {
         self.gain = blue_light_gain(step);
+    }
+
+    /// Darkens the whole picture by `step`, below the backlight's lowest.
+    pub fn set_dim(&mut self, step: u8) {
+        self.dim = dim_gain(step);
+    }
+
+    fn dimmed_gain(&self) -> [f32; 3] {
+        self.gain.map(|g| g * self.dim)
     }
 
     pub fn set_screen_effect(&mut self, effect: crate::ScreenEffect) {
@@ -503,7 +514,8 @@ impl Compositor {
             gl::Clear(gl::COLOR_BUFFER_BIT);
             gl::UseProgram(self.blit);
             gl::ActiveTexture(gl::TEXTURE0);
-            gl::Uniform3f(self.u_gain, self.gain[0], self.gain[1], self.gain[2]);
+            let [r, g, b] = self.dimmed_gain();
+            gl::Uniform3f(self.u_gain, r, g, b);
             gl::BindTexture(gl::TEXTURE_2D, self.tex);
         }
         if self.native() {
@@ -534,7 +546,8 @@ impl Compositor {
         unsafe {
             gl::Viewport(0, -drop, window.0 as i32, window.1 as i32);
             gl::UseProgram(self.bezel_prog);
-            gl::Uniform3f(self.u_bezel_gain, self.gain[0], self.gain[1], self.gain[2]);
+            let [r, g, b] = self.dimmed_gain();
+            gl::Uniform3f(self.u_bezel_gain, r, g, b);
             gl::Uniform1f(self.u_bezel_alpha, 1.0);
             gl::BindTexture(gl::TEXTURE_2D, bezel);
             gl::Enable(gl::BLEND);

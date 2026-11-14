@@ -211,6 +211,7 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             utc_offset_min: -300,
             rumble: true,
             dpad_stick: false,
+            dim: 0,
             left_stick_dpad: true,
             auto_cores: false,
             art_asleep: false,

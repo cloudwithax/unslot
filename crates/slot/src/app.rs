@@ -9,7 +9,7 @@ use slot_retro::{CoreOption, LinkChannel};
 use slot_store::{
     format_stamp, parse_stamp, read_slot_state, scan, write_slot_state, Appearance, BatteryDisplay,
     BezelPick, Cart, Core, GbPalette, Platform, Recent, Shader, SlotState, StateEntry, StateRing,
-    WallpaperPick, WallpaperTint, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, RING_MAX,
+    WallpaperPick, WallpaperTint, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, DIM_MAX, FF_SPEEDS, RING_MAX,
     RUN_AHEAD_MAX, VOLUME_MAX,
 };
 use slot_ui::{
@@ -5034,10 +5034,14 @@ impl App {
             self.hud.toast(said, self.now());
             return true;
         }
+        if let Action::BrightnessUp | Action::BrightnessDown = action {
+            self.step_brightness(action == Action::BrightnessUp);
+            let (level, muted, now) = (self.brightness_level(), self.muted(), self.now());
+            self.hud.show(HudKind::Brightness, level, muted, now);
+            return true;
+        }
         let s = &self.state;
         let (kind, value) = match action {
-            Action::BrightnessUp => (HudKind::Brightness, up(s.brightness, 1, BRIGHTNESS_MAX)),
-            Action::BrightnessDown => (HudKind::Brightness, s.brightness.saturating_sub(1)),
             Action::BlueLightUp => (HudKind::BlueLight, up(s.blue_light, 1, BLUE_LIGHT_MAX)),
             Action::BlueLightDown => (HudKind::BlueLight, s.blue_light.saturating_sub(1)),
             Action::VolumeUp => (HudKind::Volume, up(self.level(), VOLUME_STEP, VOLUME_MAX)),
@@ -5048,20 +5052,16 @@ impl App {
             self.remember_volume();
         }
         let level = match kind {
-            HudKind::Brightness => &mut self.state.brightness,
             HudKind::BlueLight => &mut self.state.blue_light,
             HudKind::Volume if self.headphones => &mut self.state.volume_hp,
             HudKind::Volume => &mut self.state.volume,
-            HudKind::Rewind => return false,
+            HudKind::Brightness | HudKind::Rewind => return false,
         };
         let moved = *level != value;
         *level = value;
         let unmuted = kind == HudKind::Volume && std::mem::take(self.muted_mut());
         let (shown, now) = (self.hud_value(kind, value), self.now());
         self.hud.show(kind, shown, self.muted(), now);
-        if let (HudKind::Brightness, Some(power)) = (kind, &mut self.power) {
-            power.set_backlight(value);
-        }
         if moved || unmuted {
             self.persist_soon();
         }
@@ -5117,6 +5117,42 @@ impl App {
 
     pub fn ff_badge(&self) -> Option<Icon> {
         self.hud.badge()
+    }
+
+    /// One step brighter or darker: past the backlight's lowest it dims the picture.
+    fn step_brightness(&mut self, brighter: bool) {
+        let s = &self.state;
+        let dim = match brighter {
+            true => s.dim.saturating_sub(1),
+            false if s.brightness == 0 => up(s.dim, 1, DIM_MAX),
+            false => s.dim,
+        };
+        if dim != s.dim {
+            self.state.dim = dim;
+            self.persist_soon();
+            return;
+        }
+        let to = match brighter {
+            true => up(s.brightness, 1, BRIGHTNESS_MAX),
+            false => s.brightness.saturating_sub(1),
+        };
+        if to == self.state.brightness {
+            return;
+        }
+        self.state.brightness = to;
+        if let Some(power) = &mut self.power {
+            power.set_backlight(to);
+        }
+        self.persist_soon();
+    }
+
+    pub fn dim(&self) -> u8 {
+        self.state.dim
+    }
+
+    /// Brightness as the HUD shows it: the dim steps under the backlight's.
+    pub fn brightness_level(&self) -> u8 {
+        DIM_MAX - self.state.dim.min(DIM_MAX) + self.state.brightness
     }
 
     pub fn blue_light(&self) -> u8 {

@@ -1,5 +1,5 @@
 use slot_gfx::{Canvas, Draw, TexId};
-use slot_store::{BLUE_LIGHT_MAX, BRIGHTNESS_MAX, VOLUME_MAX};
+use slot_store::{BLUE_LIGHT_MAX, BRIGHTNESS_MAX, DIM_MAX, VOLUME_MAX};
 
 use crate::icon::icon_box;
 use crate::toast::toast_rect;
@@ -74,7 +74,7 @@ impl HudKind {
 
     fn max(self) -> u8 {
         match self {
-            HudKind::Brightness => BRIGHTNESS_MAX,
+            HudKind::Brightness => BRIGHTNESS_MAX + DIM_MAX,
             HudKind::BlueLight => BLUE_LIGHT_MAX,
             HudKind::Volume => VOLUME_MAX,
             HudKind::Rewind => 100,
