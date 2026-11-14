@@ -585,7 +585,13 @@ impl Session {
         );
         self.app.set_named_core(opened.named);
         launch("core opened");
-        let sav = persist::read_sav(&self.root, platform, stem);
+        let (sav, sav_unread) = match persist::read_sav(&self.root, platform, stem) {
+            Ok(sav) => (sav, false),
+            Err(e) => {
+                eprintln!("slot: save: {stem}'s could not be read, it will not be written: {e}");
+                (None, true)
+            }
+        };
         launch("save read");
         let ring = self.sink.ring();
         let emu = match player.filter(|_| platform.spec().link) {
@@ -594,6 +600,9 @@ impl Session {
         };
         emu.set_volume(self.app.output_volume());
         emu.set_driven(self.driven);
+        if sav_unread {
+            emu.refuse_save_ram();
+        }
         if let (Some(console), Some(account)) = (console, account) {
             emu.start_cheevos(crate::cheevos::Start {
                 account,

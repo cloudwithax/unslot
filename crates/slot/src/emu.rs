@@ -422,6 +422,12 @@ impl EmuHandle {
         Speed::from_u8(self.shared.observed.load(Ordering::Acquire))
     }
 
+    /// Never writes the core's save ram back: the card's save could not be read, and a blank
+    /// one written over it would lose it.
+    pub fn refuse_save_ram(&self) {
+        self.shared.sav_refused.store(true, Ordering::Release);
+    }
+
     pub fn set_volume(&self, level: u8) {
         self.shared.volume.store(level.min(100), Ordering::Relaxed);
     }

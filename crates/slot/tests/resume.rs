@@ -81,7 +81,9 @@ fn a_retroarch_srm_is_read_when_there_is_no_sav() {
     std::fs::create_dir_all(d.path().join("Saves/GBA")).unwrap();
     std::fs::write(d.path().join("Saves/GBA/Emerald.srm"), b"srm bytes").unwrap();
     assert_eq!(
-        persist::read_sav(d.path(), Platform::Gba, "Emerald").as_deref(),
+        persist::read_sav(d.path(), Platform::Gba, "Emerald")
+            .unwrap()
+            .as_deref(),
         Some(&b"srm bytes"[..])
     );
 }
@@ -97,7 +99,7 @@ fn srm_bytes_on_disk_reach_the_cores_save_ram() {
         Box::new(MockCore::new()),
         d.path().join("Games/GBA/Emerald.gba"),
         StubSink::new().ring(),
-        persist::read_sav(d.path(), Platform::Gba, "Emerald"),
+        persist::read_sav(d.path(), Platform::Gba, "Emerald").unwrap(),
         persist::read_resume(d.path(), Platform::Gba, slot_store::Core::Mgba, "Emerald"),
     );
     wait_ready(&emu);
@@ -112,7 +114,9 @@ fn a_sav_wins_over_an_srm_when_both_exist() {
     std::fs::write(d.path().join("Saves/GBA/Emerald.srm"), b"srm bytes").unwrap();
     std::fs::write(d.path().join("Saves/GBA/Emerald.sav"), b"sav bytes").unwrap();
     assert_eq!(
-        persist::read_sav(d.path(), Platform::Gba, "Emerald").as_deref(),
+        persist::read_sav(d.path(), Platform::Gba, "Emerald")
+            .unwrap()
+            .as_deref(),
         Some(&b"sav bytes"[..])
     );
 }
@@ -159,7 +163,7 @@ fn a_power_press_does_not_let_a_refusing_mock_overwrite_a_real_save() {
     )
     .unwrap();
 
-    let sav = persist::read_sav(d.path(), Platform::Gba, "Emerald");
+    let sav = persist::read_sav(d.path(), Platform::Gba, "Emerald").unwrap();
     let resume = persist::read_resume(d.path(), Platform::Gba, slot_store::Core::Mgba, "Emerald");
     let emu = EmuHandle::spawn(
         Box::new(MockCore::new()),
@@ -202,7 +206,7 @@ fn an_eject_does_not_let_a_refusing_mock_overwrite_a_real_save() {
     )
     .unwrap();
 
-    let sav = persist::read_sav(d.path(), Platform::Gba, "Emerald");
+    let sav = persist::read_sav(d.path(), Platform::Gba, "Emerald").unwrap();
     let resume = persist::read_resume(d.path(), Platform::Gba, slot_store::Core::Mgba, "Emerald");
     let emu = EmuHandle::spawn(
         Box::new(MockCore::new()),
