@@ -210,7 +210,7 @@ fn open_here(
         if !path.exists() {
             continue;
         }
-        match LibretroCore::open_with(path, &bios, &saves) {
+        match LibretroCore::open_preset(path, &bios, &saves, init_options(core)) {
             Ok(mut opened) => {
                 if platform.spec().native {
                     opened.set_canvas(Canvas::Native);
@@ -264,6 +264,15 @@ pub fn dmg_only(rom: &Path) -> bool {
     std::fs::File::open(rom)
         .and_then(|mut f| f.read_exact(&mut header))
         .is_ok_and(|_| header[0x143] & 0x80 == 0)
+}
+
+/// Options a core reads only in its init, so they are set before it.
+fn init_options(core: Core) -> &'static [(&'static str, &'static str)] {
+    match core {
+        // Boots the card's Game Boy BIOS when there is one.
+        Core::Gambatte => &[("gambatte_gb_bootloader", "enabled")],
+        _ => &[],
+    }
 }
 
 fn report_missing(core: Core, paths: &[PathBuf]) {
