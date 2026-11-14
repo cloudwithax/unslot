@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.12.0
 
 - Frame Blending, on each system's Screen settings and the Screen page in the menu over a game: Mix averages each frame with the last, as flickering transparency was drawn for, and Ghosting fades like the Game Boy, Game Boy Color or Game Boy Advance LCD. It is done on the GPU, so it works under every core.
 - Saturation and Contrast, under General and on the in-game Screen page, nine steps each.
@@ -14,8 +14,6 @@
 - Kinder to the SD card: temporary files a crash left behind are cleared at start, and before a power off or restart the card is synced, the Wi-Fi driver let go of, waiting at most five seconds, and synced again, with nothing left writing to the log.
 - The speaker stays quiet until there is sound, and is shut before a power off or restart, so neither ends on a pop.
 - From slot upstream: mGBA's fixes for MBC2 saves, flash saves past a bank switch, centred Game Boy channels and the first frame after the LCD comes on.
-
-## v2.12.0
 
 - Nintendo DS, from `Games/NDS`, run by DraStic. unslot closes while a DS game runs, as it does for a port, and comes back when the game ends. DraStic brings its own stand-ins for the DS BIOS, so none goes in `BIOS`, and keeps its saves, states and settings in `Saves/NDS`, which updates leave alone. Its own menu, with its states and settings, is on Select + X. The Screen settings have no DS row, as DraStic draws the game.
 - A tap of Menu in a DS game stops it and opens unslot's menu over its picture, with Resume and Exit Game; Exit Game has DraStic save and close. The volume keys and the mute chord work as in any other game, at the same level for the speaker and the headphones, and each press shows a bar over the game for a moment.
