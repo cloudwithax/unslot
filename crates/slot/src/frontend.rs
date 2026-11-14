@@ -108,6 +108,8 @@ pub struct Frontend {
     /// family's fixed canvas.
     game_aspect: Option<f32>,
     game_rotation: u32,
+    /// Whether a game was showing last frame; one coming back starts its blending afresh.
+    game_was_visible: bool,
 }
 
 #[derive(Default)]
@@ -355,6 +357,7 @@ impl Frontend {
             link_shot_shown: false,
             game_aspect: None,
             game_rotation: 0,
+            game_was_visible: false,
         }
     }
 
@@ -729,6 +732,13 @@ impl Frontend {
         compositor.set_dim(self.session.app().dim());
         compositor.set_saturation(self.session.app().saturation());
         compositor.set_contrast(self.session.app().contrast());
+        compositor.set_lcd(self.session.app().lcd());
+        compositor.set_frame_blend(self.session.app().frame_blend());
+        let visible = self.session.game_visible();
+        if visible && !self.game_was_visible {
+            compositor.cut_frame_blend();
+        }
+        self.game_was_visible = visible;
         compositor.set_picture(self.session.app().picture_rect());
         compositor.set_screen_effect(match self.session.app().screen_shader() {
             slot_store::Shader::Off => ScreenEffect::None,

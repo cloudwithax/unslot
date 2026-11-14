@@ -146,21 +146,27 @@ fn the_rows_run_in_the_order_the_user_chose() {
             .into_iter()
             .map(QuickRow::label)
             .collect::<Vec<_>>(),
-        ["Shader", "Color Correction", "Bezel"]
+        ["Shader", "Color Correction", "Frame Blending", "Bezel"]
     );
     assert_eq!(
         QuickRow::screen_of(Platform::Gbc)
             .into_iter()
             .map(QuickRow::label)
             .collect::<Vec<_>>(),
-        ["Shader", "Color Correction", "Bezel"]
+        ["Shader", "Color Correction", "Frame Blending", "Bezel"]
     );
     assert_eq!(
         QuickRow::screen_of(Platform::Gb)
             .into_iter()
             .map(QuickRow::label)
             .collect::<Vec<_>>(),
-        ["Shader", "Color Correction", "Palettes", "Bezel"]
+        [
+            "Shader",
+            "Color Correction",
+            "Palettes",
+            "Frame Blending",
+            "Bezel"
+        ]
     );
     assert_eq!(
         QuickRow::GAME.map(QuickRow::label),
@@ -295,6 +301,8 @@ fn the_values_read_as_the_menu_prints_them() {
             "7",
             "8",
             "9",
+            "Mix",
+            "Ghosting",
         ]
     );
     assert_eq!(QuickValue::disc(0), Some(QuickValue::Disc1));
@@ -411,6 +419,7 @@ fn the_in_game_pages_hold_their_rows_in_order() {
             QuickRow::Shader,
             QuickRow::ColourCorrection,
             QuickRow::Palette,
+            QuickRow::Blending,
             QuickRow::Bezel,
             QuickRow::PlaySaturation,
             QuickRow::PlayContrast
@@ -476,14 +485,12 @@ fn a_hidden_palette_and_bezel_are_stepped_over() {
         vec![
             QuickRow::Shader,
             QuickRow::ColourCorrection,
+            QuickRow::Blending,
             QuickRow::PlaySaturation,
             QuickRow::PlayContrast
         ]
     );
-    assert_eq!(
-        QuickRow::ColourCorrection.down(&hidden),
-        QuickRow::PlaySaturation
-    );
+    assert_eq!(QuickRow::ColourCorrection.down(&hidden), QuickRow::Blending);
 }
 
 #[test]

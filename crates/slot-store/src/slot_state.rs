@@ -404,11 +404,49 @@ pub struct SlotState {
     pub shelf_cart: Option<Recent>,
 }
 
+/// How each frame is blended with the ones before it, as the handhelds' slow LCDs did.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum Blending {
+    #[default]
+    Off,
+    /// Each frame averaged with the last, which is what flickering transparency was made for.
+    Mix,
+    /// An LCD's slow response: lit pixels rise fast and dark ones fade slowly.
+    Ghosting,
+}
+
+impl Blending {
+    pub const ALL: [Blending; 3] = [Blending::Off, Blending::Mix, Blending::Ghosting];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Blending::Off => "off",
+            Blending::Mix => "mix",
+            Blending::Ghosting => "ghosting",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Blending> {
+        Blending::ALL.into_iter().find(|b| b.key() == value)
+    }
+
+    pub fn step(self, right: bool) -> Blending {
+        let n = Blending::ALL.len();
+        let at = self as usize;
+        Blending::ALL[if right {
+            (at + 1) % n
+        } else {
+            (at + n - 1) % n
+        }]
+    }
+}
+
 /// How one platform's picture is drawn.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Screen {
     pub shader: Shader,
     pub colour_correction: bool,
+    pub blending: Blending,
     pub bezel: BezelPick,
     /// A RetroArch shader in `Shaders` the picture is drawn with instead of `shader`, by name.
     pub custom_shader: Option<String>,
@@ -419,6 +457,7 @@ impl Screen {
         Screen {
             shader: platform.spec().shader,
             colour_correction: false,
+            blending: Blending::Off,
             bezel: BezelPick::Ags102,
             custom_shader: None,
         }
@@ -643,6 +682,7 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         ));
         text.push_str(&format!("shader_{key}={}\n", screen.shader.name()));
         text.push_str(&format!("bezel_{key}={}\n", screen.bezel.key()));
+        text.push_str(&format!("blending_{key}={}\n", screen.blending.key()));
         if let Some(file) = &screen.custom_shader {
             text.push_str(&format!("shader_file_{key}={file}\n"));
         }
@@ -706,6 +746,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut colour_corrections: [Option<bool>; Platform::COUNT] = [None; Platform::COUNT];
     let mut shaders: [Option<Shader>; Platform::COUNT] = [None; Platform::COUNT];
     let mut bezels: [Option<BezelPick>; Platform::COUNT] = std::array::from_fn(|_| None);
+    let mut blendings: [Option<Blending>; Platform::COUNT] = [None; Platform::COUNT];
     let mut custom_shaders: [Option<String>; Platform::COUNT] = std::array::from_fn(|_| None);
     let mut eject_save = None;
     let mut turbo = None;
@@ -749,6 +790,7 @@ fn parse(text: &str) -> Option<SlotState> {
         if let Some((setting, p)) = per_platform(key) {
             match setting {
                 "colour_correction" => colour_corrections[p.index()] = flag(value),
+                "blending" => blendings[p.index()] = Blending::parse(value),
                 "shader" => {
                     shaders[p.index()] =
                         Shader::parse(value).filter(|s| p.spec().shaders.contains(s))
@@ -827,6 +869,7 @@ fn parse(text: &str) -> Option<SlotState> {
                 .or_else(|| parent.and_then(|q| shaders[q]))
                 .filter(|s| p.spec().shaders.contains(s))
                 .unwrap_or(own.shader),
+            blending: blendings[at].unwrap_or(own.blending),
             bezel: bezels[at].clone().unwrap_or(own.bezel),
             custom_shader: custom_shaders[at].take(),
         }
@@ -887,12 +930,18 @@ fn parse(text: &str) -> Option<SlotState> {
 
 /// Splits a key like `shader_gbc` into the setting and the platform it is for.
 fn per_platform(key: &str) -> Option<(&str, Platform)> {
-    ["colour_correction", "shader_file", "shader", "bezel"]
-        .into_iter()
-        .find_map(|setting| {
-            let rest = key.strip_prefix(setting)?.strip_prefix('_')?;
-            Some((setting, Platform::from_key(rest)?))
-        })
+    [
+        "colour_correction",
+        "shader_file",
+        "shader",
+        "bezel",
+        "blending",
+    ]
+    .into_iter()
+    .find_map(|setting| {
+        let rest = key.strip_prefix(setting)?.strip_prefix('_')?;
+        Some((setting, Platform::from_key(rest)?))
+    })
 }
 
 /// Whose settings a platform starts from when the card has none of its own: a card from before

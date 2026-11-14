@@ -49,6 +49,8 @@ pub enum QuickRow {
     PlaySaturation,
     /// Contrast from the in-game Screen page.
     PlayContrast,
+    /// Frame blending for the game playing, from the in-game Screen page.
+    Blending,
     WallpaperTint,
     Resume,
     States,
@@ -102,10 +104,11 @@ pub enum QuickRow {
     ShaderOf(Platform),
     ColourCorrectionOf(Platform),
     BezelOf(Platform),
+    BlendingOf(Platform),
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 62] = [
+const GENERIC: [QuickRow; 63] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -168,10 +171,12 @@ const GENERIC: [QuickRow; 62] = [
     QuickRow::Contrast,
     QuickRow::PlaySaturation,
     QuickRow::PlayContrast,
+    QuickRow::Blending,
 ];
 
-/// How many rows each platform has of its own: its page, shader, colour correction and bezel.
-const PER_PLATFORM: usize = 4;
+/// How many rows each platform has of its own: its page, shader, colour correction, bezel and
+/// frame blending.
+const PER_PLATFORM: usize = 5;
 
 /// The order the Screen page lists the platforms in, which is not the shelves' order.
 const SCREEN_ORDER: [Platform; Platform::COUNT] = [
@@ -253,6 +258,7 @@ impl QuickRow {
             all[at + Platform::COUNT] = QuickRow::ShaderOf(platform);
             all[at + 2 * Platform::COUNT] = QuickRow::ColourCorrectionOf(platform);
             all[at + 3 * Platform::COUNT] = QuickRow::BezelOf(platform);
+            all[at + 4 * Platform::COUNT] = QuickRow::BlendingOf(platform);
             p += 1;
         }
         all
@@ -330,10 +336,11 @@ impl QuickRow {
 
     pub const SETTINGS: [QuickRow; 2] = [QuickRow::PlayScreen, QuickRow::PlayGameplay];
 
-    pub const PLAY_SCREEN: [QuickRow; 6] = [
+    pub const PLAY_SCREEN: [QuickRow; 7] = [
         QuickRow::Shader,
         QuickRow::ColourCorrection,
         QuickRow::Palette,
+        QuickRow::Blending,
         QuickRow::Bezel,
         QuickRow::PlaySaturation,
         QuickRow::PlayContrast,
@@ -357,6 +364,7 @@ impl QuickRow {
         if platform.spec().palettes {
             rows.push(QuickRow::GbPalettes);
         }
+        rows.push(QuickRow::BlendingOf(platform));
         rows.push(QuickRow::BezelOf(platform));
         rows
     }
@@ -368,6 +376,7 @@ impl QuickRow {
             QuickRow::ShaderOf(p) => own(1, p),
             QuickRow::ColourCorrectionOf(p) => own(2, p),
             QuickRow::BezelOf(p) => own(3, p),
+            QuickRow::BlendingOf(p) => own(4, p),
             row => GENERIC
                 .iter()
                 .position(|r| *r == row)
@@ -381,7 +390,8 @@ impl QuickRow {
             QuickRow::ScreenOf(p)
             | QuickRow::ShaderOf(p)
             | QuickRow::ColourCorrectionOf(p)
-            | QuickRow::BezelOf(p) => Some(p),
+            | QuickRow::BezelOf(p)
+            | QuickRow::BlendingOf(p) => Some(p),
             QuickRow::GbPalettes => Platform::ALL.into_iter().find(|p| p.spec().palettes),
             _ => None,
         }
@@ -393,6 +403,7 @@ impl QuickRow {
             QuickRow::ShaderOf(_)
             | QuickRow::ColourCorrectionOf(_)
             | QuickRow::BezelOf(_)
+            | QuickRow::BlendingOf(_)
             | QuickRow::GbPalettes => match self.platform() {
                 Some(p) => QuickRow::screen_of(p),
                 None => QuickRow::MAIN.to_vec(),
@@ -446,6 +457,7 @@ impl QuickRow {
             | QuickRow::ColourCorrection
             | QuickRow::Palette
             | QuickRow::Bezel
+            | QuickRow::Blending
             | QuickRow::PlaySaturation
             | QuickRow::PlayContrast => QuickRow::PLAY_SCREEN.to_vec(),
             _ => QuickRow::MAIN.to_vec(),
@@ -553,6 +565,7 @@ impl QuickRow {
             QuickRow::ColourCorrection | QuickRow::ColourCorrectionOf(_) => "Color Correction",
             QuickRow::Palette => "Palette",
             QuickRow::Bezel | QuickRow::BezelOf(_) => "Bezel",
+            QuickRow::Blending | QuickRow::BlendingOf(_) => "Frame Blending",
             QuickRow::ScreenOf(p) => p.name(),
             QuickRow::Disc => "Disc",
             QuickRow::Network => "Network",
@@ -664,10 +677,12 @@ pub enum QuickValue {
     Level7,
     Level8,
     Level9,
+    Mix,
+    Ghosting,
 }
 
 impl QuickValue {
-    pub const ALL: [QuickValue; 38] = [
+    pub const ALL: [QuickValue; 40] = [
         QuickValue::Speed1_5,
         QuickValue::Speed2,
         QuickValue::Speed3,
@@ -706,6 +721,8 @@ impl QuickValue {
         QuickValue::Level7,
         QuickValue::Level8,
         QuickValue::Level9,
+        QuickValue::Mix,
+        QuickValue::Ghosting,
     ];
 
     pub fn index(self) -> usize {
@@ -752,6 +769,8 @@ impl QuickValue {
             QuickValue::Level7 => "7",
             QuickValue::Level8 => "8",
             QuickValue::Level9 => "9",
+            QuickValue::Mix => "Mix",
+            QuickValue::Ghosting => "Ghosting",
         }
     }
 

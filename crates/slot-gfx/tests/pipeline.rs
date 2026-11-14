@@ -907,3 +907,45 @@ fn a_shader_that_will_not_build_leaves_the_built_in_effect() {
     c.draw_game();
     assert_eq!(px(&c.read_frame(), 10, 10), [255, 255, 255]);
 }
+
+fn centre_after(c: &mut Compositor, frames: &[u8]) -> u8 {
+    for &v in frames {
+        let shot = vec![v; (SRC_W * SRC_H * 4) as usize];
+        c.begin_frame(slot_gfx::Layout::Framed);
+        c.upload_game(&shot, (SRC_W, SRC_H));
+    }
+    c.draw_game();
+    px(&c.read_frame(), OUT_W as usize / 2, OUT_H as usize / 2)[1]
+}
+
+#[test]
+fn mix_averages_each_frame_with_the_last() {
+    let Some((_g, _s, mut c)) = compositor() else {
+        return;
+    };
+    c.set_screen_effect(ScreenEffect::None);
+    c.set_frame_blend(slot_gfx::FrameBlend::Mix);
+    let got = centre_after(&mut c, &[0, 200]);
+    assert!(got.abs_diff(100) <= 1, "{got}");
+    c.set_frame_blend(slot_gfx::FrameBlend::Off);
+    assert_eq!(centre_after(&mut c, &[]), 200, "off shows the newest frame");
+}
+
+#[test]
+fn ghosting_rises_partway_and_a_cut_starts_clean() {
+    let Some((_g, _s, mut c)) = compositor() else {
+        return;
+    };
+    c.set_screen_effect(ScreenEffect::None);
+    c.set_frame_blend(slot_gfx::FrameBlend::Ghosting);
+    let keep = slot_gfx::Lcd::Gba.response()[0];
+    let got = centre_after(&mut c, &[0, 200]);
+    let want = (200.0 * (1.0 - keep)).round() as u8;
+    assert!(got.abs_diff(want) <= 2, "{got}, want {want}");
+    c.cut_frame_blend();
+    assert_eq!(
+        centre_after(&mut c, &[200]),
+        200,
+        "a cut kept the last picture"
+    );
+}

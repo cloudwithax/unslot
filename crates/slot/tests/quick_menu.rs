@@ -535,6 +535,7 @@ fn screen_opens_a_page_of_its_own_and_b_comes_back_to_it() {
     for want in [
         QuickRow::ColourCorrectionOf(Platform::Gb),
         QuickRow::GbPalettes,
+        QuickRow::BlendingOf(Platform::Gb),
         QuickRow::BezelOf(Platform::Gb),
         QuickRow::ShaderOf(Platform::Gb),
     ] {

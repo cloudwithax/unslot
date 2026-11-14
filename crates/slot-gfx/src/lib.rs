@@ -4,6 +4,7 @@ mod custom;
 mod draw;
 mod fbdev;
 mod fbo;
+mod ghost;
 mod gl;
 mod grade;
 pub mod hdmi;
@@ -30,6 +31,7 @@ pub use bezel::{framed, lifted_rect, screen_rect};
 pub use draw::{Draw, TexId};
 pub use fbdev::{egl_error, panel_mode, panel_size, FbdevSurface};
 pub use fbo::{canvas_size, overlay_rects, Compositor, BACKDROP};
+pub use ghost::{FrameBlend, Lcd};
 pub use grade::{blue_light_gain, dim_gain, BLUE_LIGHT_MAX};
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub use headless::HeadlessSurface;

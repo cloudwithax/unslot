@@ -1,4 +1,5 @@
 use crate::custom::{CustomPass, Placed};
+use crate::ghost::{FrameBlend, Ghost, Lcd};
 use crate::lcd3x::ScreenEffect;
 use crate::power::{screen_brightness, screen_rect_above};
 use crate::quad::Quad;
@@ -13,7 +14,14 @@ pub const WHOLE_TEXTURE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 
 pub struct GamePass {
     prog: gl::types::GLuint,
-    game: gl::types::GLuint,
+    /// The last two frames, `at` the newer, for blending one with the other.
+    game: [gl::types::GLuint; 2],
+    at: usize,
+    /// How many frames since the last cut there are to blend, up to two.
+    held: usize,
+    blend: FrameBlend,
+    lcd: Lcd,
+    ghost: Ghost,
     /// The size the game texture was made at, which follows the frames uploaded into it.
     texels: (u32, u32),
     u_src: gl::types::GLint,
@@ -51,7 +59,9 @@ pub struct GamePass {
 impl GamePass {
     pub fn new() -> Result<Self, GfxError> {
         let prog = crate::shaders::program(RECT_VERT, GAME_FRAG)?;
-        let game = crate::gl::texture(SRC_W, SRC_H, gl::NEAREST, gl::CLAMP_TO_EDGE, gl::BGRA, None);
+        let game = [0, 1].map(|_| {
+            crate::gl::texture(SRC_W, SRC_H, gl::NEAREST, gl::CLAMP_TO_EDGE, gl::BGRA, None)
+        });
         let paper = crate::gl::texture(
             1,
             1,
@@ -84,6 +94,11 @@ impl GamePass {
         Ok(GamePass {
             prog,
             game,
+            at: 0,
+            held: 0,
+            blend: FrameBlend::Off,
+            lcd: Lcd::Gba,
+            ghost: Ghost::new((SRC_W, SRC_H))?,
             texels: (SRC_W, SRC_H),
             u_src,
             aspect: None,
@@ -195,22 +210,67 @@ impl GamePass {
         self.paper_size = size as f32;
     }
 
+    pub fn set_blend(&mut self, blend: FrameBlend, quad: &Quad) {
+        if blend != self.blend {
+            self.blend = blend;
+            self.reblend(quad);
+        }
+    }
+
+    pub fn set_lcd(&mut self, lcd: Lcd, quad: &Quad) {
+        if lcd != self.lcd {
+            self.lcd = lcd;
+            self.reblend(quad);
+        }
+    }
+
+    /// Forgets the frames so far, so the next is not blended with a different picture.
+    pub fn cut(&mut self) {
+        self.held = 0;
+        self.ghost.reset();
+    }
+
+    /// Builds the blend afresh from the frames held, for a change of blend or LCD.
+    fn reblend(&mut self, quad: &Quad) {
+        self.ghost.reset();
+        let (game, last) = (self.game[self.at], self.game[1 - self.at]);
+        match (self.blend, self.held) {
+            (_, 0) | (FrameBlend::Off, _) => {}
+            (_, 1) => self.ghost.respond(game, [0.0; 2], quad),
+            (FrameBlend::Mix, _) => {
+                self.ghost.respond(last, [0.0; 2], quad);
+                self.ghost.mix(game, last, quad);
+            }
+            (FrameBlend::Ghosting, _) => {
+                self.ghost.respond(last, [0.0; 2], quad);
+                self.ghost.respond(game, self.lcd.response(), quad);
+            }
+        }
+    }
+
     pub fn set_source_rect(&mut self, rect: [f32; 4]) {
         self.src = rect;
     }
 
-    pub fn upload(&mut self, xrgb8888: &[u8], (w, h): (u32, u32)) {
+    pub fn upload(&mut self, xrgb8888: &[u8], (w, h): (u32, u32), quad: &Quad) {
         if w == 0 || h == 0 || xrgb8888.len() < (w * h * 4) as usize {
             return;
         }
         if self.texels != (w, h) {
-            let game = crate::gl::texture(w, h, gl::NEAREST, gl::CLAMP_TO_EDGE, gl::BGRA, None);
-            unsafe { gl::DeleteTextures(1, &self.game) };
+            let game = [0, 1]
+                .map(|_| crate::gl::texture(w, h, gl::NEAREST, gl::CLAMP_TO_EDGE, gl::BGRA, None));
+            unsafe { gl::DeleteTextures(2, self.game.as_ptr()) };
             self.game = game;
             self.texels = (w, h);
+            self.ghost.resize((w, h));
+            self.held = 0;
         }
+        let last = self.game[self.at];
+        self.at = 1 - self.at;
+        let game = self.game[self.at];
+        self.held = (self.held + 1).min(2);
         unsafe {
-            gl::BindTexture(gl::TEXTURE_2D, self.game);
+            gl::BindTexture(gl::TEXTURE_2D, game);
             gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
             gl::TexSubImage2D(
                 gl::TEXTURE_2D,
@@ -224,6 +284,12 @@ impl GamePass {
                 xrgb8888.as_ptr() as *const std::ffi::c_void,
             );
         }
+        match self.blend {
+            FrameBlend::Off => {}
+            FrameBlend::Mix if self.held < 2 => self.ghost.respond(game, [0.0; 2], quad),
+            FrameBlend::Mix => self.ghost.mix(game, last, quad),
+            FrameBlend::Ghosting => self.ghost.respond(game, self.lcd.response(), quad),
+        }
     }
 
     pub fn draw(&self, quad: &Quad) {
@@ -235,7 +301,12 @@ impl GamePass {
             }
             _ => self.src,
         };
-        self.draw_source(self.game, quad, src);
+        let game = self.game[self.at];
+        let shown = match self.blend {
+            FrameBlend::Off => game,
+            FrameBlend::Mix | FrameBlend::Ghosting => self.ghost.texture().unwrap_or(game),
+        };
+        self.draw_source(shown, quad, src);
     }
 
     pub fn draw_still(&self, tex: gl::types::GLuint, quad: &Quad) {
@@ -327,7 +398,7 @@ fn whole_scale(at: f32, len: f32, texels: f32, out: f32) -> (f32, f32) {
 impl Drop for GamePass {
     fn drop(&mut self) {
         unsafe {
-            gl::DeleteTextures(1, &self.game);
+            gl::DeleteTextures(2, self.game.as_ptr());
             gl::DeleteTextures(1, &self.paper);
             gl::DeleteProgram(self.prog);
         }

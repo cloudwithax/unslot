@@ -3,7 +3,7 @@ mod common;
 use common::tmp_root;
 use slot_store::{
     atomic_write, read_slot_state, write_slot_state, Appearance, BatteryDisplay, BezelPick,
-    GbPalette, Platform, Recent, Screen, Shader, SlotState, WallpaperPick, WallpaperTint,
+    Blending, GbPalette, Platform, Recent, Screen, Shader, SlotState, WallpaperPick, WallpaperTint,
     FF_SPEEDS, FF_SPEED_DEFAULT,
 };
 use tempfile::tempdir;
@@ -224,18 +224,21 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
                 Screen {
                     shader: Shader::Grid,
                     colour_correction: false,
+                    blending: Blending::Off,
                     bezel: BezelPick::Ags102,
                     custom_shader: None,
                 },
                 Screen {
                     shader: Shader::Simpletex,
                     colour_correction: false,
+                    blending: Blending::Off,
                     bezel: BezelPick::Ags102,
                     custom_shader: None,
                 },
                 Screen {
                     shader: Shader::Simpletex,
                     colour_correction: false,
+                    blending: Blending::Off,
                     bezel: BezelPick::Ags102,
                     custom_shader: None,
                 },
@@ -288,18 +291,21 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
             Screen {
                 shader: Shader::Dot,
                 colour_correction: true,
+                blending: Blending::Ghosting,
                 bezel: BezelPick::None,
                 custom_shader: None,
             },
             Screen {
                 shader: Shader::Off,
                 colour_correction: false,
+                blending: Blending::Mix,
                 bezel: BezelPick::Default,
                 custom_shader: None,
             },
             Screen {
                 shader: Shader::Grid,
                 colour_correction: true,
+                blending: Blending::Off,
                 bezel: BezelPick::File("Pocket.png".into()),
                 custom_shader: Some("crt-easymode.glsl".into()),
             },

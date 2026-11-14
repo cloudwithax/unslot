@@ -166,7 +166,7 @@ impl Compositor {
     }
 
     pub fn upload_game(&mut self, xrgb8888: &[u8], size: (u32, u32)) {
-        self.game.upload(xrgb8888, size);
+        self.game.upload(xrgb8888, size, &self.quad);
     }
 
     pub fn set_game_aspect(&mut self, aspect: Option<f32>) {
@@ -240,6 +240,19 @@ impl Compositor {
 
     pub fn set_screen_effect(&mut self, effect: crate::ScreenEffect) {
         self.game.set_effect(effect);
+    }
+
+    pub fn set_frame_blend(&mut self, blend: crate::FrameBlend) {
+        self.game.set_blend(blend, &self.quad);
+    }
+
+    pub fn set_lcd(&mut self, lcd: crate::Lcd) {
+        self.game.set_lcd(lcd, &self.quad);
+    }
+
+    /// Starts blending over, for a picture that does not follow on from the last.
+    pub fn cut_frame_blend(&mut self) {
+        self.game.cut();
     }
 
     pub fn set_custom_shader(&mut self, src: Option<&str>, linear: bool) -> Result<(), GfxError> {

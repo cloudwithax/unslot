@@ -8,9 +8,9 @@ use slot_power::{Battery, Charge, LedState, LidPolicy, Power};
 use slot_retro::{CoreOption, LinkChannel};
 use slot_store::{
     format_stamp, parse_stamp, read_slot_state, scan, write_slot_state, Appearance, BatteryDisplay,
-    BezelPick, Cart, Core, GbPalette, Platform, Recent, Shader, SlotState, StateEntry, StateRing,
-    WallpaperPick, WallpaperTint, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, CONTRAST_MAX, DIM_MAX, FF_SPEEDS,
-    RING_MAX, RUN_AHEAD_MAX, SATURATION_MAX, VOLUME_MAX,
+    BezelPick, Blending, Cart, Core, GbPalette, Platform, Recent, Shader, SlotState, StateEntry,
+    StateRing, WallpaperPick, WallpaperTint, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, CONTRAST_MAX, DIM_MAX,
+    FF_SPEEDS, RING_MAX, RUN_AHEAD_MAX, SATURATION_MAX, VOLUME_MAX,
 };
 use slot_ui::{
     board_from, board_zoom, centred_hints, draw_empty_slot, draw_footer, draw_ground,
@@ -1391,6 +1391,7 @@ impl App {
             QuickRow::Shader => QuickRow::ShaderOf(platform),
             QuickRow::ColourCorrection => QuickRow::ColourCorrectionOf(platform),
             QuickRow::Bezel => QuickRow::BezelOf(platform),
+            QuickRow::Blending => QuickRow::BlendingOf(platform),
             QuickRow::PlaySaturation => QuickRow::Saturation,
             QuickRow::PlayContrast => QuickRow::Contrast,
             row => row,
@@ -1402,7 +1403,8 @@ impl App {
             QuickRow::Shader
             | QuickRow::ColourCorrection
             | QuickRow::PlaySaturation
-            | QuickRow::PlayContrast => self.quick_value(self.playing_row(row)),
+            | QuickRow::PlayContrast
+            | QuickRow::Blending => self.quick_value(self.playing_row(row)),
             QuickRow::Saturation => QuickValue::level(self.state.saturation),
             QuickRow::Contrast => QuickValue::level(self.state.contrast),
             QuickRow::FastForward => QuickValue::speed(self.state.ff_speed),
@@ -1413,6 +1415,11 @@ impl App {
             QuickRow::GbPalettes => Some(QuickValue::flag(self.state.gb_palettes)),
             QuickRow::Disc => QuickValue::disc(self.disks.1),
             QuickRow::ShaderOf(p) => Some(shader_value(self.state.screen(p).shader)),
+            QuickRow::BlendingOf(p) => Some(match self.state.screen(p).blending {
+                Blending::Off => QuickValue::Off,
+                Blending::Mix => QuickValue::Mix,
+                Blending::Ghosting => QuickValue::Ghosting,
+            }),
             QuickRow::Rumble => Some(QuickValue::flag(self.state.rumble)),
             QuickRow::DpadStick => Some(QuickValue::flag(self.state.dpad_stick)),
             QuickRow::LeftStick => Some(QuickValue::flag(self.state.left_stick_dpad)),
@@ -4796,6 +4803,8 @@ impl App {
             | QuickRow::Contrast
             | QuickRow::PlaySaturation
             | QuickRow::PlayContrast
+            | QuickRow::Blending
+            | QuickRow::BlendingOf(_)
             | QuickRow::Shader
             | QuickRow::ColourCorrection
             | QuickRow::Palette
@@ -4847,6 +4856,12 @@ impl App {
         }
         if let QuickRow::BezelOf(platform) = row {
             self.cycle_bezel(platform, right);
+            self.persist();
+            return;
+        }
+        if let QuickRow::BlendingOf(platform) = row {
+            let screen = self.state.screen_mut(platform);
+            screen.blending = screen.blending.step(right);
             self.persist();
             return;
         }
@@ -4949,6 +4964,8 @@ impl App {
             | QuickRow::Contrast
             | QuickRow::PlaySaturation
             | QuickRow::PlayContrast
+            | QuickRow::Blending
+            | QuickRow::BlendingOf(_)
             | QuickRow::Shader
             | QuickRow::ColourCorrection
             | QuickRow::Palette
@@ -5169,6 +5186,24 @@ impl App {
             power.set_backlight(to);
         }
         self.persist_soon();
+    }
+
+    /// How the playing game's frames blend, for the compositor.
+    pub fn frame_blend(&self) -> slot_gfx::FrameBlend {
+        match self.state.screen(self.playing_platform()).blending {
+            Blending::Off => slot_gfx::FrameBlend::Off,
+            Blending::Mix => slot_gfx::FrameBlend::Mix,
+            Blending::Ghosting => slot_gfx::FrameBlend::Ghosting,
+        }
+    }
+
+    /// Whose LCD the playing game's ghosting follows.
+    pub fn lcd(&self) -> slot_gfx::Lcd {
+        match self.playing_platform() {
+            Platform::Gb => slot_gfx::Lcd::Dmg,
+            Platform::Gbc => slot_gfx::Lcd::Gbc,
+            _ => slot_gfx::Lcd::Gba,
+        }
     }
 
     pub fn saturation(&self) -> u8 {
