@@ -4,7 +4,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use slot::audio::{AudioSink, StubSink};
-use slot::emu::{CoreState, EmuHandle, Speed, FAST_STEPS, FAST_STEPS_MAX};
+use slot::emu::{CoreState, EmuHandle, Speed, FAST_QUARTERS, FAST_QUARTERS_MAX};
 use slot::persist::Snapshot;
 use slot_retro::{
     AvInfo, ButtonMask, CoreError, LinkChannel, MockCore, RetroCore, NETPACKET_RELIABLE,
@@ -156,7 +156,7 @@ fn a_worker_that_stops_while_muted_leaves_the_sink_audible() {
 }
 
 #[test]
-fn fast_forward_runs_fast_steps_core_frames_per_present() {
+fn fast_forward_runs_its_default_speed_in_core_frames_per_present() {
     let emu = spawn();
     let from = frame_count(&emu);
     std::thread::sleep(Duration::from_millis(300));
@@ -167,10 +167,10 @@ fn fast_forward_runs_fast_steps_core_frames_per_present() {
     std::thread::sleep(Duration::from_millis(300));
     let fast = frame_count(&emu) - from;
 
-    let n = normal as u32;
+    let (n, x) = (normal as u32, FAST_QUARTERS / 4);
     assert!(
-        fast as u32 >= n * (FAST_STEPS - 1) && fast as u32 <= n * (FAST_STEPS + 1),
-        "{fast} frames fast against {normal} normal is not {FAST_STEPS}x"
+        fast as u32 >= n * (x - 1) && fast as u32 <= n * (x + 1),
+        "{fast} frames fast against {normal} normal is not {x}x"
     );
 }
 
@@ -187,22 +187,24 @@ fn held_counts(emu: &EmuHandle) -> (u64, u64) {
 fn fast_forward_runs_the_chosen_number_of_core_frames_per_present() {
     let emu = spawn();
     std::thread::sleep(Duration::from_millis(300));
+    // In quarters of a frame a present: 1.5x alternates one frame and two.
     for (asked, runs) in [
-        (2, 2),
-        (3, 3),
-        (4, 4),
         (6, 6),
-        (FAST_STEPS_MAX, FAST_STEPS_MAX),
-        (FAST_STEPS_MAX + 4, FAST_STEPS_MAX),
+        (8, 8),
+        (12, 12),
+        (16, 16),
+        (24, 24),
+        (FAST_QUARTERS_MAX, FAST_QUARTERS_MAX),
+        (FAST_QUARTERS_MAX + 16, FAST_QUARTERS_MAX),
     ] {
-        emu.set_fast_steps(asked);
+        emu.set_fast_quarters(asked);
         let (frames, presents) = held_counts(&emu);
         emu.set_speed(Speed::Fast);
         std::thread::sleep(Duration::from_millis(150));
         let (frames_after, presents_after) = held_counts(&emu);
         let (ran, shown) = (frames_after - frames, presents_after - presents);
         assert!(shown > 0, "nothing was presented asking for {asked}");
-        let want = shown * u64::from(runs);
+        let want = shown * u64::from(runs) / 4 + 1;
         assert!(
             ran <= want,
             "{ran} frames over {shown} presents ran past the ceiling of {runs}, asking for {asked}"
@@ -289,8 +291,8 @@ fn spawn_probe(cost: Duration) -> (EmuHandle, Arc<Mutex<Vec<bool>>>) {
 #[test]
 fn every_speed_publishes_the_frame_the_core_last_ran() {
     let emu = spawn();
-    for ceiling in [2, 3, 4, FAST_STEPS_MAX] {
-        emu.set_fast_steps(ceiling);
+    for ceiling in [8, 12, 16, FAST_QUARTERS_MAX] {
+        emu.set_fast_quarters(ceiling);
         emu.set_speed(Speed::Fast);
         std::thread::sleep(Duration::from_millis(120));
         let (frames, _) = held_counts(&emu);
@@ -312,7 +314,7 @@ fn every_speed_publishes_the_frame_the_core_last_ran() {
 fn a_fast_present_draws_only_its_last_frame() {
     let ceiling = 3;
     let (emu, log) = spawn_probe(Duration::ZERO);
-    emu.set_fast_steps(ceiling);
+    emu.set_fast_quarters(ceiling * 4);
     emu.set_speed(Speed::Fast);
     std::thread::sleep(Duration::from_millis(60));
     log.lock().expect("the skip log").clear();
@@ -347,7 +349,7 @@ fn a_fast_present_draws_only_its_last_frame() {
 fn a_present_runs_what_it_can_afford_rather_than_the_whole_ceiling() {
     let cost = Duration::from_millis(8);
     let (emu, log) = spawn_probe(cost);
-    emu.set_fast_steps(FAST_STEPS_MAX);
+    emu.set_fast_quarters(FAST_QUARTERS_MAX);
     held_counts(&emu);
     log.lock().expect("the skip log").clear();
     emu.set_speed(Speed::Fast);
@@ -438,7 +440,7 @@ fn fast_forward_sound_plays_sped_up_in_real_time() {
     emu.set_ff_sound(true);
     let real_time = 32_768.0 / 60.0;
     for steps in [2, 4] {
-        emu.set_fast_steps(steps);
+        emu.set_fast_quarters(steps * 4);
         emu.set_speed(Speed::Fast);
         std::thread::sleep(Duration::from_millis(50));
         assert!(!sink.muted(), "fast forward muted with its sound on");

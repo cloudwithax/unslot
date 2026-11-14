@@ -276,7 +276,7 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
         auto_cores: true,
         art_asleep: true,
         hardcore: true,
-        ff_speed: 2,
+        ff_speed: 8,
         ff_sound: true,
         screens: game_boy_first([
             Screen {
@@ -384,8 +384,8 @@ fn a_run_ahead_the_row_does_not_offer_reads_as_off() {
 }
 
 #[test]
-fn every_speed_the_row_offers_round_trips_as_its_own_number() {
-    for speed in FF_SPEEDS {
+fn every_speed_the_row_offers_round_trips_as_its_multiple() {
+    for (speed, text) in FF_SPEEDS.into_iter().zip(["0", "1.5", "2", "3", "4", "6"]) {
         let d = tmp_root();
         let s = SlotState {
             clock_set: true,
@@ -393,26 +393,29 @@ fn every_speed_the_row_offers_round_trips_as_its_own_number() {
             ..SlotState::default()
         };
         write_slot_state(d.path(), &s).unwrap();
-        assert_eq!(read_slot_state(d.path()), s, "{speed}x did not come back");
-        let text = std::fs::read_to_string(d.path().join("Config/slot.state")).unwrap();
-        let want = format!("ff_speed={speed}");
-        assert!(text.lines().any(|l| l == want), "no {want} in {text:?}");
+        assert_eq!(read_slot_state(d.path()), s, "{text}x did not come back");
+        let written = std::fs::read_to_string(d.path().join("Config/slot.state")).unwrap();
+        let want = format!("ff_speed={text}");
+        assert!(
+            written.lines().any(|l| l == want),
+            "no {want} in {written:?}"
+        );
     }
 }
 
 #[test]
-fn an_older_build_reads_the_new_speed_as_its_own_default() {
-    for speed in FF_SPEEDS.iter().filter(|&&n| n > 4) {
-        assert!(
-            !(2..=4).contains(speed),
-            "{speed}x is inside the range an older build accepts, so it would read as a speed"
-        );
+fn a_card_from_before_quarter_speeds_keeps_its_speed() {
+    let d = tmp_root();
+    let known = "cart=Emerald\nbrightness=3\nblue_light=1\nvolume=40\nmuted=0\nclock_set=1\nutc_offset_min=0\n";
+    for (old, quarters) in [("2", 8), ("3", 12), ("4", 16), ("6", 24)] {
+        std::fs::write(
+            d.path().join("Config/slot.state"),
+            format!("{known}ff_speed={old}\n"),
+        )
+        .unwrap();
+        assert_eq!(read_slot_state(d.path()).ff_speed, quarters, "{old}x");
     }
-    assert_eq!(SlotState::default().ff_speed, FF_SPEED_DEFAULT);
-    assert!(
-        FF_SPEEDS.contains(&FF_SPEED_DEFAULT),
-        "the default is not one of the speeds the row offers"
-    );
+    assert!(FF_SPEEDS.contains(&FF_SPEED_DEFAULT));
 }
 
 #[test]
@@ -422,7 +425,7 @@ fn an_out_of_range_setting_falls_back_to_its_default() {
     for bad in [
         "rumble=2\nff_speed=5\nff_sound=9\n",
         "rumble=\nff_speed=1\nff_sound=on\n",
-        "rumble=-1\nff_speed=0\nff_sound=-1\n",
+        "rumble=-1\nff_speed=-1\nff_sound=-1\n",
         "ff_speed=x\n",
         "colour_correction=2\n",
         "colour_correction=\n",

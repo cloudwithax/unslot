@@ -29,9 +29,10 @@ const PRESENT: Duration = Duration::from_nanos(16_666_667);
 /// leaving the audio resampler to soak up the difference.
 const NEAR_PANEL_HZ: f64 = 2.0;
 
-pub const FAST_STEPS: u32 = 6;
+/// Fast-forward speeds are in quarters of a frame a present, so 6 runs at 1.5x.
+pub const FAST_QUARTERS: u32 = 24;
 
-pub const FAST_STEPS_MAX: u32 = 6;
+pub const FAST_QUARTERS_MAX: u32 = 24;
 
 const FAST_TARGET: Duration = Duration::from_micros(14_000);
 
@@ -133,7 +134,7 @@ struct Shared {
     recording: AtomicBool,
     stop: AtomicBool,
     volume: AtomicU8,
-    fast_steps: AtomicU32,
+    fast_quarters: AtomicU32,
     ff_sound: AtomicBool,
     runahead: AtomicU8,
     published: AtomicU64,
@@ -205,7 +206,7 @@ impl EmuHandle {
             recording: AtomicBool::new(true),
             stop: AtomicBool::new(false),
             volume: AtomicU8::new(100),
-            fast_steps: AtomicU32::new(FAST_STEPS),
+            fast_quarters: AtomicU32::new(FAST_QUARTERS),
             ff_sound: AtomicBool::new(false),
             runahead: AtomicU8::new(0),
             published: AtomicU64::new(0),
@@ -425,14 +426,14 @@ impl EmuHandle {
         self.shared.volume.store(level.min(100), Ordering::Relaxed);
     }
 
-    pub fn set_fast_steps(&self, steps: u32) {
+    pub fn set_fast_quarters(&self, quarters: u32) {
         self.shared
-            .fast_steps
-            .store(steps.clamp(1, FAST_STEPS_MAX), Ordering::Relaxed);
+            .fast_quarters
+            .store(quarters.clamp(4, FAST_QUARTERS_MAX), Ordering::Relaxed);
     }
 
-    pub fn fast_steps(&self) -> u32 {
-        self.shared.fast_steps.load(Ordering::Relaxed)
+    pub fn fast_quarters(&self) -> u32 {
+        self.shared.fast_quarters.load(Ordering::Relaxed)
     }
 
     pub fn set_ff_sound(&self, on: bool) {
@@ -681,6 +682,8 @@ impl Worker {
         let mut cable_core = Duration::ZERO;
         let mut cable_wait = Duration::ZERO;
         let mut ff = (0u32, 0u32, Duration::ZERO, Instant::now());
+        // Quarter frames owed at fast forward, carried over to the next present.
+        let mut owed = 0u32;
         let mut runahead = RunAhead::default();
         let mut tracker: Option<Tracker> = None;
         let mut iteration = 0i64;
@@ -803,8 +806,16 @@ impl Worker {
                 Speed::Paused => 0,
                 Speed::Normal if lock && !ticked => 0,
                 Speed::Normal => 1,
-                Speed::Fast => self.shared.fast_steps.load(Ordering::Relaxed),
+                Speed::Fast => {
+                    owed += self.shared.fast_quarters.load(Ordering::Relaxed);
+                    let whole = owed / 4;
+                    owed %= 4;
+                    whole
+                }
             };
+            if speed != Speed::Fast {
+                owed = 0;
+            }
             if rewinding {
                 let _s = ft::span(ev::EMU_REWIND, 0);
                 if let Some(state) = rewind.pop() {

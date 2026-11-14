@@ -11,9 +11,13 @@ pub const VOLUME_MAX: u8 = 100;
 pub const UTC_OFFSET_MIN: i16 = -720;
 pub const UTC_OFFSET_MAX: i16 = 840;
 
-pub const FF_SPEEDS: [u8; 4] = [2, 3, 4, 6];
+/// Fast-forward speeds in quarters of a frame a present: off, 1.5x, 2x, 3x, 4x and 6x.
+pub const FF_SPEEDS: [u8; 6] = [0, 6, 8, 12, 16, 24];
 
-pub const FF_SPEED_DEFAULT: u8 = 6;
+/// How each speed is written, as the multiple, so a card from before 1.5x still reads.
+const FF_SPEED_TEXT: [&str; 6] = ["0", "1.5", "2", "3", "4", "6"];
+
+pub const FF_SPEED_DEFAULT: u8 = 24;
 
 pub const RUN_AHEAD_MAX: u8 = 1;
 
@@ -557,7 +561,7 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         s.clock_set as u8,
         s.utc_offset_min,
         s.rumble as u8,
-        s.ff_speed,
+        ff_speed_text(s.ff_speed),
         s.ff_sound as u8,
         s.eject_save as u8,
         s.turbo as u8,
@@ -837,7 +841,15 @@ fn offset(value: &str) -> Option<i16> {
 }
 
 fn ff_speed_value(value: &str) -> Option<u8> {
-    value.parse().ok().filter(|n| FF_SPEEDS.contains(n))
+    FF_SPEED_TEXT
+        .iter()
+        .position(|t| *t == value)
+        .map(|i| FF_SPEEDS[i])
+}
+
+fn ff_speed_text(speed: u8) -> &'static str {
+    let at = |speed| FF_SPEEDS.iter().position(|s| *s == speed);
+    FF_SPEED_TEXT[at(speed).or(at(FF_SPEED_DEFAULT)).unwrap_or(0)]
 }
 
 fn level(value: &str, max: u8) -> Option<u8> {
