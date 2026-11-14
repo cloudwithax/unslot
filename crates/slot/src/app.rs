@@ -9,8 +9,8 @@ use slot_retro::{CoreOption, LinkChannel};
 use slot_store::{
     format_stamp, parse_stamp, read_slot_state, scan, write_slot_state, Appearance, BatteryDisplay,
     BezelPick, Cart, Core, GbPalette, Platform, Recent, Shader, SlotState, StateEntry, StateRing,
-    WallpaperPick, WallpaperTint, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, DIM_MAX, FF_SPEEDS, RING_MAX,
-    RUN_AHEAD_MAX, VOLUME_MAX,
+    WallpaperPick, WallpaperTint, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, CONTRAST_MAX, DIM_MAX, FF_SPEEDS,
+    RING_MAX, RUN_AHEAD_MAX, SATURATION_MAX, VOLUME_MAX,
 };
 use slot_ui::{
     board_from, board_zoom, centred_hints, draw_empty_slot, draw_footer, draw_ground,
@@ -1391,15 +1391,20 @@ impl App {
             QuickRow::Shader => QuickRow::ShaderOf(platform),
             QuickRow::ColourCorrection => QuickRow::ColourCorrectionOf(platform),
             QuickRow::Bezel => QuickRow::BezelOf(platform),
+            QuickRow::PlaySaturation => QuickRow::Saturation,
+            QuickRow::PlayContrast => QuickRow::Contrast,
             row => row,
         }
     }
 
     pub fn quick_value(&self, row: QuickRow) -> Option<QuickValue> {
         match row {
-            QuickRow::Shader | QuickRow::ColourCorrection => {
-                self.quick_value(self.playing_row(row))
-            }
+            QuickRow::Shader
+            | QuickRow::ColourCorrection
+            | QuickRow::PlaySaturation
+            | QuickRow::PlayContrast => self.quick_value(self.playing_row(row)),
+            QuickRow::Saturation => QuickValue::level(self.state.saturation),
+            QuickRow::Contrast => QuickValue::level(self.state.contrast),
             QuickRow::FastForward => QuickValue::speed(self.state.ff_speed),
             QuickRow::FastForwardSound => Some(QuickValue::flag(self.state.ff_sound)),
             QuickRow::ColourCorrectionOf(p) => {
@@ -4787,6 +4792,10 @@ impl App {
             | QuickRow::ExitGame
             | QuickRow::PlayScreen
             | QuickRow::PlayGameplay
+            | QuickRow::Saturation
+            | QuickRow::Contrast
+            | QuickRow::PlaySaturation
+            | QuickRow::PlayContrast
             | QuickRow::Shader
             | QuickRow::ColourCorrection
             | QuickRow::Palette
@@ -4864,6 +4873,18 @@ impl App {
             self.persist();
             return;
         }
+        if let QuickRow::Saturation | QuickRow::Contrast = row {
+            let (level, max) = match row {
+                QuickRow::Saturation => (&mut self.state.saturation, SATURATION_MAX),
+                _ => (&mut self.state.contrast, CONTRAST_MAX),
+            };
+            *level = match right {
+                true => up(*level, 1, max),
+                false => level.saturating_sub(1),
+            };
+            self.persist_soon();
+            return;
+        }
         if row == QuickRow::ShowTitles {
             self.state.show_titles = !self.state.show_titles;
             self.persist();
@@ -4924,6 +4945,10 @@ impl App {
             | QuickRow::ExitGame
             | QuickRow::PlayScreen
             | QuickRow::PlayGameplay
+            | QuickRow::Saturation
+            | QuickRow::Contrast
+            | QuickRow::PlaySaturation
+            | QuickRow::PlayContrast
             | QuickRow::Shader
             | QuickRow::ColourCorrection
             | QuickRow::Palette
@@ -5144,6 +5169,14 @@ impl App {
             power.set_backlight(to);
         }
         self.persist_soon();
+    }
+
+    pub fn saturation(&self) -> u8 {
+        self.state.saturation
+    }
+
+    pub fn contrast(&self) -> u8 {
+        self.state.contrast
     }
 
     pub fn dim(&self) -> u8 {

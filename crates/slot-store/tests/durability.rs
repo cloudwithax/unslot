@@ -212,6 +212,8 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             rumble: true,
             dpad_stick: false,
             dim: 0,
+            saturation: 0,
+            contrast: 0,
             left_stick_dpad: true,
             auto_cores: false,
             art_asleep: false,

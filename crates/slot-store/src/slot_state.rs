@@ -8,6 +8,8 @@ pub const BRIGHTNESS_MAX: u8 = 9;
 pub const BLUE_LIGHT_MAX: u8 = 9;
 /// Software dim steps below the backlight's lowest level.
 pub const DIM_MAX: u8 = 6;
+pub const SATURATION_MAX: u8 = 9;
+pub const CONTRAST_MAX: u8 = 9;
 pub const VOLUME_MAX: u8 = 100;
 
 pub const UTC_OFFSET_MIN: i16 = -720;
@@ -336,6 +338,8 @@ pub struct SlotState {
     pub blue_light: u8,
     /// How many software steps the picture is dimmed past the lowest backlight.
     pub dim: u8,
+    pub saturation: u8,
+    pub contrast: u8,
     pub volume: u8,
     pub volume_hp: u8,
     pub muted: bool,
@@ -511,6 +515,8 @@ impl Default for SlotState {
             brightness: 5,
             blue_light: 0,
             dim: 0,
+            saturation: 0,
+            contrast: 0,
             volume: 60,
             volume_hp: 60,
             muted: false,
@@ -655,6 +661,8 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     text.push_str(&format!("tv_sound={}\n", s.tv_sound as u8));
     text.push_str(&format!("left_stick_dpad={}\n", s.left_stick_dpad as u8));
     text.push_str(&format!("dim={}\n", s.dim));
+    text.push_str(&format!("saturation={}\n", s.saturation));
+    text.push_str(&format!("contrast={}\n", s.contrast));
     text.push_str(&format!("wifi={}\n", s.wifi as u8));
     text.push_str(&format!("bluetooth={}\n", s.bluetooth as u8));
     text.push_str(&format!("ssh={}\n", s.ssh as u8));
@@ -719,6 +727,8 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut tv_sound = None;
     let mut left_stick_dpad = None;
     let mut dim = None;
+    let mut saturation = None;
+    let mut contrast = None;
     let mut show_titles = None;
     let mut battery_display = None;
     let mut wifi = None;
@@ -785,6 +795,8 @@ fn parse(text: &str) -> Option<SlotState> {
             "tv_sound" => tv_sound = flag(value),
             "left_stick_dpad" => left_stick_dpad = flag(value),
             "dim" => dim = level(value, DIM_MAX),
+            "saturation" => saturation = level(value, SATURATION_MAX),
+            "contrast" => contrast = level(value, CONTRAST_MAX),
             "show_titles" => show_titles = flag(value),
             "battery_display" => battery_display = BatteryDisplay::parse(value),
             "wifi" => wifi = flag(value),
@@ -854,6 +866,8 @@ fn parse(text: &str) -> Option<SlotState> {
         tv_sound: tv_sound.unwrap_or(fallback.tv_sound),
         left_stick_dpad: left_stick_dpad.unwrap_or(fallback.left_stick_dpad),
         dim: dim.unwrap_or(fallback.dim),
+        saturation: saturation.unwrap_or(fallback.saturation),
+        contrast: contrast.unwrap_or(fallback.contrast),
         show_titles: show_titles.unwrap_or(fallback.show_titles),
         battery_display: battery_display.unwrap_or(fallback.battery_display),
         wifi: wifi.unwrap_or(fallback.wifi),

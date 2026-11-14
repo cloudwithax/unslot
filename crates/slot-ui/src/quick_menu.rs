@@ -41,6 +41,14 @@ pub enum QuickRow {
     BatteryDisplay,
     /// Whether the left stick presses the d-pad.
     LeftStick,
+    /// How much the colours are boosted, menus and game alike.
+    Saturation,
+    /// How much the picture's contrast is boosted.
+    Contrast,
+    /// Saturation from the in-game Screen page.
+    PlaySaturation,
+    /// Contrast from the in-game Screen page.
+    PlayContrast,
     WallpaperTint,
     Resume,
     States,
@@ -97,7 +105,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 58] = [
+const GENERIC: [QuickRow; 62] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -156,6 +164,10 @@ const GENERIC: [QuickRow; 58] = [
     QuickRow::Hardcore,
     QuickRow::BatteryDisplay,
     QuickRow::LeftStick,
+    QuickRow::Saturation,
+    QuickRow::Contrast,
+    QuickRow::PlaySaturation,
+    QuickRow::PlayContrast,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -277,7 +289,7 @@ impl QuickRow {
         QuickRow::AutoCores,
     ];
 
-    pub const GENERAL: [QuickRow; 11] = [
+    pub const GENERAL: [QuickRow; 13] = [
         QuickRow::Wallpaper,
         QuickRow::WallpaperTint,
         QuickRow::Theme,
@@ -289,6 +301,8 @@ impl QuickRow {
         QuickRow::MenuSounds,
         QuickRow::Haptics,
         QuickRow::TvSound,
+        QuickRow::Saturation,
+        QuickRow::Contrast,
     ];
 
     pub const GAME: [QuickRow; 12] = [
@@ -316,11 +330,13 @@ impl QuickRow {
 
     pub const SETTINGS: [QuickRow; 2] = [QuickRow::PlayScreen, QuickRow::PlayGameplay];
 
-    pub const PLAY_SCREEN: [QuickRow; 4] = [
+    pub const PLAY_SCREEN: [QuickRow; 6] = [
         QuickRow::Shader,
         QuickRow::ColourCorrection,
         QuickRow::Palette,
         QuickRow::Bezel,
+        QuickRow::PlaySaturation,
+        QuickRow::PlayContrast,
     ];
 
     /// The Screen page: one row for each platform a core runs, which leaves out Apps and the DS.
@@ -403,7 +419,9 @@ impl QuickRow {
             | QuickRow::Theme
             | QuickRow::Recents
             | QuickRow::ShowTitles
-            | QuickRow::BatteryDisplay => QuickRow::GENERAL.to_vec(),
+            | QuickRow::BatteryDisplay
+            | QuickRow::Saturation
+            | QuickRow::Contrast => QuickRow::GENERAL.to_vec(),
             QuickRow::Resume
             | QuickRow::States
             | QuickRow::Settings
@@ -424,9 +442,12 @@ impl QuickRow {
             | QuickRow::Cores
             | QuickRow::AutoCores => QuickRow::ONLINE.to_vec(),
             QuickRow::Restart | QuickRow::ShutDown | QuickRow::Reload => QuickRow::POWER.to_vec(),
-            QuickRow::Shader | QuickRow::ColourCorrection | QuickRow::Palette | QuickRow::Bezel => {
-                QuickRow::PLAY_SCREEN.to_vec()
-            }
+            QuickRow::Shader
+            | QuickRow::ColourCorrection
+            | QuickRow::Palette
+            | QuickRow::Bezel
+            | QuickRow::PlaySaturation
+            | QuickRow::PlayContrast => QuickRow::PLAY_SCREEN.to_vec(),
             _ => QuickRow::MAIN.to_vec(),
         }
     }
@@ -519,6 +540,8 @@ impl QuickRow {
             QuickRow::ShowTitles => "Game Titles",
             QuickRow::BatteryDisplay => "Battery Display",
             QuickRow::LeftStick => "Left Stick as D-Pad",
+            QuickRow::Saturation | QuickRow::PlaySaturation => "Saturation",
+            QuickRow::Contrast | QuickRow::PlayContrast => "Contrast",
             QuickRow::WallpaperTint => "Wallpaper Tint",
             QuickRow::Resume => "Resume",
             QuickRow::States => "States",
@@ -632,10 +655,19 @@ pub enum QuickValue {
     Both,
     Icon,
     Percentage,
+    Level1,
+    Level2,
+    Level3,
+    Level4,
+    Level5,
+    Level6,
+    Level7,
+    Level8,
+    Level9,
 }
 
 impl QuickValue {
-    pub const ALL: [QuickValue; 29] = [
+    pub const ALL: [QuickValue; 38] = [
         QuickValue::Speed1_5,
         QuickValue::Speed2,
         QuickValue::Speed3,
@@ -665,6 +697,15 @@ impl QuickValue {
         QuickValue::Both,
         QuickValue::Icon,
         QuickValue::Percentage,
+        QuickValue::Level1,
+        QuickValue::Level2,
+        QuickValue::Level3,
+        QuickValue::Level4,
+        QuickValue::Level5,
+        QuickValue::Level6,
+        QuickValue::Level7,
+        QuickValue::Level8,
+        QuickValue::Level9,
     ];
 
     pub fn index(self) -> usize {
@@ -702,6 +743,15 @@ impl QuickValue {
             QuickValue::Both => "Both",
             QuickValue::Icon => "Icon",
             QuickValue::Percentage => "Percentage",
+            QuickValue::Level1 => "1",
+            QuickValue::Level2 => "2",
+            QuickValue::Level3 => "3",
+            QuickValue::Level4 => "4",
+            QuickValue::Level5 => "5",
+            QuickValue::Level6 => "6",
+            QuickValue::Level7 => "7",
+            QuickValue::Level8 => "8",
+            QuickValue::Level9 => "9",
         }
     }
 
@@ -737,6 +787,24 @@ impl QuickValue {
             1 => Some(QuickValue::Frames1),
             _ => None,
         }
+    }
+
+    /// A step from 0 to 9, 0 showing as Off.
+    pub fn level(step: u8) -> Option<QuickValue> {
+        [
+            QuickValue::Off,
+            QuickValue::Level1,
+            QuickValue::Level2,
+            QuickValue::Level3,
+            QuickValue::Level4,
+            QuickValue::Level5,
+            QuickValue::Level6,
+            QuickValue::Level7,
+            QuickValue::Level8,
+            QuickValue::Level9,
+        ]
+        .get(usize::from(step))
+        .copied()
     }
 
     pub fn flag(on: bool) -> QuickValue {

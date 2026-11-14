@@ -111,7 +111,9 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Clock",
             "Menu Sounds",
             "Haptics",
-            "Sound on TV"
+            "Sound on TV",
+            "Saturation",
+            "Contrast"
         ]
     );
     let screens: Vec<&str> = QuickRow::screen_page()
@@ -239,7 +241,7 @@ fn a_hidden_row_is_stepped_over_and_takes_no_place() {
     let hidden = [QuickRow::WallpaperTint];
     assert_eq!(QuickRow::Wallpaper.down(&hidden), QuickRow::Theme);
     assert_eq!(QuickRow::Theme.up(&hidden), QuickRow::Wallpaper);
-    assert_eq!(QuickRow::Wallpaper.up(&hidden), QuickRow::TvSound);
+    assert_eq!(QuickRow::Wallpaper.up(&hidden), QuickRow::Contrast);
     assert_eq!(QuickRow::Theme.position(&hidden), 1);
     assert_eq!(QuickRow::Wallpaper.down(&[]), QuickRow::WallpaperTint);
     assert_eq!(QuickRow::Theme.position(&[]), 2);
@@ -284,6 +286,15 @@ fn the_values_read_as_the_menu_prints_them() {
             "Both",
             "Icon",
             "Percentage",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
         ]
     );
     assert_eq!(QuickValue::disc(0), Some(QuickValue::Disc1));
@@ -400,7 +411,9 @@ fn the_in_game_pages_hold_their_rows_in_order() {
             QuickRow::Shader,
             QuickRow::ColourCorrection,
             QuickRow::Palette,
-            QuickRow::Bezel
+            QuickRow::Bezel,
+            QuickRow::PlaySaturation,
+            QuickRow::PlayContrast
         ]
     );
     for row in QuickRow::PLAY {
@@ -456,13 +469,21 @@ fn in_game_rows_read_as_the_menu_shows_them() {
 }
 
 #[test]
-fn a_hidden_palette_and_bezel_leave_two_screen_rows() {
+fn a_hidden_palette_and_bezel_are_stepped_over() {
     let hidden = [QuickRow::Palette, QuickRow::Bezel];
     assert_eq!(
         QuickRow::Shader.shown(&hidden),
-        vec![QuickRow::Shader, QuickRow::ColourCorrection]
+        vec![
+            QuickRow::Shader,
+            QuickRow::ColourCorrection,
+            QuickRow::PlaySaturation,
+            QuickRow::PlayContrast
+        ]
     );
-    assert_eq!(QuickRow::ColourCorrection.down(&hidden), QuickRow::Shader);
+    assert_eq!(
+        QuickRow::ColourCorrection.down(&hidden),
+        QuickRow::PlaySaturation
+    );
 }
 
 #[test]
@@ -501,9 +522,13 @@ fn screen_rows_in_game_sit_in_a_panel_at_the_bottom() {
     let shader = slot_ui::quick_row_top(QuickRow::Shader, &hidden);
     let colour = slot_ui::quick_row_top(QuickRow::ColourCorrection, &hidden);
     assert_eq!(colour - shader, slot_ui::QUICK_PITCH);
-    assert!(
-        shader > slot_ui::OUT_H as f32 / 2.0,
-        "the panel starts at {shader}"
+    // Anchored at the bottom: fewer rows leave the last one where it was.
+    assert_eq!(
+        slot_ui::quick_row_top(QuickRow::PlayContrast, &hidden),
+        slot_ui::quick_row_top(
+            QuickRow::PlayContrast,
+            &[QuickRow::Palette, QuickRow::Bezel]
+        )
     );
     assert!(slot_ui::quick_row_top(QuickRow::FastForward, &[]) < shader);
 }

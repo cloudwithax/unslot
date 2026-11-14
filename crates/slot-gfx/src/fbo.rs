@@ -1,5 +1,5 @@
 use crate::draw::{Draw, Sprites, TexId};
-use crate::grade::{blue_light_gain, dim_gain};
+use crate::grade::{blue_light_gain, contrast_boost, dim_gain, saturation_boost};
 use crate::pipeline::GamePass;
 use crate::quad::Quad;
 use crate::shaders::{BEZEL_FRAG, BLIT_FRAG, BLIT_VERT, TURN_VERT};
@@ -29,6 +29,10 @@ pub struct Compositor {
     size: (u32, u32),
     blit: gl::types::GLuint,
     u_gain: gl::types::GLint,
+    u_saturation: gl::types::GLint,
+    u_contrast: gl::types::GLint,
+    saturation: f32,
+    contrast: f32,
     u_blit_uv: gl::types::GLint,
     gain: [f32; 3],
     dim: f32,
@@ -86,6 +90,8 @@ impl Compositor {
             gl::UseProgram(blit);
             gl::Uniform1i(crate::gl::uniform_location(blit, "u_tex"), 0);
             let u_gain = crate::gl::uniform_location(blit, "u_gain");
+            let u_saturation = crate::gl::uniform_location(blit, "u_saturation");
+            let u_contrast = crate::gl::uniform_location(blit, "u_contrast");
             let u_blit_uv = crate::gl::uniform_location(blit, "u_uv");
             gl::Uniform4f(u_blit_uv, 0.0, 0.0, 1.0, 1.0);
             gl::UseProgram(bezel_prog);
@@ -106,6 +112,10 @@ impl Compositor {
                 size: (OUT_W, OUT_H),
                 blit,
                 u_gain,
+                u_saturation,
+                u_contrast,
+                saturation: saturation_boost(0),
+                contrast: contrast_boost(0),
                 u_blit_uv,
                 gain: blue_light_gain(0),
                 dim: dim_gain(0),
@@ -218,6 +228,14 @@ impl Compositor {
 
     fn dimmed_gain(&self) -> [f32; 3] {
         self.gain.map(|g| g * self.dim)
+    }
+
+    pub fn set_saturation(&mut self, step: u8) {
+        self.saturation = saturation_boost(step);
+    }
+
+    pub fn set_contrast(&mut self, step: u8) {
+        self.contrast = contrast_boost(step);
     }
 
     pub fn set_screen_effect(&mut self, effect: crate::ScreenEffect) {
@@ -516,6 +534,8 @@ impl Compositor {
             gl::ActiveTexture(gl::TEXTURE0);
             let [r, g, b] = self.dimmed_gain();
             gl::Uniform3f(self.u_gain, r, g, b);
+            gl::Uniform1f(self.u_saturation, self.saturation);
+            gl::Uniform1f(self.u_contrast, self.contrast);
             gl::BindTexture(gl::TEXTURE_2D, self.tex);
         }
         if self.native() {
