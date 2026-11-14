@@ -17,6 +17,8 @@ signed updates over the air.
 
 </div>
 
+Join the [unslot Discord](https://discord.gg/uBZPeKrmyQ) for questions, sharing setups, and talking about the project.
+
 <p align="center">
 <img src=".github/resources/screenshots/unslot/shelf-pc-engine.png" width="49%" alt="PC Engine HuCards on the shelf over a pixel-art city">
 <img src=".github/resources/screenshots/unslot/shelf-playstation.png" width="49%" alt="A PlayStation disc on the shelf, its system named above the slot">
