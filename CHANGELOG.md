@@ -13,6 +13,7 @@
 - A133P Nodosumi builds patch a desktop-GL loader and framebuffer call that crash under the requested GLES 3.0 minimum. Host Mesa renderer and context-lifecycle checks pass; PowerVR rendering and gameplay remain unverified.
 - GPU-core and DraStic menu children self-launch correctly through a versioned glibc loader such as `ld-2.33.so`. The old `ld-linux`-only check omitted slot's ELF operand and sent `--core-host` directly to the loader, so Nodosumi failed before it initialised on the Brick Pro.
 - `task drastic:a133p` host-stages the proprietary runner with a source-built, Zlib-licensed PowerVR SDL2 instead of H700 Mali pixmaps. The runner requires glibc 2.27; rebuilt libraries target the SDK's 2.23 baseline. No on-device verification was performed.
+- An empty `System/trace-ftrace.on` makes each slot start record slot's and Nodosumi's frame traces in `Logs/ftrace`, with pacing and latency lines in `slot.log`, keeping the previous traced run in `Logs/ftrace.1`. `System/trace-ftrace-fine.on` adds Nodosumi's fine zones. `A133P_PROFILE=1 tools/a133p/gpu-cores.sh nodosumi` builds a profiling core into `target-a133p/cores-profile`; its code matches the release build.
 
 ## v2.13.1
 

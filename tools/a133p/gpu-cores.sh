@@ -1,5 +1,8 @@
 #!/bin/sh
 # Host-only A133P GPU builds. Usage: sh tools/a133p/gpu-cores.sh [CORE...]
+# A133P_PROFILE=1 builds nodosumi or flycast for profiling on the device: the release recipe and
+# optimisation plus debug info and frame pointers, into target-a133p/cores-profile. zig's clang
+# already gives AArch64 both, so Nodosumi's profiling code matches its release build's.
 set -eu
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 work="$root/target-a133p"
@@ -8,7 +11,12 @@ cxx="$root/tools/a133p/zcxx"
 gpu="${A133P_GPU_LIBS:-$work/gpu}"
 export JOBS="${JOBS:-2}"
 export CFLAGS="-Wno-error=date-time -I$work/khronos"
+profile="${A133P_PROFILE:-}"
+[ -z "$profile" ] || CFLAGS="$CFLAGS -g -fno-omit-frame-pointer"
 export CXXFLAGS="$CFLAGS"
+cores="$work/cores"
+builddir=build
+[ -z "$profile" ] || { cores="$work/cores-profile"; builddir=build-profile; }
 [ "$#" -gt 0 ] || set -- nodosumi parallel_n64 flycast vecx
 build() (
  name="$1"
@@ -26,7 +34,7 @@ build() (
   done
  fi
  src="$work/src/$name"
- mkdir -p "$src" "$work/cores" "$work/tmp"
+ mkdir -p "$src" "$cores" "$work/tmp"
  export TMPDIR="$work/tmp"
  [ -d "$src/.git" ] || git init -q "$src"
  git -C "$src" cat-file -e "$commit^{commit}" 2>/dev/null ||
@@ -45,21 +53,23 @@ build() (
   if [ "$name" = flycast ]; then
    git submodule update --init --recursive --depth 1
   fi
-  cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$root/tools/a133p/toolchain.cmake" \
+  cmake -S . -B "$builddir" -DCMAKE_TOOLCHAIN_FILE="$root/tools/a133p/toolchain.cmake" \
    -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS" \
    -DCMAKE_SHARED_LINKER_FLAGS="-L$gpu" $flags
   target=nodosumi
   [ "$name" != flycast ] || target=flycast_libretro
-  cmake --build build --target "$target" -j"$JOBS"
-  output="build/${name}_libretro.so"
+  cmake --build "$builddir" --target "$target" -j"$JOBS"
+  output="$builddir/${name}_libretro.so"
   ;;
  parallel_n64)
+  [ -z "$profile" ] || { echo "no profiling recipe for $name" >&2; exit 2; }
   [ -f "$gpu/libGLESv2.so" ] || { echo "provide firmware libGLESv2.so in $gpu" >&2; exit 1; }
   make -j"$JOBS" $flags CC="$cc" CXX="$cxx" LD="$cxx" \
    GL_LIB="-L$gpu -lGLESv2" CPUFLAGS='-DARM -DDONT_WANT_ARM_OPTIMIZATIONS -DARM64'
   output=parallel_n64_libretro.so
   ;;
  vecx)
+  [ -z "$profile" ] || { echo "no profiling recipe for $name" >&2; exit 2; }
   make -j"$JOBS" $flags CC="$cc" CXX="$cxx" LD="$cxx"
   output=vecx_libretro.so
   ;;
@@ -92,7 +102,7 @@ build() (
    exit 1
   fi
  fi
- cp "$output" "$work/cores/${name}_libretro.so"
+ cp "$output" "$cores/${name}_libretro.so"
  {
   echo "repo=https://github.com/$repo"
   echo "commit=$commit"
@@ -104,11 +114,12 @@ build() (
   nodosumi|flycast) echo "CMAKE_BUILD_TYPE=Release CMAKE_SHARED_LINKER_FLAGS=-L$gpu" ;;
   parallel_n64) echo "GL_LIB=-L$gpu -lGLESv2 CPUFLAGS=-DARM -DDONT_WANT_ARM_OPTIMIZATIONS -DARM64" ;;
   esac
+  [ -z "$profile" ] || echo "profile=release optimisation plus -g -fno-omit-frame-pointer"
   if [ "$name" = nodosumi ]; then
    echo "patch=tools/a133p/nodosumi-gles.patch"
    echo "patch_sha256=$(sha256sum "$root/tools/a133p/nodosumi-gles.patch" | cut -d ' ' -f1)"
   fi
- } >"$work/cores/${name}_libretro.so.meta"
+ } >"$cores/${name}_libretro.so.meta"
 )
 if [ "${1:-}" = --build ]; then
  build "$2"

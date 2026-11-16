@@ -177,6 +177,27 @@ LIBGL_ALWAYS_SOFTWARE=1 MESA_GLES_VERSION_OVERRIDE=3.0 \
   /tmp/nodosumi-gles-smoke "$SOURCE/build-host/nodosumi_libretro.so"
 ```
 
+### Profiling on the device
+
+`A133P_PROFILE=1 sh tools/a133p/gpu-cores.sh nodosumi` builds the release recipe with
+`-g -fno-omit-frame-pointer` into `target-a133p/cores-profile/`, with its own `.meta`. zig's clang
+already emits both for AArch64, so its code, read-only data and data sections match the release
+core byte for byte; only the debug info's build paths differ.
+
+An empty `System/trace-ftrace.on` makes `launch_frontend.sh` record at each slot start:
+
+| File | What it holds |
+|---|---|
+| `Logs/ftrace/slot-trace.bin` (`.names`, `.threads`) | slot's and its core host's frame path: `SLOT_FTRACE`. |
+| `Logs/ftrace/nodo-trace.bin` (`.names`) | Nodosumi's emu, video and worker threads: `NODOSUMI_FTRACE`. Each game start truncates it. |
+| `Logs/slot.log` | `slot: pace:` every 600 presents and `slot: latency:` lines: `SLOT_TRACE_LATENCY`. |
+
+A start after one that ran a core keeps the earlier traces and their `slot.log` in
+`Logs/ftrace.1`. `System/trace-ftrace-fine.on` adds `NODOSUMI_FTRACE_FINE`, which also times SH4
+interpreter runs and TA polygon writes. Decode slot's trace with `tools/ftrace_dump.py`, and both
+together with Nodosumi's `tools/ftrace/analyze.py --core nodo-trace.bin --slot slot-trace.bin`.
+Remove the flag files and start slot again to stop tracing.
+
 ## Known limits
 
 - **Run on a Brick Pro, firmware 1.1.1.** Screen orientation is correct, menu cropping is fixed,
