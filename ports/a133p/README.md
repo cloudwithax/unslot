@@ -179,10 +179,9 @@ LIBGL_ALWAYS_SOFTWARE=1 MESA_GLES_VERSION_OVERRIDE=3.0 \
 
 ### Profiling on the device
 
-`A133P_PROFILE=1 sh tools/a133p/gpu-cores.sh nodosumi` builds the release recipe with
-`-g -fno-omit-frame-pointer` into `target-a133p/cores-profile/`, with its own `.meta`. zig's clang
-already emits both for AArch64, so its code, read-only data and data sections match the release
-core byte for byte; only the debug info's build paths differ.
+`A133P_PROFILE=1 sh tools/a133p/gpu-cores.sh nodosumi` builds the release recipe with `-g` into
+`target-a133p/cores-profile/`, with its own `.meta`. `-g` leaves the code alone, so its code and
+read-only data sections match the release core byte for byte; only the debug info differs.
 
 An empty `System/trace-ftrace.on` makes `launch_frontend.sh` record at each slot start:
 
@@ -194,9 +193,47 @@ An empty `System/trace-ftrace.on` makes `launch_frontend.sh` record at each slot
 
 A start after one that ran a core keeps the earlier traces and their `slot.log` in
 `Logs/ftrace.1`. `System/trace-ftrace-fine.on` adds `NODOSUMI_FTRACE_FINE`, which also times SH4
-interpreter runs and TA polygon writes. Decode slot's trace with `tools/ftrace_dump.py`, and both
-together with Nodosumi's `tools/ftrace/analyze.py --core nodo-trace.bin --slot slot-trace.bin`.
-Remove the flag files and start slot again to stop tracing.
+interpreter runs and TA polygon writes, and `NODOSUMI_COUNT_INSTRS`: each emu frame then ends with
+the running totals of SH4 and ARM7 instructions (`sh4_instrs`, `arm7_instrs`) and of SH4 loads and
+stores made through calls instead of fastmem (`sh4_mem_calls`). Decode slot's trace with
+`tools/ftrace_dump.py`, and both together with Nodosumi's
+`tools/ftrace/analyze.py --core nodo-trace.bin --slot slot-trace.bin`. Remove the flag files and
+start slot again to stop tracing.
+
+### Dreamcast performance
+
+These changes come from reading one Crazy Taxi 2 trace on the Brick Pro, the source and both
+cores' disassembly. **None of them has been run on the hardware.**
+
+- **Compiler.** The H700 core is GCC 9.4 (Ubuntu 20.04), `-O3`, with `-march=armv8-a
+  -mtune=cortex-a53`. This one is zig's clang 22, `-O3`, with `-mcpu=cortex-a53`. Neither uses
+  LTO, sanitizer traps or outline atomics. Ubuntu's GCC adds a stack protector, which zig leaves
+  out. The JIT emits the same code in both. The hot C helpers (`ta_poly_write32`, `sh4_ccn_pref`,
+  `sh4_read32`) compile to equivalent code, so the compiler does not explain the gap. The recipe
+  now adds `-fomit-frame-pointer`, as GCC does, and `-fno-math-errno`, which removes zig's software
+  `sqrtf` from the FSQRT and FSRRA fallbacks.
+- **CPUs.** While Nodosumi runs in its core host, `crates/slot/src/cpus.rs` puts it on dedicated
+  cores:
+  - CPU 3 runs only the emu thread, at nice -10.
+  - CPU 2 runs only the core host's main thread, which draws the frames, at nice -5.
+  - CPUs 0 and 1 run everything else: slot's threads, the core host's other threads and the
+    `dmesg` loop in `launch.sh`, which now runs at nice 19.
+
+  `slot-audio` runs at nice -10 and the CHD reader at -5. Nodosumi names its `emu`, `conv` and
+  `nodo-ftrace` threads for this (`tools/a133p/nodosumi-threads-trace.patch`). A thread whose CPUs
+  or nice cannot be set is left as it was. `SLOT_CPUS=off` turns the plan off.
+- **SH4.** Frames before a dip spent 4.2 ms more in `z_sh4`. The trace accounts for 4.0 ms of it:
+  - 2.6 ms is extra geometry. These frames sent 416 KB of TA parameters instead of 295 KB, and the
+    SH4 costs 2.2 ms per 100 KB.
+  - 1.2 ms is time off the CPU, which counts inside the zone.
+  - 0.25 ms comes from running on CPU 0.
+
+  JIT compiles, invalidations and fastmem faults add 0.17 ms in total. The CPU plan addresses the
+  off-CPU time and the CPU 0 cost. The geometry cost is the game's own work.
+- **Sound.** The 191 underruns during play came after the ring had drained. In the 200 ms before
+  one, the ring held 1,092 frames, against 2,678 typically. In the 300 ms before one, 57% had a
+  slot emu step over 30 ms, against 20% at random times. The buffer size is unchanged, because
+  the underruns follow the emulator falling behind.
 
 ## Known limits
 

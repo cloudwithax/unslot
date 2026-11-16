@@ -139,8 +139,14 @@ fn open_remote(
         .arg(if colour { "1" } else { "0" })
         .args(paths)
         .stdin(Stdio::from(OwnedFd::from(theirs)));
+    // Slot's threads keep off the CPUs the plan gives the core's, from before the host starts,
+    // which takes the same, until the game ends with the host.
+    let confined = crate::cpus::plan(core).map(|plan| crate::cpus::confine_slot(&plan));
     let child = cmd.spawn()?;
-    let remote = slot_retro::RemoteCore::new(child, ours)?;
+    let mut remote = slot_retro::RemoteCore::new(child, ours)?;
+    if let Some(confined) = confined {
+        remote.keep(Box::new(confined));
+    }
     eprintln!("slot: {} runs in a core host", core.as_str());
     Ok(Box::new(remote))
 }
@@ -160,6 +166,9 @@ pub fn host(args: &[String]) -> Result<(), String> {
     let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
     // Gone with slot, whatever it was doing.
     unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) };
+    if let Some(plan) = crate::cpus::plan(core) {
+        crate::cpus::place_host(plan);
+    }
     // SAFETY: slot hands the socket over as stdin and nothing else here reads it.
     let stream = UnixStream::from(unsafe { OwnedFd::from_raw_fd(0) });
     let opened = open_here(

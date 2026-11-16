@@ -586,6 +586,8 @@ pub struct RemoteCore {
     av: AvInfo,
     rumble: Rumble,
     audio: Vec<i16>,
+    /// What the host's caller set up around it, dropped once the host has ended.
+    _kept: Option<Box<dyn Send>>,
 }
 
 impl RemoteCore {
@@ -634,7 +636,13 @@ impl RemoteCore {
             },
             rumble: Rumble::default(),
             audio: Vec::new(),
+            _kept: None,
         })
+    }
+
+    /// Keeps `guard` until the host has ended, so what was set up for it is undone after.
+    pub fn keep(&mut self, guard: Box<dyn Send>) {
+        self._kept = Some(guard);
     }
 
     /// Does `f` with the stream to the host, unless it is gone or goes, which is said the first

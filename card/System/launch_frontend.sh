@@ -164,7 +164,8 @@ fi
 # for tools/ftrace_dump.py and Nodosumi's tools/ftrace/analyze.py. They go to Logs/ftrace; a start
 # after one where a core recorded keeps that one, with its slot.log, in Logs/ftrace.1. With
 # System/trace-ftrace-fine.on as well, Nodosumi also times the zones it enters thousands of times
-# a frame, which costs more.
+# a frame and counts each frame's SH4 and ARM7 instructions and the SH4's loads and stores that
+# miss fastmem, which costs more.
 if [ -f "$SYS/trace-ftrace.on" ]; then
 	TRACE="$LOGS/ftrace"
 	if [ -f "$TRACE/nodo-trace.bin" ]; then
@@ -174,7 +175,7 @@ if [ -f "$SYS/trace-ftrace.on" ]; then
 	fi
 	mkdir -p "$TRACE"
 	export SLOT_FTRACE="$TRACE/slot-trace.bin" NODOSUMI_FTRACE="$TRACE/nodo-trace.bin" SLOT_TRACE_LATENCY=1
-	[ -f "$SYS/trace-ftrace-fine.on" ] && export NODOSUMI_FTRACE_FINE=1
+	[ -f "$SYS/trace-ftrace-fine.on" ] && export NODOSUMI_FTRACE_FINE=1 NODOSUMI_COUNT_INSTRS=1
 	log "tracing to $TRACE${NODOSUMI_FTRACE_FINE:+, fine}"
 fi
 

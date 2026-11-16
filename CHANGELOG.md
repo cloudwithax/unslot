@@ -14,6 +14,7 @@
 - GPU-core and DraStic menu children self-launch correctly through a versioned glibc loader such as `ld-2.33.so`. The old `ld-linux`-only check omitted slot's ELF operand and sent `--core-host` directly to the loader, so Nodosumi failed before it initialised on the Brick Pro.
 - `task drastic:a133p` host-stages the proprietary runner with a source-built, Zlib-licensed PowerVR SDL2 instead of H700 Mali pixmaps. The runner requires glibc 2.27; rebuilt libraries target the SDK's 2.23 baseline. No on-device verification was performed.
 - An empty `System/trace-ftrace.on` makes each slot start record slot's and Nodosumi's frame traces in `Logs/ftrace`, with pacing and latency lines in `slot.log`, keeping the previous traced run in `Logs/ftrace.1`. `System/trace-ftrace-fine.on` adds Nodosumi's fine zones. `A133P_PROFILE=1 tools/a133p/gpu-cores.sh nodosumi` builds a profiling core into `target-a133p/cores-profile`; its code matches the release build.
+- A133P Dreamcast tuning based on one Crazy Taxi 2 trace and untested on the hardware. While Nodosumi runs, its emu thread has CPU 3 to itself and the core host's renderer has CPU 2. slot, its sound output and the core's other threads share CPUs 0 and 1 (`SLOT_CPUS=off` turns this off). Nodosumi names its threads for this, builds with `-fomit-frame-pointer -fno-math-errno`, and counts SH4 and ARM7 instructions and SH4 non-fastmem accesses in fine traces. The 5-second `dmesg` loop runs at nice 19 on CPUs 0 and 1. See `ports/a133p/README.md`.
 
 ## v2.13.1
 

@@ -15,6 +15,7 @@ pub mod cheevos;
 pub mod core;
 pub mod core_downloads;
 pub mod core_picker;
+pub mod cpus;
 #[cfg(unix)]
 pub mod crash;
 #[cfg(not(unix))]

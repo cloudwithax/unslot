@@ -1,8 +1,15 @@
 #!/bin/sh
 # Host-only A133P GPU builds. Usage: sh tools/a133p/gpu-cores.sh [CORE...]
 # A133P_PROFILE=1 builds nodosumi or flycast for profiling on the device: the release recipe and
-# optimisation plus debug info and frame pointers, into target-a133p/cores-profile. zig's clang
-# already gives AArch64 both, so Nodosumi's profiling code matches its release build's.
+# optimisation plus debug info, into target-a133p/cores-profile. -g leaves the code alone, so a
+# profiling build runs its release build's code.
+#
+# Nodosumi also gets -fomit-frame-pointer, which Nodosumi's H700 build has from GCC's default and
+# zig's clang leaves off on AArch64 (one register more and no frame setup in its C helpers), and
+# -fno-math-errno, so sqrtf and the like are the instruction rather than a call on a negative
+# input (zig's compiler_rt has a software sqrtf). The rest of its codegen already matches or beats
+# the H700's: both -O3, no LTO, no sanitizer traps or outline atomics, and no stack protector
+# here where Ubuntu's GCC adds one.
 set -eu
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 work="$root/target-a133p"
@@ -12,7 +19,7 @@ gpu="${A133P_GPU_LIBS:-$work/gpu}"
 export JOBS="${JOBS:-2}"
 export CFLAGS="-Wno-error=date-time -I$work/khronos"
 profile="${A133P_PROFILE:-}"
-[ -z "$profile" ] || CFLAGS="$CFLAGS -g -fno-omit-frame-pointer"
+[ -z "$profile" ] || CFLAGS="$CFLAGS -g"
 export CXXFLAGS="$CFLAGS"
 cores="$work/cores"
 builddir=build
@@ -20,13 +27,17 @@ builddir=build
 [ "$#" -gt 0 ] || set -- nodosumi parallel_n64 flycast vecx
 build() (
  name="$1"
+ opt=''
+ patches=''
  case "$name" in
- nodosumi) repo=cloudwithax/nodosumi; commit=984de9dfdbffdd5fd38296f5ed71356a5778c934; flags='-DBUILD_LIBRETRO=ON -DA64_JIT=ON'; renderer='GLES 3.0 (frontend procedure loader)' ;;
+ nodosumi) repo=cloudwithax/nodosumi; commit=984de9dfdbffdd5fd38296f5ed71356a5778c934; flags='-DBUILD_LIBRETRO=ON -DA64_JIT=ON'; renderer='GLES 3.0 (frontend procedure loader)'; opt='-fomit-frame-pointer -fno-math-errno'; patches='nodosumi-gles.patch nodosumi-threads-trace.patch' ;;
  parallel_n64) repo=libretro/parallel-n64; commit=a8280501a71c1bcd4c85c5b8bfe75cfa62cd6127; flags='platform=unix-gles ARCH=aarch64 WITH_DYNAREC=aarch64'; renderer='GLES 2.0' ;;
  flycast) repo=flyinghead/flycast; commit=6bb0fc3e18dac4b01694f488c7a71f5930e8a648; flags='-DLIBRETRO=ON -DUSE_GLES=ON -DUSE_VULKAN=OFF -DUSE_OPENMP=OFF -DUSE_HOST_LIBZIP=OFF'; renderer='GLES 3.x (frontend procedure loader)' ;;
  vecx) repo=libretro/libretro-vecx; commit=8f671cc9d737f2890c3ce19e177e2984dcae121f; flags='platform=unix HAS_GPU=0'; renderer=software ;;
  *) echo "no GPU recipe for $name" >&2; exit 2 ;;
  esac
+ CFLAGS="$CFLAGS${opt:+ $opt}"
+ CXXFLAGS="$CFLAGS"
  if [ "$name" != vecx ]; then
   mkdir -p "$work/khronos"
   for dir in GLES2 GLES3 EGL KHR; do
@@ -41,13 +52,13 @@ build() (
   git -C "$src" fetch -q --depth 1 "https://github.com/$repo.git" "$commit"
  git -C "$src" checkout -q --detach "$commit"
  cd "$src"
- if [ "$name" = nodosumi ]; then
-  patch="$root/tools/a133p/nodosumi-gles.patch"
+ for p in $patches; do
+  patch="$root/tools/a133p/$p"
   if ! git apply --reverse --check "$patch" 2>/dev/null; then
    git apply --check "$patch"
    git apply "$patch"
   fi
- fi
+ done
  case "$name" in
  nodosumi|flycast)
   if [ "$name" = flycast ]; then
@@ -114,11 +125,11 @@ build() (
   nodosumi|flycast) echo "CMAKE_BUILD_TYPE=Release CMAKE_SHARED_LINKER_FLAGS=-L$gpu" ;;
   parallel_n64) echo "GL_LIB=-L$gpu -lGLESv2 CPUFLAGS=-DARM -DDONT_WANT_ARM_OPTIMIZATIONS -DARM64" ;;
   esac
-  [ -z "$profile" ] || echo "profile=release optimisation plus -g -fno-omit-frame-pointer"
-  if [ "$name" = nodosumi ]; then
-   echo "patch=tools/a133p/nodosumi-gles.patch"
-   echo "patch_sha256=$(sha256sum "$root/tools/a133p/nodosumi-gles.patch" | cut -d ' ' -f1)"
-  fi
+  [ -z "$profile" ] || echo "profile=release optimisation plus -g"
+  for p in $patches; do
+   echo "patch=tools/a133p/$p"
+   echo "patch_sha256=$(sha256sum "$root/tools/a133p/$p" | cut -d ' ' -f1)"
+  done
  } >"$cores/${name}_libretro.so.meta"
 )
 if [ "${1:-}" = --build ]; then
