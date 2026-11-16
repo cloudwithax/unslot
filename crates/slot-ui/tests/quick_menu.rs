@@ -104,6 +104,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Wallpaper",
             "Wallpaper Tint",
             "Theme",
+            "Boot Logo",
             "Recents",
             "Game Titles",
             "Battery Display",
@@ -217,6 +218,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::Controls,
             QuickRow::Upload,
             QuickRow::Online,
+            QuickRow::Hostname,
         ]
         .into_iter()
         .chain(Platform::ALL.map(QuickRow::ScreenOf))
@@ -303,6 +305,12 @@ fn the_values_read_as_the_menu_prints_them() {
             "9",
             "Mix",
             "Ghosting",
+            "1 min",
+            "3 min",
+            "5 min",
+            "10 min",
+            "30 min",
+            "Never",
         ]
     );
     assert_eq!(QuickValue::disc(0), Some(QuickValue::Disc1));

@@ -1,5 +1,5 @@
 mod art;
-pub use art::{contain, cover, is_cutout};
+pub use art::{contain, cover, decode_bytes as decode_picture, is_cutout};
 mod bitmaps;
 pub use bitmaps::{
     link_port, link_port_light, slot_back, slot_back_light, slot_front, slot_front_light,

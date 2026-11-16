@@ -71,8 +71,25 @@ start has the Wi-Fi up. Game Art's **Clear All Art** takes every label off the c
 press. Settings → Network keeps Wi-Fi, Bluetooth, Cast and services.
 
 Turn on **Art While Asleep** to find missing labels during standby with Wi-Fi connected. The
-search postpones shutdown while charging or above 20% battery. The normal idle
-timeout starts again after scraping finishes.
+search postpones shutdown while charging or above 20% battery. The selected
+Power Off After timeout starts again after scraping finishes.
+
+**Settings → Power:** **Sleep After** is Off by default, or 1, 3, 5 or 10 minutes
+without input, on the shelf, in menus or in games. Sleeping saves the game and leaves its
+cart seated. Buttons, sticks, controllers, volume keys and the lid restart the timer.
+Link sessions, Gallery videos, playing music, casting and downloads keep it awake.
+**Power Off After** sets how long standby lasts: 1, 3 (default), 5, 10 or 30 minutes,
+or Never. Link and Art While Asleep retain their standby exceptions.
+
+**Settings → Network → Hostname** names the handheld on the network. Use 1–63 ASCII
+letters, digits or hyphens, with no hyphen at either end. The name is saved in
+TF1's `baseos.conf`, even if unslot runs from TF2; restart to use it. It does not
+rename the running handheld.
+
+**Settings → General → Boot Logo**, after Theme, chooses unslot, BaseOS's original,
+or a picture in `Bootlogos/`. PNG, JPEG and 24-bit BMP pictures are fitted to the panel
+without stretching or enlarging, and installed in the background. Upload from Phone
+also accepts a **Boot logo**, up to 8 MiB, and selects it when it arrives.
 
 **Controls:** remap which of the handheld's buttons presses each of the game's sixteen, under
 Settings → Gameplay → Controls. Maps live in `Config/Remaps`, which an update leaves alone, as

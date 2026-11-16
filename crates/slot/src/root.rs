@@ -7,6 +7,7 @@ pub fn dirs() -> Vec<String> {
     let mut dirs: Vec<String> = [
         "BIOS",
         "Books",
+        "Bootlogos",
         "Config",
         "Logs",
         "Music",

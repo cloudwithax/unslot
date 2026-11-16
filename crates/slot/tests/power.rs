@@ -125,16 +125,21 @@ fn lid_close_over_the_switcher_wakes_into_the_game() {
 #[test]
 fn a_doze_that_outlasts_the_timeout_powers_off_by_itself() {
     let d = tmp_root_with_carts(&["Emerald"]);
-    let mut a = app_playing_in(d.path(), "Emerald");
+    let mut a = common::app_playing_with_state(
+        d.path(),
+        SlotState {
+            cart: Some("Emerald".into()),
+            clock_set: true,
+            power_off_after: 1,
+            ..SlotState::default()
+        },
+    );
     a.set_power(panel(d.path(), Duration::from_secs(2)).0);
     a.apply(Action::LidClose);
-    for _ in 0..100 {
-        a.update(1.0 / 60.0);
-    }
-    assert!(!a.powering_off(), "1.6 s is short of the 2 s timeout");
-    for _ in 0..40 {
-        a.update(1.0 / 60.0);
-    }
+    let asleep = a.now();
+    a.tick_ms(asleep + 59_999);
+    assert!(!a.powering_off(), "one minute has not elapsed");
+    a.tick_ms(asleep + 60_000);
     assert!(a.powering_off());
 }
 
@@ -232,16 +237,21 @@ fn the_shutdown_screen_is_up_before_the_machine_may_stop() {
 #[test]
 fn a_dozing_device_powers_off_by_itself_rather_than_waiting_for_the_lid() {
     let d = tmp_root_with_carts(&["Emerald"]);
-    let mut a = app_playing_in(d.path(), "Emerald");
+    let mut a = common::app_playing_with_state(
+        d.path(),
+        SlotState {
+            cart: Some("Emerald".into()),
+            clock_set: true,
+            power_off_after: 1,
+            ..SlotState::default()
+        },
+    );
     a.set_power(panel(d.path(), Duration::from_secs(2)).0);
     a.apply(Action::LidClose);
-    for _ in 0..180 {
-        a.update(1.0 / 60.0);
-    }
-    assert!(
-        a.powering_off(),
-        "three seconds is past the two second timeout"
-    );
+    let asleep = a.now();
+    a.tick_ms(asleep + 60_000);
+    a.tick_ms(asleep + 60_300);
+    assert!(a.powering_off(), "one minute has elapsed");
     assert!(
         a.ready_to_power_off(),
         "the shutdown screen has had its 250 ms and the machine is still not allowed to stop"

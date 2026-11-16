@@ -97,6 +97,17 @@ impl Music {
         view
     }
 
+    pub fn is_playing(&self) -> bool {
+        !self.shared.paused.load(Ordering::Relaxed)
+            && !self.shared.held.load(Ordering::Relaxed)
+            && self
+                .view
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .at
+                .is_some()
+    }
+
     pub fn play(&self, queue: Vec<PathBuf>, at: usize) {
         self.shared.paused.store(false, Ordering::Relaxed);
         let _ = self.cmds.send(Cmd::Play(queue, at));

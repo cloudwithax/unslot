@@ -28,6 +28,7 @@ pub mod face_builder;
 pub mod frames;
 pub mod frontend;
 pub mod gpu;
+pub mod idle;
 pub mod input;
 pub mod json;
 pub mod label_cache;

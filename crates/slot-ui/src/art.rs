@@ -138,7 +138,7 @@ fn decode(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
 }
 
 /// A PNG or a JPEG, told apart by its first bytes rather than its name.
-fn decode_bytes(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+pub fn decode_bytes(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     match bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
         true => decode_jpeg_bytes(bytes),
         false => decode_png(bytes),

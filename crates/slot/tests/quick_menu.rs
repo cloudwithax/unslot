@@ -689,10 +689,14 @@ fn x_on_about_restarts() {
 }
 
 #[test]
-fn a_on_power_opens_restart_shut_down_and_reload_and_b_comes_back() {
+fn a_on_power_opens_sleep_shutdown_and_actions_and_b_comes_back() {
     let (_d, mut a, _) = on_carousel();
     open_at(&mut a, QuickRow::Power);
     press(&mut a, Btn::A);
+    assert_eq!(a.quick_menu(), Some(QuickRow::SleepAfter));
+    press(&mut a, Btn::Down);
+    assert_eq!(a.quick_menu(), Some(QuickRow::PowerOffAfter));
+    press(&mut a, Btn::Down);
     assert_eq!(a.quick_menu(), Some(QuickRow::Restart));
     press(&mut a, Btn::Down);
     assert_eq!(a.quick_menu(), Some(QuickRow::ShutDown));
@@ -1510,4 +1514,84 @@ fn the_clock_turns_to_12_hours_and_back_and_saves() {
     );
     press(&mut a, Btn::Left);
     assert!(!read_slot_state(d.path()).clock_12h);
+}
+
+#[test]
+fn hostname_is_visible_without_wifi_and_invalid_done_keeps_the_keyboard() {
+    let (_d, mut a, _) = on_carousel();
+    assert!(!a.hidden_rows().contains(&QuickRow::Hostname));
+    let name = a.hostname_label().to_string();
+    open_at(&mut a, QuickRow::Hostname);
+    press(&mut a, Btn::A);
+    let Phase::Keyboard { keys, .. } = a.phase() else {
+        panic!("no keyboard");
+    };
+    assert_eq!(keys.text(), name);
+    press(&mut a, Btn::Y);
+    press(&mut a, Btn::Start);
+    let Phase::Keyboard { keys, .. } = a.phase() else {
+        panic!("invalid name closed the keyboard");
+    };
+    assert_eq!(keys.text(), format!("{name} "));
+    assert_eq!(a.hostname_label(), name);
+    assert_eq!(
+        a.cheevo_text().as_deref(),
+        Some(slot::baseos::HOSTNAME_HINT)
+    );
+    let tex = TexId::from_raw(9999);
+    a.set_cheevo_face(Some((tex, 400, 40)));
+    let mut draws = Vec::new();
+    a.draw(&mut draws);
+    assert!(draws
+        .iter()
+        .any(|d| matches!(d, Draw::Tex { tex: at, .. } if *at == tex)));
+}
+
+#[test]
+fn hostname_done_saves_without_changing_the_running_name() {
+    let (d, mut a, _) = on_carousel();
+    let running = slot::services::hostname();
+    open_at(&mut a, QuickRow::Hostname);
+    press(&mut a, Btn::A);
+    press(&mut a, Btn::Start);
+    assert_eq!(a.quick_menu(), Some(QuickRow::Hostname));
+    assert_eq!(
+        slot::baseos::configured_hostname(d.path()),
+        a.hostname_label()
+    );
+    assert_eq!(slot::services::hostname(), running);
+    assert_eq!(
+        a.cheevo_text().as_deref(),
+        Some("Restart to use the new name")
+    );
+}
+
+#[test]
+fn power_settings_cycle_and_persist_the_literal_values() {
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::SleepAfter);
+    for (minutes, text) in [
+        (1, "1 min"),
+        (3, "3 min"),
+        (5, "5 min"),
+        (10, "10 min"),
+        (0, "Off"),
+    ] {
+        press(&mut a, Btn::Right);
+        assert_eq!(a.quick_value(QuickRow::SleepAfter).unwrap().text(), text);
+        assert_eq!(read_slot_state(d.path()).sleep_after, minutes);
+    }
+    press(&mut a, Btn::Down);
+    for (minutes, text) in [
+        (5, "5 min"),
+        (10, "10 min"),
+        (30, "30 min"),
+        (0, "Never"),
+        (1, "1 min"),
+        (3, "3 min"),
+    ] {
+        press(&mut a, Btn::Right);
+        assert_eq!(a.quick_value(QuickRow::PowerOffAfter).unwrap().text(), text);
+        assert_eq!(read_slot_state(d.path()).power_off_after, minutes);
+    }
 }

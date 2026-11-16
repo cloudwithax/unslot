@@ -384,6 +384,8 @@ pub fn menu(root: &Path, frame: &Path) -> i32 {
             clock: None,
             wallpaper: None,
             theme: None,
+            boot_logo: None,
+            hostname: None,
             faces: Some(&faces),
             ground: None,
             palette: None,

@@ -24,6 +24,7 @@ const BEZEL_MAX: u64 = 32 << 20;
 pub enum Landed {
     /// In `wallpaper::OWN`, by its name.
     Wallpaper(String),
+    BootLogo(String),
     /// In the system's games folder, by its name.
     Game(Platform, String),
     /// In the system's folder in `bezel::GAME_BEZELS`, by its name: a PNG, or the `.info`
@@ -146,6 +147,21 @@ pub fn place(
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
+    if to == "bootlogo" {
+        if !["png", "jpg", "jpeg", "bmp"]
+            .iter()
+            .any(|x| ext.eq_ignore_ascii_case(x))
+        {
+            return Err("A boot logo is a PNG, a JPEG or a BMP");
+        }
+        if length > 8 << 20 {
+            return Err("That picture is too big");
+        }
+        return Ok((
+            root.join(crate::bootlogo::OWN).join(name),
+            Landed::BootLogo(name.into()),
+        ));
+    }
     if to == WALLPAPER {
         if !["png", "jpg", "jpeg"]
             .iter()

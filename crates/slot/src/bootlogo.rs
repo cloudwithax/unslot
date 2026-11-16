@@ -9,6 +9,8 @@ const LOGO: &str = "bootlogo.bmp";
 const ORIGINAL: &str = "bootlogo.baseos.bmp";
 const PARTITION: &str = "boot-resource";
 const MOUNT: &str = "/tmp/slot-boot-resource";
+static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub const OWN: &str = "Bootlogos";
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Outcome {
@@ -107,6 +109,20 @@ fn turned(img: &Bmp) -> Bmp {
     }
 }
 
+fn landscape(img: Bmp) -> Bmp {
+    if img.width >= img.height {
+        return img;
+    }
+    let (width, height) = (img.height, img.width);
+    let mut rgb = vec![[0; 3]; width * height];
+    for y in 0..img.height {
+        for x in 0..img.width {
+            rgb[x * width + img.height - 1 - y] = img.rgb[y * img.width + x];
+        }
+    }
+    Bmp { width, height, rgb }
+}
+
 pub fn compose(wordmark: &Bmp, (width, height): (usize, usize)) -> Option<Bmp> {
     let turned_mark;
     let mark = if height > width {
@@ -198,6 +214,7 @@ pub fn splash_rgba(card: &Path, size: (usize, usize)) -> Option<Vec<u8>> {
 }
 
 pub fn refresh(card: &Path) {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(logo) = chosen(card) else {
         return;
     };
@@ -242,4 +259,136 @@ fn run(program: &str, args: &[&str]) -> bool {
         .args(args)
         .status()
         .is_ok_and(|s| s.success())
+}
+
+pub fn choices(card: &Path) -> Vec<String> {
+    let dir = card.join(OWN);
+    let _ = fs::create_dir_all(&dir);
+    let mut files: Vec<String> = fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| {
+            let path = entry.path();
+            let ext = path.extension()?.to_str()?;
+            ["png", "jpg", "jpeg", "bmp"]
+                .iter()
+                .any(|x| ext.eq_ignore_ascii_case(x))
+                .then(|| entry.file_name().to_string_lossy().into_owned())
+        })
+        .collect();
+    files.sort_by(|a, b| {
+        a.to_lowercase()
+            .cmp(&b.to_lowercase())
+            .then_with(|| a.cmp(b))
+    });
+    let mut choices = vec!["unslot".into(), "BaseOS".into()];
+    choices.extend(files);
+    choices
+}
+
+pub fn label(choice: &str) -> &str {
+    Path::new(choice)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(choice)
+}
+
+/// Dimensions are in the panel's landscape coordinate system; compose turns portrait panels.
+pub fn fit(img: Bmp, panel: (usize, usize)) -> Bmp {
+    let (pw, ph) = if panel.1 > panel.0 {
+        (panel.1, panel.0)
+    } else {
+        panel
+    };
+    if img.width <= pw && img.height <= ph {
+        return img;
+    }
+    let scale = (pw as f64 / img.width as f64).min(ph as f64 / img.height as f64);
+    let width = ((img.width as f64 * scale) as usize).max(1);
+    let height = ((img.height as f64 * scale) as usize).max(1);
+    let mut rgb = Vec::with_capacity(width * height);
+    for y in 0..height {
+        for x in 0..width {
+            rgb.push(img.rgb[(y * img.height / height) * img.width + x * img.width / width]);
+        }
+    }
+    Bmp { width, height, rgb }
+}
+
+fn picture(path: &Path) -> io::Result<Bmp> {
+    let bytes = fs::read(path)?;
+    if let Some(img) = decode(&bytes) {
+        return Ok(img);
+    }
+    let (rgba, width, height) = slot_ui::decode_picture(&bytes)
+        .ok_or_else(|| io::Error::other("Could not read that boot logo"))?;
+    Ok(Bmp {
+        width: width as usize,
+        height: height as usize,
+        rgb: rgba.chunks_exact(4).map(|p| [p[0], p[1], p[2]]).collect(),
+    })
+}
+
+/// Serialized with startup refresh: neither mount nor Config can race another selection.
+pub fn select(card: &Path, choice: &str) -> io::Result<()> {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let device = partition(PARTITION)
+        .ok_or_else(|| io::Error::other("Could not find the boot partition"))?;
+    fs::create_dir_all(MOUNT)?;
+    if !run("mount", &["-t", "vfat", "-o", "rw,noatime", &device, MOUNT]) {
+        return Err(io::Error::other("Could not mount the boot partition"));
+    }
+    let result = select_in(card, choice, Path::new(MOUNT));
+    if !run("umount", &[MOUNT]) {
+        return Err(io::Error::other("Could not unmount the boot partition"));
+    }
+    result
+}
+
+/// Selects and installs a logo with the boot-resource partition already mounted at `dir`.
+pub fn select_in(card: &Path, choice: &str, dir: &Path) -> io::Result<()> {
+    let original = fs::read(dir.join(ORIGINAL)).or_else(|_| fs::read(dir.join(LOGO)))?;
+    let panel = size(&original).ok_or_else(|| io::Error::other("Could not read the panel size"))?;
+    let bytes = match choice {
+        "unslot" => fs::read(card.join(CARD_LOGO))?,
+        "BaseOS" => {
+            let img = decode(&original)
+                .ok_or_else(|| io::Error::other("Could not read the BaseOS boot logo"))?;
+            encode(&landscape(img))
+        }
+        _ => {
+            if !choices(card).iter().any(|c| c == choice) {
+                return Err(io::Error::other("No such boot logo"));
+            }
+            encode(&fit(picture(&card.join(OWN).join(choice))?, panel))
+        }
+    };
+    fs::create_dir_all(card.join("Config"))?;
+    let path = card.join(USER_LOGO);
+    let previous = match fs::read(&path) {
+        Ok(bytes) => Some(bytes),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e),
+    };
+    let store = |bytes: Option<&[u8]>| -> io::Result<()> {
+        match bytes {
+            Some(bytes) => slot_store::atomic_write(&path, bytes),
+            None => match fs::remove_file(&path) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            },
+        }
+    };
+    store((choice != "unslot").then_some(bytes.as_slice()))?;
+    let result = install(&bytes, dir).and_then(|outcome| match outcome {
+        Outcome::Invalid => Err(io::Error::other("That boot logo does not fit the panel")),
+        _ => Ok(()),
+    });
+    if let Err(e) = result {
+        store(previous.as_deref())?;
+        return Err(e);
+    }
+    Ok(())
 }

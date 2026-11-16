@@ -1,11 +1,11 @@
 ## Changes
 
-- Google Cast discovery now receives multicast replies, assembles service records split across packets, and retries missing records. It keeps listening throughout a simultaneous Miracast search, since both Wi-Fi interfaces share the handheld's radio.
-- Casting scales down on the GPU and overlaps readback with encoding instead of making each frame wait for both. Google Cast uses a 480-line stream budget; on RG CubeXX it measured 59.8 fps in menus and about 58 fps in GBA gameplay, with no capture drops in steady-state measurement windows. Heavier games can still fall below 60 fps.
-- Google Cast and Miracast request 50 ms of receiver buffering instead of 100 ms. This is not a measurement of controller-to-TV latency.
-- Miracast retains the discovery radio and peer cache while a TV is picked, avoiding a fresh search at connection time. Live Miracast playback remains unverified: the test TCL TV did not admit the connection.
+- **Sleep After** (Settings → Power): the handheld can now go to sleep on its own after 1, 3, 5 or 10 minutes without input, on the shelf, in menus or in games. Sleeping saves the game, as a tap of Power does. It stays awake during a link session, a Gallery video, music playback, casting and downloads. It is Off by default, so nothing changes until you turn it on.
+- **Power Off After** (Settings → Power): how long the handheld stays asleep before powering off, from 1 to 30 minutes, or Never. The default is 3 minutes, as before.
+- **Hostname** (Settings → Network): rename the handheld on your network (`<name>.local`) with the on-screen keyboard. The name is checked as BaseOS checks it and saved in `baseos.conf`; it takes effect after a restart.
+- **Boot Logo** (Settings → General): choose unslot's logo, BaseOS's original, or your own PNG, JPEG or BMP from the new `Bootlogos/` folder. A picture larger than the screen is scaled down to fit and centred on the colour of its top-left pixel. Upload from Phone has a new Boot logo option that sends a picture straight there.
 
-Verified on RG CubeXX with Google Cast to an onn. 4K Streaming Box. All three local Cast endpoints were found in each of five combined discovery scans.
+Verified on RG CubeXX: Sleep After at 1 minute slept after a minute without input and woke on Power; a hostname with a space was refused and a valid one changed only its line in `baseos.conf`; choosing a picture, uploading one from the phone page, and switching back to unslot's logo each rewrote the boot partition's logo, with the last restoring the original byte for byte. Not verified on hardware: Power Off After actually powering the handheld off, and the new name and logo after a full reboot. Both are covered by tests.
 
 ## New card: flash the image
 

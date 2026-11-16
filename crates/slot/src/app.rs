@@ -404,6 +404,7 @@ pub enum Phase {
 /// What the keyboard is being typed for.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Typing {
+    Hostname,
     Password(String),
     /// The name of a network that does not announce itself.
     HiddenName,
@@ -603,6 +604,12 @@ pub struct App {
     quick_clock_faces: Option<[(TexId, u32, u32); 2]>,
     quick_wallpaper_faces: Option<[(TexId, u32, u32); 2]>,
     quick_theme_faces: Option<[(TexId, u32, u32); 2]>,
+    quick_boot_logo_faces: Option<[(TexId, u32, u32); 2]>,
+    quick_hostname_faces: Option<[(TexId, u32, u32); 2]>,
+    hostname: String,
+    logo_job: Option<std::sync::mpsc::Receiver<(String, Result<(), String>)>>,
+    logo_queue: VecDeque<String>,
+    logo_cursor: Option<String>,
     /// Whether the slot of your own that is shown is pale, once its picture has been looked at.
     own_slot_light: Option<bool>,
     quick_palette_faces: Option<[(TexId, u32, u32); 2]>,
@@ -654,6 +661,7 @@ pub struct App {
     game_ready: bool,
     clock: f64,
     power: Option<Power>,
+    idle: crate::idle::IdleTimer,
     dozed_at: Millis,
     /// Whether this doze has started a search for missing art, for Art While Asleep.
     art_asleep: bool,
@@ -871,6 +879,7 @@ impl App {
             platform: Platform::default(),
             named_core: false,
             video_mode: VideoMode::default(),
+            idle: crate::idle::IdleTimer::default(),
             link: None,
             sfx: None,
             buzz: None,
@@ -884,6 +893,12 @@ impl App {
             quick_clock_faces: None,
             quick_wallpaper_faces: None,
             quick_theme_faces: None,
+            quick_boot_logo_faces: None,
+            quick_hostname_faces: None,
+            hostname: crate::services::hostname(),
+            logo_job: None,
+            logo_queue: VecDeque::new(),
+            logo_cursor: None,
             own_slot_light: None,
             quick_palette_faces: None,
             quick_bezel_faces: [None; Platform::COUNT],
@@ -997,6 +1012,7 @@ impl App {
         app.root = Some(root.to_path_buf());
         app.loading = loading;
         app.state = read_slot_state(root);
+        app.hostname = crate::baseos::configured_hostname(root);
         let wifi = Wifi::for_card(root);
         if app.state.wifi {
             wifi.turn_on();
@@ -1340,6 +1356,49 @@ impl App {
             _ => None,
         }
     }
+    pub fn boot_logo_label(&self) -> &str {
+        crate::bootlogo::label(&self.state.boot_logo)
+    }
+
+    pub fn hostname_label(&self) -> &str {
+        &self.hostname
+    }
+
+    pub fn set_extra_setting_faces(&mut self, hostname: bool, faces: [(TexId, u32, u32); 2]) {
+        if hostname {
+            self.quick_hostname_faces = Some(faces);
+        } else {
+            self.quick_boot_logo_faces = Some(faces);
+        }
+    }
+    pub fn standby_timeout(&self) -> std::time::Duration {
+        if self.state.power_off_after == 0 {
+            std::time::Duration::MAX
+        } else {
+            std::time::Duration::from_secs(u64::from(self.state.power_off_after) * 60)
+        }
+    }
+
+    fn select_boot_logo(&mut self, choice: String) {
+        self.logo_cursor = Some(choice.clone());
+        if self.logo_job.is_some() {
+            self.logo_queue.push_back(choice);
+            return;
+        }
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        match std::thread::Builder::new()
+            .name("slot-bootlogo".into())
+            .spawn(move || {
+                let result = crate::bootlogo::select(&root, &choice).map_err(|e| e.to_string());
+                let _ = tx.send((choice, result));
+            }) {
+            Ok(_) => self.logo_job = Some(rx),
+            Err(e) => self.cheevo_line(format!("Could not change the boot logo: {e}")),
+        }
+    }
 
     pub fn in_game_menu(&self) -> Option<QuickRow> {
         self.in_game_menu
@@ -1400,6 +1459,23 @@ impl App {
 
     pub fn quick_value(&self, row: QuickRow) -> Option<QuickValue> {
         match row {
+            QuickRow::SleepAfter | QuickRow::PowerOffAfter => {
+                let minutes = if row == QuickRow::SleepAfter {
+                    self.state.sleep_after
+                } else {
+                    self.state.power_off_after
+                };
+                Some(match minutes {
+                    1 => QuickValue::Min1,
+                    3 => QuickValue::Min3,
+                    5 => QuickValue::Min5,
+                    10 => QuickValue::Min10,
+                    30 => QuickValue::Min30,
+                    _ if row == QuickRow::SleepAfter => QuickValue::Off,
+                    _ => QuickValue::Never,
+                })
+            }
+            QuickRow::BootLogo | QuickRow::Hostname => None,
             QuickRow::Shader
             | QuickRow::ColourCorrection
             | QuickRow::PlaySaturation
@@ -2928,7 +3004,12 @@ impl App {
         }
     }
 
+    pub fn note_input(&mut self, now: Millis) {
+        self.idle.input(now);
+    }
+
     pub fn apply(&mut self, action: Action) {
+        self.note_input(self.now());
         let before = (self.feel(), self.state.clone());
         self.act(action);
         self.answer(action, before);
@@ -3961,6 +4042,10 @@ impl App {
         let landed = upload.landed();
         for file in landed {
             let note = match file {
+                Landed::BootLogo(name) => {
+                    self.select_boot_logo(name);
+                    "Changing the boot logo...".into()
+                }
                 Landed::Wallpaper(name) => {
                     let note = format!("{name} is the wallpaper now");
                     self.state.wallpaper = WallpaperPick::File(name);
@@ -4339,6 +4424,9 @@ impl App {
             KeyOutcome::Typing => {}
             KeyOutcome::Cancelled => {
                 self.phase = match typing {
+                    Typing::Hostname => Phase::QuickMenu {
+                        row: QuickRow::Hostname,
+                    },
                     Typing::Search { again: true } => Phase::Search { cursor },
                     Typing::Search { again: false } => Phase::Shelf,
                     Typing::RootPassword { .. } => Phase::Services { cursor, note: None },
@@ -4350,6 +4438,27 @@ impl App {
                 };
             }
             KeyOutcome::Done(text) => match typing {
+                Typing::Hostname => {
+                    if !crate::baseos::valid_hostname(&text) {
+                        self.cheevo_line(crate::baseos::HOSTNAME_HINT.into());
+                        return;
+                    }
+                    let result = self
+                        .root
+                        .as_deref()
+                        .ok_or_else(|| std::io::Error::other("No card"))
+                        .and_then(|root| crate::baseos::set_hostname(root, &text));
+                    match result {
+                        Ok(()) => {
+                            self.cheevo_line("Restart to use the new name".into());
+                            self.hostname = text;
+                            self.phase = Phase::QuickMenu {
+                                row: QuickRow::Hostname,
+                            };
+                        }
+                        Err(e) => self.cheevo_line(format!("Could not save the name: {e}")),
+                    }
+                }
                 Typing::Search { .. } => self.search_for(&text),
                 Typing::SsUser if text.is_empty() => {
                     let note = self.save_ss_login("", "");
@@ -4674,6 +4783,17 @@ impl App {
 
     fn open_quick_row(&mut self, row: QuickRow) {
         match row {
+            QuickRow::Hostname => {
+                let name = self.hostname.clone();
+                self.phase = Phase::Keyboard {
+                    keys: Keyboard::new("Name for this handheld", &name, false, 1, 63),
+                    typing: Typing::Hostname,
+                    cursor: 0,
+                };
+            }
+            QuickRow::SleepAfter | QuickRow::PowerOffAfter | QuickRow::BootLogo => {
+                self.change_setting(row, true)
+            }
             QuickRow::DateTime => {
                 self.phase = clock_screen(self.utc_secs(), self.state.utc_offset_min, true);
             }
@@ -4816,6 +4936,25 @@ impl App {
     }
 
     fn change_setting(&mut self, row: QuickRow, right: bool) {
+        if row == QuickRow::BootLogo {
+            let Some(root) = &self.root else {
+                return;
+            };
+            let choices = crate::bootlogo::choices(root);
+            let at = choices
+                .iter()
+                .position(|c| {
+                    c == self
+                        .logo_queue
+                        .back()
+                        .or(self.logo_cursor.as_ref())
+                        .unwrap_or(&self.state.boot_logo)
+                })
+                .unwrap_or(0);
+            let at = (at + if right { 1 } else { choices.len() - 1 }) % choices.len();
+            self.select_boot_logo(choices[at].clone());
+            return;
+        }
         let row = self.playing_row(row);
         if row == QuickRow::Bluetooth {
             self.state.bluetooth = !self.state.bluetooth;
@@ -4907,6 +5046,13 @@ impl App {
         }
         let s = &mut self.state;
         match row {
+            QuickRow::SleepAfter => {
+                s.sleep_after = next_minutes(s.sleep_after, &[0, 1, 3, 5, 10], right)
+            }
+            QuickRow::PowerOffAfter => {
+                s.power_off_after = next_minutes(s.power_off_after, &[1, 3, 5, 10, 30, 0], right)
+            }
+            QuickRow::Hostname | QuickRow::BootLogo => return,
             QuickRow::FastForward => {
                 let to = ff_next(s.ff_speed, right);
                 if to == s.ff_speed {
@@ -5541,6 +5687,26 @@ impl App {
     }
 
     fn timers(&mut self) {
+        if let Some(result) = self.logo_job.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.logo_job = None;
+            let (choice, result) = result;
+            let line = match result {
+                Ok(()) => {
+                    self.state.boot_logo = choice.clone();
+                    self.persist();
+                    format!("{choice} is the boot logo now")
+                }
+                Err(e) => e,
+            };
+            if let Phase::Upload { note } = &mut self.phase {
+                *note = Some(line);
+            } else {
+                self.cheevo_line(line);
+            }
+            if let Some(choice) = self.logo_queue.pop_front() {
+                self.select_boot_logo(choice);
+            }
+        }
         self.settle_loading_mark();
         crate::audio::set_tv_sound(self.state.tv_sound);
         if let Some(wifi) = &self.wifi {
@@ -5605,6 +5771,20 @@ impl App {
             p.set_undo(offer);
         }
         self.find_art_asleep();
+        let activity = crate::idle::Activity {
+            link: self.link_active(),
+            powering_off: self.shutting_down(),
+            asleep: matches!(self.phase, Phase::Doze { .. }),
+            video: self.apps.as_ref().is_some_and(|apps| matches!(apps.screen(), Some(crate::apps::Screen::Video(v)) if v.error.is_none() && !v.paused() && !v.ended())),
+            music: self.music.as_ref().is_some_and(Music::is_playing),
+            casting: self.cast_view.casting.is_some(),
+            downloading: matches!(self.updates_view.unslot.stage, Stage::Downloading(..))
+                || self.cores_view.downloading.is_some()
+                || !self.cores_view.queued.is_empty(),
+        };
+        if self.idle.tick(self.now(), self.state.sleep_after, activity) {
+            self.doze();
+        }
         if matches!(self.phase, Phase::Doze { .. }) && self.finding_art_asleep() {
             self.dozed_at = self.now();
         }
@@ -6268,6 +6448,8 @@ impl App {
                 clock: self.quick_clock_faces,
                 wallpaper: self.quick_wallpaper_faces,
                 theme: self.quick_theme_faces,
+                boot_logo: self.quick_boot_logo_faces,
+                hostname: self.quick_hostname_faces,
                 faces: self.quick_menu_faces.as_ref(),
                 ground: self.menu_ground(),
                 palette: None,
@@ -6367,6 +6549,15 @@ impl App {
                         alpha: 1.0,
                     });
                 }
+                if matches!(
+                    self.phase,
+                    Phase::Keyboard {
+                        typing: Typing::Hostname,
+                        ..
+                    }
+                ) {
+                    self.draw_cheevo(out);
+                }
                 return;
             }
             Phase::Inserting { cart, resumed, .. } => {
@@ -6432,6 +6623,8 @@ impl App {
                 clock: None,
                 wallpaper: None,
                 theme: None,
+                boot_logo: None,
+                hostname: None,
                 faces: self.quick_menu_faces.as_ref(),
                 ground: None,
                 palette: self.quick_palette_faces,
@@ -6477,6 +6670,10 @@ impl App {
             self.draw_game_menu(menu, out);
         }
         self.hud.draw(self.canvas(), self.now(), out);
+        self.draw_cheevo(out);
+    }
+
+    fn draw_cheevo(&self, out: &mut Vec<Draw>) {
         if let Some((tex, w, h)) = self.cheevo_face {
             let (w, h) = (w as f32, h as f32);
             let shown = self.now().saturating_sub(self.cheevo_since);
@@ -7193,6 +7390,7 @@ impl App {
     }
 
     fn wake(&mut self) {
+        self.idle.input(self.now());
         let Phase::Doze { cart } = &mut self.phase else {
             return;
         };
@@ -7206,7 +7404,7 @@ impl App {
     }
 
     pub fn on_doze_timeout(&mut self) {
-        if !matches!(self.phase, Phase::Doze { .. }) {
+        if !matches!(self.phase, Phase::Doze { .. }) || self.state.power_off_after == 0 {
             return;
         }
         self.begin_power_off();
@@ -7933,10 +8131,10 @@ impl App {
         if self.link_active() || self.finding_art_asleep() {
             return false;
         }
-        let (Phase::Doze { .. }, Some(power)) = (&self.phase, &self.power) else {
+        if !matches!(self.phase, Phase::Doze { .. }) || self.state.power_off_after == 0 {
             return false;
-        };
-        self.now().saturating_sub(self.dozed_at) >= power.timeout().as_millis() as Millis
+        }
+        self.now().saturating_sub(self.dozed_at) >= self.state.power_off_after as Millis * 60_000
     }
 
     pub fn settle_saves(&mut self) {
@@ -8424,4 +8622,9 @@ fn free_stamp(ring: &StateRing, now: i64) -> String {
         stamp = format_stamp(secs);
     }
     stamp
+}
+
+fn next_minutes(value: u8, choices: &[u8], right: bool) -> u8 {
+    let at = choices.iter().position(|n| *n == value).unwrap_or(0);
+    choices[(at + if right { 1 } else { choices.len() - 1 }) % choices.len()]
 }

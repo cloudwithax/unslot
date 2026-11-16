@@ -29,8 +29,6 @@ use crate::link_screen::{LinkSprites, Sprite};
 use crate::link_start::{LinkFail, LinkStep};
 use crate::session::Session;
 
-const DOZE_TIMEOUT: Duration = Duration::from_secs(180);
-
 const ALERT_INK: [u8; 3] = [0xf0, 0xb4, 0x3c];
 
 /// Draws the card's boot logo as the first frame, before the shelf is built, so the panel is not
@@ -96,6 +94,8 @@ pub struct Frontend {
     quick_clock: QuickClock,
     quick_palette: QuickPalette,
     quick_theme: QuickTheme,
+    quick_boot_logo: QuickTheme,
+    quick_hostname: QuickTheme,
     wallpaper: WallpaperSync,
     page: PageSync,
     game_bezel: BezelSync,
@@ -318,9 +318,8 @@ impl Frontend {
         crate::boot_time::mark("session");
         let stale_check =
             Self::check_labels(platform.root(), session.app().carts().cloned().collect());
-        session
-            .app_mut()
-            .set_power(Power::new(platform, DOZE_TIMEOUT));
+        let timeout = session.app().standby_timeout();
+        session.app_mut().set_power(Power::new(platform, timeout));
         Frontend {
             session,
             start: now,
@@ -347,6 +346,8 @@ impl Frontend {
             quick_clock: QuickClock::default(),
             quick_palette: QuickPalette::default(),
             quick_theme: QuickTheme::default(),
+            quick_boot_logo: QuickTheme::default(),
+            quick_hostname: QuickTheme::default(),
             wallpaper: WallpaperSync::default(),
             page: PageSync::default(),
             game_bezel: BezelSync::default(),
@@ -788,6 +789,18 @@ impl Frontend {
         sync_quick_clock(self.session.app_mut(), compositor, &mut self.quick_clock);
         sync_quick_palette(self.session.app_mut(), compositor, &mut self.quick_palette);
         sync_quick_theme(self.session.app_mut(), compositor, &mut self.quick_theme);
+        sync_extra_setting(
+            self.session.app_mut(),
+            compositor,
+            &mut self.quick_boot_logo,
+            false,
+        );
+        sync_extra_setting(
+            self.session.app_mut(),
+            compositor,
+            &mut self.quick_hostname,
+            true,
+        );
         sync_wallpaper(self.session.app_mut(), compositor, &mut self.wallpaper);
         sync_page(self.session.app_mut(), compositor, &mut self.page);
         sync_game_bezel(self.session.app_mut(), compositor, &mut self.game_bezel);
@@ -1436,6 +1449,32 @@ fn sync_quick_theme(app: &mut App, compositor: &mut Compositor, state: &mut Quic
     let dim = upload(compositor, &mut state.dim, dim);
     let lit = upload(compositor, &mut state.lit, lit);
     app.set_quick_theme_faces((dim, dim_size.0, dim_size.1), (lit, lit_size.0, lit_size.1));
+    state.shown = text;
+}
+
+fn sync_extra_setting(
+    app: &mut App,
+    compositor: &mut Compositor,
+    state: &mut QuickTheme,
+    hostname: bool,
+) {
+    if app.quick_menu().is_none() {
+        return;
+    }
+    let text = if hostname {
+        app.hostname_label()
+    } else {
+        app.boot_logo_label()
+    };
+    if text == state.shown {
+        return;
+    }
+    let text = text.to_string();
+    let (dim, lit) = (value_face(&text, false), value_face(&text, true));
+    let (ds, ls) = ((dim.w, dim.h), (lit.w, lit.h));
+    let dim = upload(compositor, &mut state.dim, dim);
+    let lit = upload(compositor, &mut state.lit, lit);
+    app.set_extra_setting_faces(hostname, [(dim, ds.0, ds.1), (lit, ls.0, ls.1)]);
     state.shown = text;
 }
 

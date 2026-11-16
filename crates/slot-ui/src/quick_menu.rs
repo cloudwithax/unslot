@@ -34,6 +34,10 @@ pub enum QuickRow {
     GbPalettes,
     RunAhead,
     Theme,
+    BootLogo,
+    Hostname,
+    SleepAfter,
+    PowerOffAfter,
     Wallpaper,
     General,
     Recents,
@@ -108,7 +112,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 63] = [
+const GENERIC: [QuickRow; 67] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -172,6 +176,10 @@ const GENERIC: [QuickRow; 63] = [
     QuickRow::PlaySaturation,
     QuickRow::PlayContrast,
     QuickRow::Blending,
+    QuickRow::BootLogo,
+    QuickRow::Hostname,
+    QuickRow::SleepAfter,
+    QuickRow::PowerOffAfter,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction, bezel and
@@ -274,15 +282,22 @@ impl QuickRow {
         QuickRow::About,
     ];
 
-    pub const POWER: [QuickRow; 3] = [QuickRow::Restart, QuickRow::ShutDown, QuickRow::Reload];
+    pub const POWER: [QuickRow; 5] = [
+        QuickRow::SleepAfter,
+        QuickRow::PowerOffAfter,
+        QuickRow::Restart,
+        QuickRow::ShutDown,
+        QuickRow::Reload,
+    ];
 
-    pub const NETWORK: [QuickRow; 6] = [
+    pub const NETWORK: [QuickRow; 7] = [
         QuickRow::Wifi,
         QuickRow::WifiNetworks,
         QuickRow::Bluetooth,
         QuickRow::BtDevices,
         QuickRow::Cast,
         QuickRow::Services,
+        QuickRow::Hostname,
     ];
 
     pub const ONLINE: [QuickRow; 7] = [
@@ -295,10 +310,11 @@ impl QuickRow {
         QuickRow::AutoCores,
     ];
 
-    pub const GENERAL: [QuickRow; 13] = [
+    pub const GENERAL: [QuickRow; 14] = [
         QuickRow::Wallpaper,
         QuickRow::WallpaperTint,
         QuickRow::Theme,
+        QuickRow::BootLogo,
         QuickRow::Recents,
         QuickRow::ShowTitles,
         QuickRow::BatteryDisplay,
@@ -428,6 +444,7 @@ impl QuickRow {
             | QuickRow::Haptics
             | QuickRow::TvSound
             | QuickRow::Theme
+            | QuickRow::BootLogo
             | QuickRow::Recents
             | QuickRow::ShowTitles
             | QuickRow::BatteryDisplay
@@ -444,6 +461,7 @@ impl QuickRow {
             | QuickRow::Bluetooth
             | QuickRow::BtDevices
             | QuickRow::Cast
+            | QuickRow::Hostname
             | QuickRow::Services => QuickRow::NETWORK.to_vec(),
             QuickRow::Upload
             | QuickRow::GameArt
@@ -452,7 +470,11 @@ impl QuickRow {
             | QuickRow::Updates
             | QuickRow::Cores
             | QuickRow::AutoCores => QuickRow::ONLINE.to_vec(),
-            QuickRow::Restart | QuickRow::ShutDown | QuickRow::Reload => QuickRow::POWER.to_vec(),
+            QuickRow::SleepAfter
+            | QuickRow::PowerOffAfter
+            | QuickRow::Restart
+            | QuickRow::ShutDown
+            | QuickRow::Reload => QuickRow::POWER.to_vec(),
             QuickRow::Shader
             | QuickRow::ColourCorrection
             | QuickRow::Palette
@@ -471,7 +493,7 @@ impl QuickRow {
             QuickRow::Disc => Some(QuickRow::Game),
             QuickRow::Wifi => Some(QuickRow::Network),
             QuickRow::Upload => Some(QuickRow::Online),
-            QuickRow::Restart => Some(QuickRow::Power),
+            QuickRow::SleepAfter => Some(QuickRow::Power),
             QuickRow::Wallpaper => Some(QuickRow::General),
             QuickRow::PlayScreen => Some(QuickRow::Settings),
             QuickRow::Shader => Some(QuickRow::PlayScreen),
@@ -491,7 +513,6 @@ impl QuickRow {
         page == QuickRow::MAIN
             || page == QuickRow::PLAY
             || page == QuickRow::SETTINGS
-            || page == QuickRow::POWER
             || page == QuickRow::screen_page()
     }
 
@@ -527,6 +548,10 @@ impl QuickRow {
 
     pub fn label(self) -> &'static str {
         match self {
+            QuickRow::BootLogo => "Boot Logo",
+            QuickRow::Hostname => "Hostname",
+            QuickRow::SleepAfter => "Sleep After",
+            QuickRow::PowerOffAfter => "Power Off After",
             QuickRow::FastForward => "Fast Forward",
             QuickRow::FastForwardSound => "Fast Forward Sound",
             QuickRow::Screen => "Screen",
@@ -595,6 +620,7 @@ impl QuickRow {
         matches!(
             self,
             QuickRow::DateTime
+                | QuickRow::Hostname
                 | QuickRow::Controls
                 | QuickRow::About
                 | QuickRow::Screen
@@ -679,10 +705,16 @@ pub enum QuickValue {
     Level9,
     Mix,
     Ghosting,
+    Min1,
+    Min3,
+    Min5,
+    Min10,
+    Min30,
+    Never,
 }
 
 impl QuickValue {
-    pub const ALL: [QuickValue; 40] = [
+    pub const ALL: [QuickValue; 46] = [
         QuickValue::Speed1_5,
         QuickValue::Speed2,
         QuickValue::Speed3,
@@ -723,6 +755,12 @@ impl QuickValue {
         QuickValue::Level9,
         QuickValue::Mix,
         QuickValue::Ghosting,
+        QuickValue::Min1,
+        QuickValue::Min3,
+        QuickValue::Min5,
+        QuickValue::Min10,
+        QuickValue::Min30,
+        QuickValue::Never,
     ];
 
     pub fn index(self) -> usize {
@@ -731,6 +769,12 @@ impl QuickValue {
 
     pub fn text(self) -> &'static str {
         match self {
+            QuickValue::Min1 => "1 min",
+            QuickValue::Min3 => "3 min",
+            QuickValue::Min5 => "5 min",
+            QuickValue::Min10 => "10 min",
+            QuickValue::Min30 => "30 min",
+            QuickValue::Never => "Never",
             QuickValue::Speed1_5 => "1.5×",
             QuickValue::Speed2 => "2×",
             QuickValue::Speed3 => "3×",
@@ -1057,6 +1101,8 @@ pub struct QuickMenu<'a> {
     pub wallpaper: Option<[(TexId, u32, u32); 2]>,
     /// The slot's look, by name.
     pub theme: Option<[(TexId, u32, u32); 2]>,
+    pub boot_logo: Option<[(TexId, u32, u32); 2]>,
+    pub hostname: Option<[(TexId, u32, u32); 2]>,
     pub faces: Option<&'a QuickMenuFaces>,
     pub ground: Option<TexId>,
     pub palette: Option<[(TexId, u32, u32); 2]>,
@@ -1131,6 +1177,8 @@ impl QuickMenu<'_> {
                 QuickRow::DateTime => self.clock.map(|c| c[lit as usize]),
                 QuickRow::Wallpaper => self.wallpaper.map(|c| c[lit as usize]),
                 QuickRow::Theme => self.theme.map(|c| c[lit as usize]),
+                QuickRow::BootLogo => self.boot_logo.map(|c| c[lit as usize]),
+                QuickRow::Hostname => self.hostname.map(|c| c[lit as usize]),
                 QuickRow::Palette => self.palette.map(|c| c[lit as usize]),
                 QuickRow::BezelOf(p) => self.bezels[p.index()].map(|c| c[lit as usize]),
                 QuickRow::Bezel => self.bezel.map(|c| c[lit as usize]),

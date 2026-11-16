@@ -27,6 +27,7 @@ pub struct Session {
     pad: Pad,
     /// The sticks as the input last read them.
     sticks: [i16; 4],
+    held_input: u32,
     rewinding: bool,
     fast: bool,
     motor: u16,
@@ -51,6 +52,7 @@ impl Session {
             gestures: Gestures::new(),
             pad: Pad::default(),
             sticks: [0; 4],
+            held_input: 0,
             rewinding: false,
             fast: false,
             motor: 0,
@@ -176,7 +178,18 @@ impl Session {
         let latched = self.gestures.ff_latched();
         self.gestures.set_game_triggers(self.app.game_triggers());
         for ev in events {
+            self.app.note_input(now);
+            match ev {
+                RawEvent::Down(btn) if btn != slot_input::Btn::Lid => {
+                    self.held_input |= 1 << btn as u32
+                }
+                RawEvent::Up(btn) => self.held_input &= !(1 << btn as u32),
+                _ => {}
+            }
             actions.extend(self.gestures.feed(ev, now));
+        }
+        if self.held_input != 0 || self.sticks.iter().any(|v| *v != 0) {
+            self.app.note_input(now);
         }
         actions.extend(self.gestures.tick(now));
         if !latched && (self.app.in_game_menu().is_some() || self.app.game_page_open()) {

@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.14.0
+
+- Sleep After and Power Off After under Settings → Power. Sleep After (Off by default, or 1, 3, 5 or 10 minutes) puts the handheld to sleep after that long without input, on the shelf, in menus or in games, as a tap of Power does: the game is saved and its cart stays in. Link sessions, Gallery videos, playing music, casting and downloads keep it awake. Power Off After sets how long it stays asleep before powering off: 1, 3 (the old fixed time, and still the default), 5, 10 or 30 minutes, or Never.
+- Hostname under Settings → Network names the handheld on the network. It checks the name as BaseOS does and saves it in `baseos.conf`, changing only that line, even when unslot runs from TF2. The new name is used from the next restart.
+- Boot Logo under Settings → General, after Theme, chooses unslot's logo, BaseOS's original, or a PNG, JPEG or BMP from the new `Bootlogos/` folder. Pictures larger than the screen are scaled down to fit, centred on their top-left pixel's colour, and installed in the background. Upload from Phone takes a Boot logo too, up to 8 MiB, and selects it when it arrives.
+
 ## v2.13.1
 
 - Google Cast discovery listens for multicast and unicast DNS-SD replies, collects records split across packets, and asks for missing service and host records. It keeps listening throughout a simultaneous Wi-Fi Direct search: the two handheld interfaces share a radio, and the old three-second Cast search could finish before replies got through.

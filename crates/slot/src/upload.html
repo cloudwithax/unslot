@@ -55,6 +55,7 @@ select{appearance:none;-webkit-appearance:none;width:100%;height:50px;padding:0 
 <button class="chip" type="button" data-kind="game" aria-pressed="true">Game</button>
 <button class="chip" type="button" data-kind="bezel" aria-pressed="false">Bezel</button>
 <button class="chip" type="button" data-kind="wallpaper" aria-pressed="false">Wallpaper</button>
+<button class="chip" type="button" data-kind="bootlogo" aria-pressed="false">Boot logo</button>
 </div>
 
 <div id="system-field">
@@ -78,14 +79,15 @@ const $=id=>document.getElementById(id);
 const hints={
  game:"Unzip games first, except arcade, Neo Geo and CPS sets, and DOS and Amiga games packed that way.",
  bezel:"A PNG the size of the screen, with a clear window for the game. Send its .info too if it has one, or a RetroArch overlay's .cfg with its PNG.",
- wallpaper:"A PNG or a JPEG. It becomes the wallpaper as soon as it arrives."
+ wallpaper:"A PNG or a JPEG. It becomes the wallpaper as soon as it arrives.",
+ bootlogo:"A PNG, a JPEG or a BMP, up to 8 MiB. It becomes the boot logo as soon as it arrives."
 };
-const accept={game:"",bezel:".png,.info,.cfg",wallpaper:".png,.jpg,.jpeg"};
+const accept={game:"",bezel:".png,.info,.cfg",wallpaper:".png,.jpg,.jpeg",bootlogo:".png,.jpg,.jpeg,.bmp"};
 let kind="game";
 function pick(k){
  kind=k;
  document.querySelectorAll(".chip").forEach(c=>c.setAttribute("aria-pressed",c.dataset.kind===k));
- $("system-field").hidden=k==="wallpaper";
+ $("system-field").hidden=k==="wallpaper"||k==="bootlogo";
  $("files").accept=accept[k];
  $("hint").textContent=hints[k];
 }
@@ -121,7 +123,7 @@ function send(file,to,li){
 }
 $("go").onclick=async()=>{
  const sys=$("system").value;
- const to=kind==="wallpaper"?"{WALLPAPER}":kind==="bezel"?"{BEZEL}"+sys:sys;
+ const to=kind==="bootlogo"?"bootlogo":kind==="wallpaper"?"{WALLPAPER}":kind==="bezel"?"{BEZEL}"+sys:sys;
  const files=[...$("files").files];
  $("go").disabled=true;
  const rows=files.map(f=>row(f.name));

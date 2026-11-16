@@ -332,6 +332,12 @@ impl BezelPick {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct SlotState {
+    /// Minutes without input before sleeping; zero disables idle sleep.
+    pub sleep_after: u8,
+    /// Minutes asleep before powering off; zero means never.
+    pub power_off_after: u8,
+    /// `unslot`, `BaseOS`, or a file name in Bootlogos.
+    pub boot_logo: String,
     pub cart: Option<String>,
     pub cart_platform: Option<Platform>,
     pub brightness: u8,
@@ -549,6 +555,9 @@ impl Shader {
 impl Default for SlotState {
     fn default() -> Self {
         SlotState {
+            sleep_after: 0,
+            power_off_after: 3,
+            boot_logo: "unslot".into(),
             cart: None,
             cart_platform: None,
             brightness: 5,
@@ -674,6 +683,10 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         s.appearance.name(),
         s.wallpaper.key()
     );
+    text.push_str(&format!(
+        "sleep_after={}\npower_off_after={}\nboot_logo={}\n",
+        s.sleep_after, s.power_off_after, s.boot_logo
+    ));
     for p in Platform::ALL {
         let (key, screen) = (p.key(), s.screen(p));
         text.push_str(&format!(
@@ -729,6 +742,9 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
 }
 
 fn parse(text: &str) -> Option<SlotState> {
+    let mut sleep_after = 0;
+    let mut power_off_after = 3;
+    let mut boot_logo = "unslot".to_string();
     let mut cart = None;
     let mut cart_platform = None;
     let mut brightness = None;
@@ -803,6 +819,21 @@ fn parse(text: &str) -> Option<SlotState> {
             continue;
         }
         match key {
+            "sleep_after" => {
+                sleep_after = value
+                    .parse()
+                    .ok()
+                    .filter(|n| [0, 1, 3, 5, 10].contains(n))
+                    .unwrap_or(0);
+            }
+            "power_off_after" => {
+                power_off_after = value
+                    .parse()
+                    .ok()
+                    .filter(|n| [0, 1, 3, 5, 10, 30].contains(n))
+                    .unwrap_or(3);
+            }
+            "boot_logo" => boot_logo = value.to_string(),
             "cart" => cart = Some(value.to_string()),
             "cart_platform" => cart_platform = Platform::from_key(value),
             "brightness" => brightness = Some(level(value, BRIGHTNESS_MAX)?),
@@ -875,6 +906,9 @@ fn parse(text: &str) -> Option<SlotState> {
         }
     });
     Some(SlotState {
+        sleep_after,
+        power_off_after,
+        boot_logo,
         cart: if cart.is_empty() { None } else { Some(cart) },
         cart_platform,
         brightness: brightness?,

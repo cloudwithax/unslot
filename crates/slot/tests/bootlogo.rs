@@ -182,3 +182,76 @@ fn a_config_logo_that_is_not_a_24_bit_bmp_falls_back_to_the_shipped_one() {
     let card = card_with(&[(CARD_LOGO, &shipped), (USER_LOGO, b"not a bmp")]);
     assert_eq!(chosen(card.path()), Some(shipped));
 }
+
+#[test]
+fn selection_fits_pictures_restores_baseos_and_removes_the_override_for_unslot() {
+    use slot::bootlogo::select_in;
+    let card = tempfile::tempdir().unwrap();
+    let boot = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(card.path().join("System")).unwrap();
+    std::fs::create_dir_all(card.path().join("Bootlogos")).unwrap();
+    let original = encode(&Bmp {
+        width: 4,
+        height: 6,
+        rgb: (0..24).map(|n| [n, 1, 2]).collect(),
+    });
+    std::fs::write(boot.path().join("bootlogo.bmp"), &original).unwrap();
+    let shipped = encode(&Bmp {
+        width: 3,
+        height: 2,
+        rgb: vec![[1, 2, 3]; 6],
+    });
+    std::fs::write(card.path().join(CARD_LOGO), &shipped).unwrap();
+    std::fs::write(
+        card.path().join("Bootlogos/Picture.jpg"),
+        include_bytes!("../../slot-ui/tests/fixtures/two-bands.jpg"),
+    )
+    .unwrap();
+    select_in(card.path(), "Picture.jpg", boot.path()).unwrap();
+    assert_eq!(
+        std::fs::read(boot.path().join("bootlogo.baseos.bmp")).unwrap(),
+        original
+    );
+    let selected = decode(&std::fs::read(card.path().join(USER_LOGO)).unwrap()).unwrap();
+    assert_eq!((selected.width, selected.height), (4, 4));
+    assert_eq!(
+        install(&chosen(card.path()).unwrap(), boot.path()).unwrap(),
+        Outcome::Same
+    );
+    select_in(card.path(), "BaseOS", boot.path()).unwrap();
+    assert_eq!(
+        std::fs::read(boot.path().join("bootlogo.bmp")).unwrap(),
+        original
+    );
+    // The saved override is landscape-oriented, so startup and splash turn it only once.
+    assert_eq!(
+        install(&chosen(card.path()).unwrap(), boot.path()).unwrap(),
+        Outcome::Same
+    );
+    select_in(card.path(), "unslot", boot.path()).unwrap();
+    assert!(!card.path().join(USER_LOGO).exists());
+    assert_eq!(install(&shipped, boot.path()).unwrap(), Outcome::Same);
+}
+
+#[test]
+fn a_picture_that_will_not_decode_changes_neither_logo() {
+    let card = tempfile::tempdir().unwrap();
+    let boot = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(card.path().join("Bootlogos")).unwrap();
+    std::fs::create_dir_all(card.path().join("Config")).unwrap();
+    let original = screen(8, 6, 30);
+    let override_logo = encode(&mark());
+    std::fs::write(boot.path().join("bootlogo.bmp"), &original).unwrap();
+    std::fs::write(card.path().join(USER_LOGO), &override_logo).unwrap();
+    std::fs::write(card.path().join("Bootlogos/Broken.png"), b"not a picture").unwrap();
+    assert!(slot::bootlogo::select_in(card.path(), "Broken.png", boot.path()).is_err());
+    assert_eq!(
+        std::fs::read(boot.path().join("bootlogo.bmp")).unwrap(),
+        original
+    );
+    assert_eq!(
+        std::fs::read(card.path().join(USER_LOGO)).unwrap(),
+        override_logo
+    );
+    assert!(!boot.path().join("bootlogo.baseos.bmp").exists());
+}
