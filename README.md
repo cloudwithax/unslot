@@ -256,7 +256,7 @@ out at 720 by 720. It has been run on hardware on the **RG34XX SP**. If you try 
 model, [open an issue](https://github.com/cloudwithax/unslot/issues) and say how it went.
 
 A port to TrimUI's A133P handhelds, the Smart Pro, Brick and Brick Pro, is in progress on the
-`a133p` branch. It boots on a Brick Pro; Wi-Fi and Bluetooth do not work there yet. See
+`a133p` branch. The Brick Pro boots with corrected screen cropping and user-confirmed Wi-Fi and Bluetooth.
 [ports/a133p/README.md](ports/a133p/README.md).
 
 ## Building

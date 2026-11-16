@@ -782,6 +782,11 @@ tasks:
         {{.MGBA_COMMIT}} target-a133p/mgba target-a133p/cores/mgba_libretro.so
       - sh tools/a133p/check-glibc.sh target-a133p/cores/mgba_libretro.so
 
+  core:a133p:extra:
+    desc: Rebuild incompatible buildbot cores for A133P (optional CORE arguments)
+    cmds:
+      - sh tools/a133p/cores.sh {{.CLI_ARGS}}
+
   dist:a133p:
     desc: >-
       Build the card for TrimUI's A133P handhelds into OUT (default dist-a133p): the H700 tree
@@ -797,7 +802,7 @@ tasks:
       - rm -rf {{.OUT}}
       - cp -R {{.FROM}} {{.OUT}}
       - cp target-a133p/aarch64-unknown-linux-gnu/device/slot {{.OUT}}/System/slot
-      - cp target-a133p/cores/mgba_libretro.so {{.OUT}}/System/
+      - for f in target-a133p/cores/*_libretro.so; do test ! -f "$f" || cp "$f" {{.OUT}}/System/; done
       - cp -R card/System/. {{.OUT}}/System/
       - cp -R ports/a133p/card/. {{.OUT}}/
       - |
