@@ -2,12 +2,12 @@
 
 ## Unreleased
 
-- A port to TrimUI's A133P handhelds, the Smart Pro, Brick and Brick Pro, on their stock firmware, built with `task dist:a133p`. It has not been run on hardware yet, and most bundled cores need a newer glibc than the firmware has. See `ports/a133p/README.md`.
+- A port to TrimUI's A133P handhelds, the Smart Pro, Brick and Brick Pro, on their stock firmware, built with `task dist:a133p`. It boots on a Brick Pro; its Wi-Fi and Bluetooth are not working yet, and some bundled cores need a newer glibc than the firmware has. See `ports/a133p/README.md`.
 - Update packs carry the chip they are for. A133P builds look for `unslot-<version>-a133p.pak`; the H700's packs keep their name, `unslot-<version>.pak`.
 - The installer is now `card/update/install.sh`, copied into each pack under its chip's name, and it installs only a pack built for its own chip.
 - `coresave.sh` finds the card from where it sits instead of assuming `/mnt/sdcard`, so it also finds `/mnt/SDCARD`, where TrimUI's firmware mounts the card.
 - On a 4:3 screen the shelf and menus keep their whole 720-wide layout, with room above and below as on the RG CubeXX, instead of a 640-wide middle that cut off the carts and names at the sides. This is every 4:3 panel: the 640x480 RG35XX family as well as the 1024x768 Brick.
-- Bluetooth runs `bluetoothctl` under BusyBox 1.27's `timeout -t` where the plain `timeout SECS` form is missing, and update packs are picked by a plain sort where `sort -V` is.
+- Update packs are picked by a plain sort where `sort -V` is missing, as in TrimUI's BusyBox 1.27.
 
 ## v2.13.1
 

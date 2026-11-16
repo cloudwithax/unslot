@@ -47,10 +47,11 @@ show() {
 	done
 	section "wifi config and init"
 	ls -la /etc/wifi /etc/init.d 2> /dev/null
-	show /etc/init.d/wpa_supplicant /etc/init.d/wifi /etc/init.d/network /etc/wifi/*.sh /etc/wifi/*.conf
+	show /etc/init.d/wpa_supplicant /etc/init.d/wifi /etc/wifi/*.sh /etc/wifi/*.conf /etc/wifi/udhcpc_wlan0
 	section bluetooth
 	ls -la /etc/bluetooth /sys/class/bluetooth /proc/bluetooth /proc/bluetooth/sleep 2> /dev/null
-	show /etc/bluetooth/*.sh /etc/bluetooth/bluetoothd /etc/bluetooth/main.conf /etc/init.d/bluetooth* /etc/init.d/bt*
+	show /etc/init.d/hciattach /etc/bluetooth/bt-init /etc/bluetooth/xr_bt.conf /etc/bluetooth/bluetoothd /etc/bluetooth/main.conf /etc/bluetooth/bluetooth.json
+	ls -l /lib/firmware 2> /dev/null | grep -iE 'xr|bt|fw' | head -n 20
 	ls -l /dev/ttyS* 2> /dev/null
 	section "stock launcher"
 	show /usr/trimui/bin/runtrimui-original.sh /etc/init.d/runtrimui

@@ -1,9 +1,9 @@
 # unslot on TrimUI's A133P handhelds
 
 > [!WARNING]
-> This port has not been run on a TrimUI handheld yet. Everything below is what it is built to do,
-> not what has been seen to work. If you try it, [open an issue](https://github.com/cloudwithax/unslot/issues)
-> with `Logs/a133p.log` and `Logs/slot.log`.
+> This port is being brought up. It has booted on a Brick Pro, where Wi-Fi and Bluetooth do not
+> work yet; the Smart Pro and Brick have not been tried. If you try it,
+> [open an issue](https://github.com/cloudwithax/unslot/issues) with the files in `Logs`.
 
 The port lives on the `a133p` branch. It runs unslot on TrimUI's stock firmware, in place of
 TrimUI's frontend, with no BaseOS under it.
@@ -16,10 +16,12 @@ TrimUI's frontend, with no BaseOS under it.
 | TrimUI Brick | 1024 by 768 | no sticks; two front keys |
 | TrimUI Brick Pro | 1024 by 768 | two sticks, L3 and R3, F1 and F2, Home |
 
-All three are Allwinner A133P with a PowerVR GE8300 GPU, on TrimUI's stock firmware (glibc 2.23,
-Linux 4.9). NextUI calls this platform tg5040. The hardware facts the port uses, its GPIOs, mixer
-controls, key codes and ioctls, were taken from [NextUI](https://github.com/LoveRetro/NextUI). No
-NextUI code is used: NextUI is under the PolyForm Noncommercial licence.
+All three are Allwinner A133P with a PowerVR GE8300 GPU, on TrimUI's stock firmware: Tina Linux on
+Linux 4.9, with an XRadio XR829 for Wi-Fi and Bluetooth. TrimUI's 2023 SDK has glibc 2.23; the Brick
+Pro's firmware 1.1.1 (July 2026) has 2.33. NextUI calls this platform tg5040. The hardware facts
+the port uses, its GPIOs, mixer controls, key codes and ioctls, were taken from
+[NextUI](https://github.com/LoveRetro/NextUI). No NextUI code is used: NextUI is under the
+PolyForm Noncommercial licence.
 
 ## Install
 
@@ -114,16 +116,26 @@ Builds use [Task](https://taskfile.dev), and cross-compile against glibc 2.23 th
 `dist:a133p` starts from an H700 device tree, `FROM`, which defaults to `dist-device`; an unzipped
 release `unslot-<version>-h700.zip` works too. It puts in the A133P's own slot and mGBA, and the
 files the firmware boots through. It writes `Logs/a133p-glibc.txt`, listing every file that needs a
-newer glibc than 2.23.
+newer glibc than 2.23, the oldest firmware's.
 
 ## Known limits
 
-- **Untested on hardware.** Nothing here has run on a TrimUI handheld yet.
-- **Most cores and tools will not load yet.** They come from the H700 build and need glibc 2.29 to
-  2.38: about 60 of 97 files, among them the buildbot cores such as FCEUmm, Snes9x, PCSX ReARMed and
-  FinalBurn Neo, Flycast, PPSSPP, DraStic's SDL, PortMaster's libraries and `zip`. They will not
-  load on the stock firmware until they are rebuilt. The A133P's own slot and mGBA, and gpSP, are
-  built for 2.23. `Logs/a133p-glibc.txt` lists the rest.
+- **Run on a Brick Pro, firmware 1.1.1.** It boots to the shelf, the screen is the right way up and
+  filled, and the buttons drive the menus. Wi-Fi and Bluetooth are still being brought up, and the
+  Smart Pro and Brick have not been tried.
+- **Some cores and tools need a newer glibc.** They come from the H700 build. On the Brick Pro's
+  glibc 2.33, 14 files will not load: DOSBox Pure, FinalBurn Neo, Hatari, Beetle PC-FX, Neko
+  Project II, PCSX ReARMed, PUAE, px68k, Retro8, MAME 2003-Plus, TIC-80, PortMaster's OpenAL and
+  `astcenc`, and `zip`. On older firmware with glibc 2.23, about 60 files will not, listed in
+  `Logs/a133p-glibc.txt`. The A133P's own slot and mGBA, and gpSP, load on either.
+- **Wi-Fi is not done.** The firmware starts its own `wpa_supplicant` at boot, which fought unslot's
+  for `wlan0`; it is now stopped for the first minute after boot. The XR829 driver has also logged
+  a kernel warning while failing to authenticate to one network, and a join has restarted the
+  handheld. Wi-Fi Direct, and so Miracast, is not there: the firmware's supplicant is built without
+  P2P.
+- **Bluetooth is not done.** The firmware has no `timeout`, which every `bluetoothctl` call ran
+  under, so the port brings its own; the firmware's own `hciattach` is left to finish loading the
+  chip's firmware.
 - **Not done yet:**
   - DraStic, which is the H700's SDL and Mali build;
   - the volume of PortMaster ports, which uses the H700's codec control;
@@ -132,4 +144,5 @@ newer glibc than 2.23.
   - deep sleep;
   - SSH, which on the H700 is BaseOS's dropbear;
   - a release, and a CI job to build one.
-- **Pak updates** need `unzip` and `sort -V` on the firmware, which has not been checked.
+- **Pak updates** need `unzip`, which the Brick Pro's firmware does not have. Its BusyBox `sort` has
+  no `-V`, so a plain sort picks the pack.

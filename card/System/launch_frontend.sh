@@ -83,8 +83,9 @@ if [ -f "$UPD/trial" ] && [ -d "$UPD/System.old" ]; then
 	sync
 fi
 
+# The power LED, through BaseOS's AXP2202 driver; TrimUI's firmware does not let it be set.
 pid="$(cat "$RUN/slot-led.pid" 2>/dev/null)"
-if [ -z "$pid" ] || [ ! -d "/proc/$pid" ]; then
+if [ "$CHIP" = h700 ] && { [ -z "$pid" ] || [ ! -d "/proc/$pid" ]; }; then
 	sh "$SYS/led.sh" once
 	sh "$SYS/led.sh" loop > /dev/null 2>&1 &
 	echo $! > "$RUN/slot-led.pid"

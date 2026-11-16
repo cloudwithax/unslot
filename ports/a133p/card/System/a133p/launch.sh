@@ -38,9 +38,10 @@ export LD_LIBRARY_PATH="/usr/trimui/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 # slot and its scripts keep their pids and sockets in /run, which is in memory on BaseOS.
 grep -q ' /run ' /proc/mounts || { mkdir -p /run && mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run; }
 
-# gpio N in|out [VALUE]
+# gpio N in|out [VALUE]. A pin the kernel already holds (PD11 on the Brick Pro) is left to it.
 gpio() {
-	[ -d "/sys/class/gpio/gpio$1" ] || echo "$1" > /sys/class/gpio/export
+	[ -d "/sys/class/gpio/gpio$1" ] || echo "$1" > /sys/class/gpio/export 2> /dev/null
+	[ -d "/sys/class/gpio/gpio$1" ] || return 0
 	echo "$2" > "/sys/class/gpio/gpio$1/direction"
 	[ -z "${3:-}" ] || echo "$3" > "/sys/class/gpio/gpio$1/value"
 }
@@ -74,18 +75,37 @@ for p in /sys/devices/system/cpu/cpufreq/policy*; do
 done
 
 # slot runs Wi-Fi itself, so the firmware's supplicant and lease go: two supplicants on wlan0
-# fight over every handshake.
+# fight over every handshake, one deauthenticating as soon as the other associates. The
+# firmware's is a procd service whose boot script is still retrying `ifconfig wlan0 up` when
+# this runs, so it starts after any one-off stop: it is watched for, by its config under
+# /etc/wifi, for a minute.
 echo "radio daemons at boot: $(ps w 2> /dev/null | grep -E 'wpa_supplicant|udhcpc|hciattach|bluetoothd|bluealsa' | grep -v grep | tr -s ' ' | tr '\n' ';')"
-/etc/init.d/wpa_supplicant stop > /dev/null 2>&1
-killall wpa_supplicant udhcpc 2> /dev/null
+killall udhcpc 2> /dev/null
+(n=0
+while [ "$n" -lt 60 ]; do
+	for pid in $(ps w 2> /dev/null | grep '[w]pa_supplicant.*/etc/wifi/' | awk '{print $1}'); do
+		echo "$(date '+%F %T') stopping the firmware's wpa_supplicant ($pid)"
+		kill "$pid" 2> /dev/null
+	done
+	sleep 1
+	n=$((n + 1))
+done) &
 
 # What slotwifi.sh and slotbt.sh call on BaseOS, where TrimUI's firmware has something else.
 command -v rfkill > /dev/null 2>&1 || export AGS_RFKILL="/bin/sh $HERE/rfkill.sh"
 export AGS_SYSTEMCTL="/bin/sh $HERE/systemctl.sh"
 export AGS_SETBT="$HERE/bluetooth.sh"
 export AGS_HCIATTACH=hciattach
-# The firmware's BusyBox (1.27) wants timeout's seconds after -t.
-timeout 1 true 2> /dev/null || export AGS_TIMEOUT="timeout -t"
+# The firmware's own hciattach loads the chip's firmware for some seconds after boot.
+export AGS_HCI_WAIT_S=20
+# The Brick Pro's firmware has no timeout at all; older BusyBoxes want its seconds after -t.
+if ! timeout 1 true 2> /dev/null; then
+	if timeout -t 1 true 2> /dev/null; then
+		export AGS_TIMEOUT="timeout -t"
+	else
+		export AGS_TIMEOUT="/bin/sh $HERE/timeout.sh"
+	fi
+fi
 
 # While the port is brought up: the radio scripts' every step, the supplicant's debug output,
 # the kernel's log and what the firmware has, all in Logs, a boot's worth at a time.
@@ -97,7 +117,7 @@ for f in radio-trace.log wpa_supplicant.log dmesg.txt; do
 done
 /bin/sh "$HERE/diag.sh" "$LOGS/a133p-diag.txt" &
 (while :; do
-	sleep 20
+	sleep 5
 	dmesg > "$LOGS/dmesg.txt" 2> /dev/null
 done) &
 

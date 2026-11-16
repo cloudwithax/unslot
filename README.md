@@ -256,7 +256,8 @@ out at 720 by 720. It has been run on hardware on the **RG34XX SP**. If you try 
 model, [open an issue](https://github.com/cloudwithax/unslot/issues) and say how it went.
 
 A port to TrimUI's A133P handhelds, the Smart Pro, Brick and Brick Pro, is in progress on the
-`a133p` branch. It has not been run on hardware yet. See [ports/a133p/README.md](ports/a133p/README.md).
+`a133p` branch. It boots on a Brick Pro; Wi-Fi and Bluetooth do not work there yet. See
+[ports/a133p/README.md](ports/a133p/README.md).
 
 ## Building
 
@@ -267,7 +268,7 @@ Builds use [Task](https://taskfile.dev). The device build runs in an arm64 Debia
 | `task dist:device` | The card tree in `dist-device`. |
 | `task dist:update` | The update pack, `MinUI.zip`. |
 | `task image:device TARGET=rg34xxsp` | A whole card image to flash to TF1: BaseOS with unslot already on it (Linux only). |
-| `task dist:a133p` | The card tree for TrimUI's A133P handhelds in `dist-a133p`, built from an H700 tree. Untested; see [ports/a133p/README.md](ports/a133p/README.md). |
+| `task dist:a133p` | The card tree for TrimUI's A133P handhelds in `dist-a133p`, built from an H700 tree. In progress; see [ports/a133p/README.md](ports/a133p/README.md). |
 | `task test` | The tests. |
 
 ## Credits
