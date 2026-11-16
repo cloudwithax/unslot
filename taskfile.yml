@@ -757,6 +757,62 @@ tasks:
         v="$(cat "{{.OUT}}/System/version")"
         cargo run -q --release -p slot --no-default-features --example make_pak --           "{{.PACK}}" "$v" "unslot-$v.pak"
 
+  build:a133p:
+    desc: >-
+      Build for TrimUI's A133P handhelds, the Smart Pro, Brick and Brick Pro, against the glibc
+      2.23 their firmware has, through zig: cargo install cargo-zigbuild, and pip install ziglang
+      or put zig on the PATH
+    cmds:
+      - >-
+        UNSLOT_CHIP=a133p CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=cortex-a53"
+        cargo zigbuild --profile device --target aarch64-unknown-linux-gnu.2.23
+        --target-dir target-a133p -p slot --no-default-features --features device
+      - tools/target-cap/target-cap.sh
+      - sh tools/a133p/check-glibc.sh target-a133p/aarch64-unknown-linux-gnu/device/slot
+      - 'echo "built target-a133p/aarch64-unknown-linux-gnu/device/slot"'
+
+  core:a133p:
+    desc: Build the mGBA core for the A133P handhelds, against their firmware's glibc, through zig
+    status:
+      - test -f target-a133p/cores/mgba_libretro.so
+      - test "$(cat target-a133p/cores/mgba_libretro.so.meta 2>/dev/null)" = "$(sh cores/mgba/build.sh stamp {{.MGBA_COMMIT}})"
+    cmds:
+      - >-
+        CMAKE_TOOLCHAIN_FILE="$PWD/tools/a133p/toolchain.cmake" sh cores/mgba/build.sh build
+        {{.MGBA_COMMIT}} target-a133p/mgba target-a133p/cores/mgba_libretro.so
+      - sh tools/a133p/check-glibc.sh target-a133p/cores/mgba_libretro.so
+
+  dist:a133p:
+    desc: >-
+      Build the card for TrimUI's A133P handhelds into OUT (default dist-a133p): the H700 tree
+      FROM (default dist-device, from task dist:device or an unzipped unslot-<version>-h700.zip)
+      with the A133P's own slot and mGBA, this checkout's card/System, and the files TrimUI's
+      firmware boots it through. Copy all of OUT, .tmp_update too, to the root of the card
+    deps: [build:a133p, core:a133p]
+    vars:
+      OUT: '{{.OUT | default "dist-a133p"}}'
+      FROM: '{{.FROM | default "dist-device"}}'
+    cmds:
+      - test -f "{{.FROM}}/System/slot" || { echo "{{.FROM}} is not a device tree" >&2; exit 1; }
+      - rm -rf {{.OUT}}
+      - cp -R {{.FROM}} {{.OUT}}
+      - cp target-a133p/aarch64-unknown-linux-gnu/device/slot {{.OUT}}/System/slot
+      - cp target-a133p/cores/mgba_libretro.so {{.OUT}}/System/
+      - cp -R card/System/. {{.OUT}}/System/
+      - cp -R ports/a133p/card/. {{.OUT}}/
+      - |
+        set -eu
+        v='{{.VERSION | default ""}}'
+        [ -n "$v" ] || v="$(git describe --tags --always --dirty 2>/dev/null || echo unknown)"
+        echo "$v" > "{{.OUT}}/System/version"
+      - |
+        # What in the tree the firmware's glibc is too old for, so a core that will not load is
+        # no surprise.
+        mkdir -p {{.OUT}}/Logs
+        sh tools/a133p/check-glibc.sh -r {{.OUT}}/System > {{.OUT}}/Logs/a133p-glibc.txt
+        echo "$(wc -l < {{.OUT}}/Logs/a133p-glibc.txt) files need a newer glibc; see {{.OUT}}/Logs/a133p-glibc.txt"
+      - 'echo "A133P card ready at {{.OUT}}, copy all of it, .tmp_update too, to the card root"'
+
   deploy:device:
     desc: Build and push onto a device over adb, then restart it. SD defaults to /mnt/sdcard
     deps: [core:device, core:gpsp, core:fetch, services, drastic, portmaster, build:device]

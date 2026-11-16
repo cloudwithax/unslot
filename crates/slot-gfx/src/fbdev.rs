@@ -22,6 +22,7 @@ const EGL_CONTEXT_CLIENT_VERSION: i32 = 0x3098;
 const EGL_OPENGL_ES_API: u32 = 0x30A0;
 const EGL_WINDOW_BIT: i32 = 0x0004;
 const EGL_OPENGL_ES2_BIT: i32 = 0x0004;
+const EGL_VENDOR: i32 = 0x3053;
 
 type Ptr = *mut c_void;
 type GetDisplay = unsafe extern "C" fn(Ptr) -> Ptr;
@@ -37,6 +38,7 @@ type SwapInterval = unsafe extern "C" fn(Ptr, i32) -> u32;
 type GetProcAddress = unsafe extern "C" fn(*const c_char) -> *const c_void;
 type GetError = unsafe extern "C" fn() -> i32;
 type Terminate = unsafe extern "C" fn(Ptr) -> u32;
+type QueryString = unsafe extern "C" fn(Ptr, i32) -> *const c_char;
 
 struct Egl {
     get_display: GetDisplay,
@@ -52,6 +54,7 @@ struct Egl {
     get_proc_address: GetProcAddress,
     get_error: GetError,
     terminate: Terminate,
+    query_string: QueryString,
     _lib: Library,
 }
 
@@ -154,6 +157,7 @@ impl Egl {
                 swap_interval: sym(&lib, "eglSwapInterval")?,
                 get_proc_address: sym(&lib, "eglGetProcAddress")?,
                 get_error: sym(&lib, "eglGetError")?,
+                query_string: sym(&lib, "eglQueryString")?,
                 terminate: sym(&lib, "eglTerminate")?,
                 _lib: lib,
             })
@@ -200,39 +204,54 @@ impl FbdevSurface {
             if (egl.bind_api)(EGL_OPENGL_ES_API) == 0 {
                 return Err(egl.fail("eglBindAPI"));
             }
-            let attrs = [
-                EGL_SURFACE_TYPE,
-                EGL_WINDOW_BIT,
-                EGL_RED_SIZE,
-                8,
-                EGL_GREEN_SIZE,
-                8,
-                EGL_BLUE_SIZE,
-                8,
-                EGL_ALPHA_SIZE,
-                0,
-                EGL_RENDERABLE_TYPE,
-                EGL_OPENGL_ES2_BIT,
-                EGL_NONE,
-            ];
+            // 8/8/8 colour, or 5/6/5 where a 16-bit framebuffer gives nothing better.
             let mut config: Ptr = std::ptr::null_mut();
             let mut found = 0;
-            if (egl.choose_config)(display, attrs.as_ptr(), &mut config, 1, &mut found) == 0 {
-                return Err(egl.fail("eglChooseConfig"));
+            for (r, g, b) in [(8, 8, 8), (5, 6, 5)] {
+                let attrs = [
+                    EGL_SURFACE_TYPE,
+                    EGL_WINDOW_BIT,
+                    EGL_RED_SIZE,
+                    r,
+                    EGL_GREEN_SIZE,
+                    g,
+                    EGL_BLUE_SIZE,
+                    b,
+                    EGL_ALPHA_SIZE,
+                    0,
+                    EGL_RENDERABLE_TYPE,
+                    EGL_OPENGL_ES2_BIT,
+                    EGL_NONE,
+                ];
+                if (egl.choose_config)(display, attrs.as_ptr(), &mut config, 1, &mut found) == 0 {
+                    return Err(egl.fail("eglChooseConfig"));
+                }
+                if found > 0 {
+                    if r < 8 {
+                        eprintln!("slot: egl: no 8/8/8 window config, drawing in 5/6/5");
+                    }
+                    break;
+                }
             }
             if found == 0 {
                 return Err(GfxError::Context(
-                    "eglChooseConfig: no es2 window config with 8/8/8 colour".into(),
+                    "eglChooseConfig: no es2 window config with 8/8/8 or 5/6/5 colour".into(),
                 ));
             }
+            // Mali's fbdev EGL takes the panel's size as its window. PowerVR's, on TrimUI's A133P
+            // handhelds, has no window system and fills the framebuffer: its window is null, as
+            // TrimUI's own SDL gives it.
             let mut window = Box::new(FbdevWindow {
                 width: hint.0 as u16,
                 height: hint.1 as u16,
             });
-            let native = &mut *window as *mut FbdevWindow as Ptr;
+            let native = match imagination(&egl, display) {
+                true => std::ptr::null_mut(),
+                false => &mut *window as *mut FbdevWindow as Ptr,
+            };
             let mut surface =
                 (egl.create_window_surface)(display, config, native, std::ptr::null());
-            if surface.is_null() {
+            if surface.is_null() && !native.is_null() {
                 surface = (egl.create_window_surface)(
                     display,
                     config,
@@ -269,6 +288,17 @@ impl FbdevSurface {
             })
         }
     }
+}
+
+/// Whether the EGL is Imagination's, PowerVR's.
+fn imagination(egl: &Egl, display: Ptr) -> bool {
+    let vendor = unsafe { (egl.query_string)(display, EGL_VENDOR) };
+    if vendor.is_null() {
+        return false;
+    }
+    let vendor = unsafe { std::ffi::CStr::from_ptr(vendor) }.to_string_lossy();
+    eprintln!("slot: egl vendor {vendor}");
+    vendor.contains("Imagination")
 }
 
 fn query_size(egl: &Egl, display: Ptr, surface: Ptr) -> Option<(u32, u32)> {

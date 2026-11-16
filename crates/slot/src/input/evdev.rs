@@ -16,17 +16,22 @@ pub const ABS_GAS: u16 = 0x09;
 pub const ABS_BRAKE: u16 = 0x0a;
 pub const ABS_LSX: u16 = 0x02;
 pub const ABS_LSY: u16 = 0x03;
+pub const ABS_Z: u16 = 0x02;
+pub const ABS_RZ: u16 = 0x05;
 
 /// How far the stick, scaled to i16, tilts before it counts as a d-pad press: half way.
 pub const STICK_DEADZONE: i32 = i16::MAX as i32 / 2;
 
-const LEFT_STICK_TARGETS: [&str; 6] = [
+const LEFT_STICK_TARGETS: [&str; 8] = [
     "rg34xxsp",
     "rg35xxh",
     "rg35xxpro",
     "rg40xxh",
     "rg40xxv",
     "rgcubexx",
+    // TrimUI's A133P handhelds, as System/a133p/launch.sh names them.
+    "smartpro",
+    "brickpro",
 ];
 
 /// Whether the handheld `target` names has a left stick.
@@ -94,9 +99,10 @@ impl Hat {
     }
 }
 
-/// A pad's analog triggers, LT on brake and RT on gas as the Xbox Wireless Controller has them,
-/// as L2 and R2, held past half their pull.
+/// A pad's analog triggers, as L2 and R2, held past half their pull: LT on brake and RT on gas as
+/// the Xbox Wireless Controller has them, or on whichever two axes `on` is given.
 pub struct Triggers {
+    codes: [u16; 2],
     half: [i32; 2],
     held: [bool; 2],
 }
@@ -104,16 +110,27 @@ pub struct Triggers {
 impl Triggers {
     /// From how far each pulls: brake's then gas's.
     pub fn new(max: [i32; 2]) -> Triggers {
+        Triggers::on([ABS_BRAKE, ABS_GAS], max)
+    }
+
+    /// L2 on the first of `codes` and R2 on the second, each pulling as far as its `max`.
+    pub fn on(codes: [u16; 2], max: [i32; 2]) -> Triggers {
         Triggers {
+            codes,
             half: max.map(|m| m / 2),
             held: [false; 2],
         }
     }
 
+    /// Whether `code` is one of the two trigger axes.
+    pub fn takes(&self, code: u16) -> bool {
+        self.codes.contains(&code)
+    }
+
     pub fn feed(&mut self, ev: Ev) -> Option<RawEvent> {
         let (i, btn) = match ev.code {
-            ABS_BRAKE => (0, Btn::L2),
-            ABS_GAS => (1, Btn::R2),
+            c if c == self.codes[0] => (0, Btn::L2),
+            c if c == self.codes[1] => (1, Btn::R2),
             _ => return None,
         };
         let now = ev.value > self.half[i];
@@ -213,6 +230,54 @@ pub fn pad_code_to_btn(code: u16) -> Option<Btn> {
         0x13e => Btn::R3,
         _ => return None,
     })
+}
+
+/// The name trimui_inputd gives the pad it makes of a TrimUI handheld's own buttons. It says it
+/// is a wired Xbox 360 pad, on the USB bus, so it is told from one by its name.
+pub const TRIMUI_PAD: &str = "TRIMUI Player1";
+
+/// `ev` as a button of a TrimUI handheld's own pad.
+pub fn trimui_to_raw(ev: Ev) -> Option<RawEvent> {
+    if ev.kind != EV_KEY {
+        return None;
+    }
+    let btn = trimui_code_to_btn(ev.code)?;
+    match ev.value {
+        0 => Some(RawEvent::Up(btn)),
+        1 => Some(RawEvent::Down(btn)),
+        _ => None,
+    }
+}
+
+/// A TrimUI handheld's button, by the code trimui_inputd sends. Its face buttons send an Xbox
+/// pad's codes by where they sit, so the bottom one, printed B, sends the Xbox A's. The Brick's
+/// two front keys come as the stick clicks, the Brick Pro's Home as a second Menu, and the
+/// volume keys, on the Brick and the Brick Pro, on this pad too.
+pub fn trimui_code_to_btn(code: u16) -> Option<Btn> {
+    Some(match code {
+        0x130 => Btn::B,
+        0x131 => Btn::A,
+        0x133 => Btn::Y,
+        0x134 => Btn::X,
+        0x136 => Btn::L1,
+        0x137 => Btn::R1,
+        0x13a => Btn::Select,
+        0x13b => Btn::Start,
+        0x13c => Btn::Menu,
+        0x13d => Btn::L3,
+        0x13e => Btn::R3,
+        172 => Btn::Menu,
+        115 => Btn::VolUp,
+        114 => Btn::VolDown,
+        _ => return None,
+    })
+}
+
+/// Whether `node` is trimui_inputd's pad.
+pub fn is_trimui_pad(sys: &Path, node: &Path) -> bool {
+    node.file_name()
+        .and_then(|n| std::fs::read_to_string(sys.join(n).join("device/name")).ok())
+        .is_some_and(|name| name.trim() == TRIMUI_PAD)
 }
 
 /// Whether `node` is a pad paired or plugged in, not the handheld's own buttons, which are on

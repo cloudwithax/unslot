@@ -10,8 +10,9 @@ use slot_input::{Btn, InputSource, Millis, RawEvent};
 use slot_retro::Sticks;
 
 use super::evdev::{
-    decode, device_name, is_pad, pad_to_raw, pick_devices, to_raw, Ev, Hat, Triggers, ABS_BRAKE,
-    ABS_GAS, ABS_LSX, ABS_LSY, EVENT_BYTES, EV_ABS, EV_KEY, EV_SYN,
+    decode, device_name, is_pad, is_trimui_pad, pad_to_raw, pick_devices, to_raw, trimui_to_raw,
+    Ev, Hat, Triggers, ABS_BRAKE, ABS_GAS, ABS_LSX, ABS_LSY, ABS_RZ, ABS_Z, EVENT_BYTES, EV_ABS,
+    EV_KEY, EV_SYN,
 };
 use super::stick::{layout, Range, StickNode};
 use super::trace;
@@ -114,7 +115,13 @@ impl Readers {
                 device_name(&self.sys, &node)
             );
             quicken_poll(&self.sys, &node);
-            let pad = is_pad(&self.sys, &node);
+            let kind = if is_trimui_pad(&self.sys, &node) {
+                Kind::Trimui
+            } else if is_pad(&self.sys, &node) {
+                Kind::Pad
+            } else {
+                Kind::Handheld
+            };
             let axes = stick_axes(&self.sys, &node);
             if let Some(axes) = axes {
                 eprintln!("slot: input {}: sticks on {axes:?}", node.display());
@@ -125,11 +132,11 @@ impl Readers {
                 .name(format!("slot-input-{name}"))
                 .spawn(move || {
                     // A pad has both its sticks, whichever model it is paired with.
-                    let right = shared.right_stick || pad;
+                    let right = shared.right_stick || kind == Kind::Pad;
                     let sticks = axes.map(|axes| (axes, right, shared.sticks.clone()));
                     read_node(
                         &node,
-                        pad,
+                        kind,
                         &shared.pending,
                         sticks,
                         &shared.steers,
@@ -151,6 +158,17 @@ impl Readers {
 }
 
 const POLL_MS: u32 = 10;
+
+/// Whose buttons a node carries, which says how its codes read.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum Kind {
+    /// The handheld's own, Anbernic's codes.
+    Handheld,
+    /// A TrimUI handheld's own, through trimui_inputd's pad.
+    Trimui,
+    /// One paired or plugged in.
+    Pad,
+}
 
 fn quicken_poll(sys: &Path, node: &Path) {
     let Some(name) = node.file_name() else {
@@ -185,7 +203,7 @@ type StickOut = ([u16; 4], bool, Arc<Mutex<Sticks>>);
 
 fn read_node(
     node: &Path,
-    pad: bool,
+    kind: Kind,
     queue: &Mutex<Vec<RawEvent>>,
     sticks: Option<StickOut>,
     steers: &AtomicBool,
@@ -211,8 +229,13 @@ fn read_node(
         });
         (StickNode::new(axes, ranges, right), out)
     });
+    let trigger_axes = match kind {
+        Kind::Handheld => None,
+        Kind::Trimui => Some([ABS_Z, ABS_RZ]),
+        Kind::Pad => Some([ABS_BRAKE, ABS_GAS]),
+    };
     let mut triggers =
-        pad.then(|| Triggers::new([ABS_BRAKE, ABS_GAS].map(|code| abs_range(&file, code).max)));
+        trigger_axes.map(|codes| Triggers::on(codes, codes.map(|code| abs_range(&file, code).max)));
     let mut buf = [0u8; EVENT_BYTES * 16];
     loop {
         let read = match file.read(&mut buf) {
@@ -249,12 +272,17 @@ fn read_node(
                 }
             }
             match ev.kind {
-                EV_ABS => {
-                    events.extend(hat.feed(ev));
-                    events.extend(triggers.as_mut().and_then(|t| t.feed(ev)));
-                }
-                _ if pad => events.extend(pad_to_raw(ev)),
-                _ => events.extend(to_raw(ev)),
+                // A trigger's axis is not the hat's, though TrimUI's left one, Z, shares its code
+                // with the left stick the hat steers by.
+                EV_ABS => match triggers.as_mut() {
+                    Some(t) if t.takes(ev.code) => events.extend(t.feed(ev)),
+                    _ => events.extend(hat.feed(ev)),
+                },
+                _ => events.extend(match kind {
+                    Kind::Handheld => to_raw(ev),
+                    Kind::Trimui => trimui_to_raw(ev),
+                    Kind::Pad => pad_to_raw(ev),
+                }),
             }
         }
         if events.is_empty() {

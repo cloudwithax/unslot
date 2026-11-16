@@ -126,8 +126,11 @@ struct Shm {
 
 impl Shm {
     fn create(name: &std::ffi::CStr) -> Option<Shm> {
-        // SAFETY: a fresh memfd with a NUL-terminated name.
-        let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
+        // SAFETY: a fresh memfd with a NUL-terminated name. Through the syscall, which the 4.9
+        // kernels have, as glibc only wraps it from 2.27 and TrimUI's firmware has 2.23.
+        let fd = unsafe {
+            libc::syscall(libc::SYS_memfd_create, name.as_ptr(), libc::MFD_CLOEXEC) as libc::c_int
+        };
         // SAFETY: a valid fd just made, owned from here on.
         (fd >= 0).then(|| Shm::from(unsafe { OwnedFd::from_raw_fd(fd) }))
     }

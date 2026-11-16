@@ -127,6 +127,7 @@ fn reads_on(path: &Path) -> bool {
 
 /// The panel's own framebuffer size, for switching back to it. BaseOS names
 /// the device in BASEOS_TARGET; the sizes are the ones its device list gives.
+/// TrimUI's A133P handhelds are named by System/a133p/launch.sh instead.
 pub fn panel_for(target: Option<&str>) -> (u32, u32) {
     match target.unwrap_or("") {
         "rgcubexx" => (720, 720),
@@ -135,6 +136,8 @@ pub fn panel_for(target: Option<&str>) -> (u32, u32) {
         "rg34xx" | "rg34xxsp" | "rgsp" => (720, 480),
         // A portrait panel, turned by unslot.
         "rg28xx" => (480, 640),
+        "brick" | "brickpro" => (1024, 768),
+        "smartpro" => (1280, 720),
         _ => (640, 480),
     }
 }

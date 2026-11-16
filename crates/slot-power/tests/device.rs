@@ -471,3 +471,33 @@ fn the_kernel_log_keeps_the_latest_card_lines() {
     assert_eq!(kept.len(), 40);
     assert_eq!(kept.last().unwrap(), "[99] FAT-fs (mmcblk0p7): line 99");
 }
+
+#[test]
+fn a_trimui_motor_is_switched_by_its_gpio_and_driven_by_the_strength() {
+    let d = tempfile::tempdir().unwrap();
+    let gpio = d.path().join("class/gpio/gpio227");
+    let motor = d.path().join("class/motor");
+    fs::create_dir_all(&gpio).unwrap();
+    fs::create_dir_all(&motor).unwrap();
+    fs::write(gpio.join("value"), "0\n").unwrap();
+    fs::write(motor.join("voltage"), "0\n").unwrap();
+    let mut p = platform(&d);
+    assert!(p.report().contains("motor gpio"), "{}", p.report());
+    p.set_rumble(u16::MAX);
+    assert_eq!(fs::read_to_string(gpio.join("value")).unwrap(), "1");
+    assert_eq!(
+        fs::read_to_string(motor.join("voltage")).unwrap(),
+        "2500000"
+    );
+    p.set_rumble(0);
+    assert_eq!(fs::read_to_string(gpio.join("value")).unwrap(), "0");
+    p.set_rumble(u16::MAX / 2);
+    let uv: u64 = fs::read_to_string(motor.join("voltage"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(
+        (1_400_000..=1_600_000).contains(&uv),
+        "half strength drove {uv} µV"
+    );
+}

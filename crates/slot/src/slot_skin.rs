@@ -7,7 +7,8 @@ use slot_ui::SlotSkin;
 /// `slot_back.png` and `slot_front.png` and, if it likes, `link_port.png`. It is outside System,
 /// so an update never touches it.
 pub const OWN: &str = "Slots";
-/// The sets a build ships beside the SP colours, which an update carries over (see h700.sh).
+/// The sets a build ships beside the SP colours, which an update carries over (see
+/// card/update/install.sh).
 pub const BUNDLED: &str = "System/Slots";
 
 const BACK: &str = "slot_back.png";

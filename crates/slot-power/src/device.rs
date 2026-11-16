@@ -79,9 +79,23 @@ const EVIOCSFF: c_ulong = 0x4030_4580;
 
 const DISPDBG_MAX: u32 = 255;
 
+/// sunxi disp2's ioctl that sets lcd0's backlight, 0 to 255, as TrimUI's own settings do.
+#[cfg(unix)]
+const DISP_LCD_SET_BRIGHTNESS: c_ulong = 0x102;
+
+/// TrimUI's A133P handhelds' rumble motor: GPIO PH3, which System/a133p/launch.sh exports, turns
+/// it on and off, and the motor class sets how hard it drives it, in microvolts.
+const MOTOR_GPIO: &str = "class/gpio/gpio227/value";
+const MOTOR_VOLTAGE: &str = "class/motor/voltage";
+const MOTOR_MIN_UV: u64 = 500_000;
+/// The Brick Pro's driver takes 3.3 V, but NextUI found it harsh past 2.5 V, so none goes past it.
+const MOTOR_MAX_UV: u64 = 2_500_000;
+
 enum Backlight {
     Class(PathBuf),
     Dispdbg(PathBuf),
+    /// sunxi disp2's device, where neither of the others is there.
+    Disp(PathBuf),
 }
 
 enum Led {
@@ -97,6 +111,7 @@ pub struct DevicePlatform {
     battery: Option<PathBuf>,
     rtc: Option<PathBuf>,
     motor: Option<Motor>,
+    gpio_motor: Option<GpioMotor>,
     pad_motor: PadMotor,
     led: Option<Led>,
 }
@@ -120,6 +135,8 @@ impl DevicePlatform {
                 let dbg = sysfs.join("kernel/debug/dispdbg");
                 if dbg.join("param").is_file() {
                     Some(Backlight::Dispdbg(dbg))
+                } else if sysfs.join("class/disp/disp").is_dir() {
+                    Some(Backlight::Disp(Path::new(DEV).join("disp")))
                 } else {
                     None
                 }
@@ -128,6 +145,10 @@ impl DevicePlatform {
         let battery = first_dir(&sysfs.join("class/power_supply"), is_battery);
         let rtc = first_dir(&sysfs.join("class/rtc"), |_| true);
         let motor = Motor::open(sysfs);
+        let gpio_motor = match motor {
+            Some(_) => None,
+            None => GpioMotor::find(sysfs),
+        };
         let led = first_dir(&sysfs.join("class/leds"), |d| {
             d.join("multi_intensity").is_file() || d.join("brightness").is_file()
         })
@@ -147,6 +168,7 @@ impl DevicePlatform {
             battery,
             rtc,
             motor,
+            gpio_motor,
             pad_motor: PadMotor {
                 sysfs: sysfs.to_path_buf(),
                 node: None,
@@ -187,11 +209,13 @@ impl DevicePlatform {
         let backlight = match &self.backlight {
             Some(Backlight::Class(dir)) => leaf(dir),
             Some(Backlight::Dispdbg(_)) => "dispdbg".to_string(),
+            Some(Backlight::Disp(_)) => "disp".to_string(),
             None => "no backlight".to_string(),
         };
-        let motor = match &self.motor {
-            Some(m) => format!("motor {}", m.name),
-            None => "no motor".to_string(),
+        let motor = match (&self.motor, &self.gpio_motor) {
+            (Some(m), _) => format!("motor {}", m.name),
+            (None, Some(_)) => "motor gpio".to_string(),
+            (None, None) => "no motor".to_string(),
         };
         format!(
             "backlight {} (0 to {}), battery {}, {}, {motor}",
@@ -266,6 +290,71 @@ pub fn motor_change(strength: u16, running: bool) -> Option<bool> {
         (true, false) => Some(true),
         (false, true) => Some(false),
         _ => None,
+    }
+}
+
+/// The drive for a rumble of `strength`, between the motor's weakest and the most it is given.
+fn motor_microvolts(strength: u16) -> u64 {
+    MOTOR_MIN_UV + u64::from(strength) * (MOTOR_MAX_UV - MOTOR_MIN_UV) / u64::from(u16::MAX)
+}
+
+struct GpioMotor {
+    enable: PathBuf,
+    voltage: PathBuf,
+    running: bool,
+}
+
+impl GpioMotor {
+    fn find(sysfs: &Path) -> Option<GpioMotor> {
+        let enable = sysfs.join(MOTOR_GPIO);
+        let voltage = sysfs.join(MOTOR_VOLTAGE);
+        (enable.is_file() && voltage.is_file()).then_some(GpioMotor {
+            enable,
+            voltage,
+            running: false,
+        })
+    }
+
+    fn set(&mut self, strength: u16) {
+        let Some(on) = motor_change(strength, self.running) else {
+            return;
+        };
+        if on {
+            if let Err(e) = fs::write(&self.voltage, motor_microvolts(strength).to_string()) {
+                eprintln!("slot: rumble {}: {e}", self.voltage.display());
+            }
+        }
+        match fs::write(&self.enable, if on { "1" } else { "0" }) {
+            Ok(()) => self.running = on,
+            Err(e) => eprintln!("slot: rumble {}: {e}", self.enable.display()),
+        }
+    }
+}
+
+impl Drop for GpioMotor {
+    fn drop(&mut self) {
+        if self.running {
+            let _ = fs::write(&self.enable, "0");
+        }
+    }
+}
+
+/// Sets lcd0's backlight through sunxi disp2's ioctl.
+fn disp_backlight(dev: &Path, value: u32) -> std::io::Result<()> {
+    #[cfg(not(unix))]
+    {
+        let _ = (dev, value);
+        Ok(())
+    }
+    #[cfg(unix)]
+    {
+        let disp = fs::OpenOptions::new().read(true).write(true).open(dev)?;
+        let mut args: [c_ulong; 4] = [0, c_ulong::from(value), 0, 0];
+        let rc = unsafe { ioctl(disp.as_raw_fd(), DISP_LCD_SET_BRIGHTNESS, args.as_mut_ptr()) };
+        if rc < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
     }
 }
 
@@ -561,6 +650,11 @@ impl Platform for DevicePlatform {
                 write(dir.join("param"), value.to_string());
                 write(dir.join("start"), "1".to_string());
             }
+            Backlight::Disp(dev) => {
+                if let Err(e) = disp_backlight(dev, value) {
+                    eprintln!("slot: {}: {e}", dev.display());
+                }
+            }
         }
     }
 
@@ -673,6 +767,9 @@ impl Platform for DevicePlatform {
 
     fn set_rumble(&mut self, strength: u16) {
         self.pad_motor.set(strength);
+        if let Some(motor) = &mut self.gpio_motor {
+            motor.set(strength);
+        }
         let Some(motor) = &mut self.motor else {
             return;
         };

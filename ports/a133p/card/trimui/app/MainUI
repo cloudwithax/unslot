@@ -1,0 +1,19 @@
+#!/bin/sh
+# The first boot of a card on TrimUI's stock firmware, which runs a card's trimui/app/MainUI in
+# place of its own frontend. This puts runtrimui.sh, beside it, in place of the firmware's own
+# /usr/trimui/bin/runtrimui.sh, which it keeps as runtrimui-original.sh, so every boot after
+# runs the card's .tmp_update/updater, or the firmware's frontend for a card without one. A
+# firmware that already has the hook, from a NextUI card, is left as it is: it runs the same
+# updater. Then this folder goes, and unslot starts.
+SD=/mnt/SDCARD
+BIN=/usr/trimui/bin
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
+if [ -f "$BIN/runtrimui.sh" ] && [ ! -f "$BIN/runtrimui-original.sh" ]; then
+	mv "$BIN/runtrimui.sh" "$BIN/runtrimui-original.sh" &&
+		cp "$HERE/runtrimui.sh" "$BIN/runtrimui.sh" &&
+		chmod 755 "$BIN/runtrimui.sh"
+fi
+rm -rf "$SD/trimui"
+sync
+exec /bin/sh "$SD/.tmp_update/updater"

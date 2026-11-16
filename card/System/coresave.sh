@@ -1,5 +1,6 @@
 #!/bin/sh
-SD="${AGS_CARD:-/mnt/sdcard}"
+# The card this is on: /mnt/sdcard on BaseOS, /mnt/SDCARD on TrimUI's firmware.
+SD="${AGS_CARD:-$(cd "$(dirname "$0")/.." && pwd)}"
 MOUNTPOINT="${AGS_MOUNTPOINT:-mountpoint}"
 DIR="$SD/Logs/crash"
 

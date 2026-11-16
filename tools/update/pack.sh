@@ -3,11 +3,14 @@
 # boot when it is at the card's root as MinUI.zip. It replaces System/ and nothing else, so it
 # updates unslot, or turns a card running slot into one running unslot.
 #
-#   pack.sh TREE OUT.zip
+#   pack.sh TREE OUT.zip [CHIP]
+#
+# CHIP, h700 unless given, is the chip the tree was built for; the pack installs only there.
 set -eu
 
 TREE="$1"
 OUT="$2"
+CHIP="${3:-h700}"
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 
 [ -f "$TREE/System/slot" ] || { echo "$TREE has no System/slot" >&2; exit 1; }
@@ -34,17 +37,17 @@ mkdir -p "$pack"
 cp -R "$TREE/System" "$pack/System"
 {
 	echo "format=unslot-update/1"
-	echo "target=h700"
+	echo "target=$CHIP"
 	echo "version=$version"
 	echo "build=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 } > "$pack/manifest"
 (cd "$pack" && find System -type f | LC_ALL=C sort | while IFS= read -r f; do sha256sum "$f"; done) \
 	> "$pack/System.sha256"
-cp "$REPO/card/update/h700.sh" "$stage/.tmp_update/h700.sh"
+cp "$REPO/card/update/install.sh" "$stage/.tmp_update/$CHIP.sh"
 
 mkdir -p "$(dirname "$OUT")"
 out="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
 rm -f "$out"
 # The installer goes in last: BaseOS unzips in order, so once it is on the card the rest is.
-(cd "$stage" && zip -qrX "$out" .tmp_update/unslot && zip -qX "$out" .tmp_update/h700.sh)
+(cd "$stage" && zip -qrX "$out" .tmp_update/unslot && zip -qX "$out" ".tmp_update/$CHIP.sh")
 echo "$out: unslot $version"

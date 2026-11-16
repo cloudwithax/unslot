@@ -25,9 +25,25 @@ pub const RELEASE_KEY: [u8; 32] = [
 const FORMAT: &str = "format=unslot-pak/1";
 const ZIP: &str = "MinUI.zip";
 
-/// The name a release's pack goes by.
+/// The chip this build is for, from UNSLOT_CHIP when it was built. The H700's came first, and
+/// its builds set none.
+pub const CHIP: &str = match option_env!("UNSLOT_CHIP") {
+    Some(chip) => chip,
+    None => "h700",
+};
+
+/// The name a release's pack for this build's chip goes by.
 pub fn file_name(version: &str) -> String {
-    format!("unslot-{version}.pak")
+    file_name_for(version, CHIP)
+}
+
+/// The name a release's pack for `chip` goes by: the H700's has none in it, as it had before
+/// there was another.
+pub fn file_name_for(version: &str, chip: &str) -> String {
+    match chip {
+        "h700" => format!("unslot-{version}.pak"),
+        _ => format!("unslot-{version}-{chip}.pak"),
+    }
 }
 
 /// Checks a pack on disk without keeping its update in memory.
@@ -517,7 +533,8 @@ mod tests {
     }
 
     #[test]
-    fn a_pack_is_named_for_its_version() {
-        assert_eq!(file_name("v2.2.0"), "unslot-v2.2.0.pak");
+    fn a_pack_is_named_for_its_version_and_any_chip_but_the_h700() {
+        assert_eq!(file_name_for("v2.2.0", "h700"), "unslot-v2.2.0.pak");
+        assert_eq!(file_name_for("v2.2.0", "a133p"), "unslot-v2.2.0-a133p.pak");
     }
 }

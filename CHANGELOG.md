@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- A port to TrimUI's A133P handhelds, the Smart Pro, Brick and Brick Pro, on their stock firmware, built with `task dist:a133p`. It has not been run on hardware yet, and most bundled cores need a newer glibc than the firmware has. See `ports/a133p/README.md`.
+- Update packs carry the chip they are for. A133P builds look for `unslot-<version>-a133p.pak`; the H700's packs keep their name, `unslot-<version>.pak`.
+- The installer is now `card/update/install.sh`, copied into each pack under its chip's name, and it installs only a pack built for its own chip.
+- `coresave.sh` finds the card from where it sits instead of assuming `/mnt/sdcard`, so it also finds `/mnt/SDCARD`, where TrimUI's firmware mounts the card.
+
 ## v2.13.1
 
 - Google Cast discovery listens for multicast and unicast DNS-SD replies, collects records split across packets, and asks for missing service and host records. It keeps listening throughout a simultaneous Wi-Fi Direct search: the two handheld interfaces share a radio, and the old three-second Cast search could finish before replies got through.

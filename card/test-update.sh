@@ -199,6 +199,40 @@ launch
 [ "$(cat "$TMP/picked-pak")" = "$CARD/unslot-v2.12.0.pak" ] ||
 	fail "the newest version was not handed to --unpack-pak"
 
+# A TrimUI A133P card takes only its own chip's packs, unslot-<version>-a133p.pak, and boots
+# through .tmp_update/updater, which installing one leaves where it is.
+sh "$REPO/tools/update/pack.sh" "$tree" "$TMP/MinUI-a133p.zip" a133p > /dev/null ||
+	fail "pack.sh failed for the A133P"
+[ "$(unzip -Z1 "$TMP/MinUI-a133p.zip" | tail -n 1)" = ".tmp_update/a133p.sh" ] ||
+	fail "the A133P's installer is not the last thing in its zip"
+sed "s#$TMP/MinUI.zip#$TMP/MinUI-a133p.zip#" "$TMP/fake-slot" > "$TMP/fake-slot-a133p"
+card
+rm -f "$CARD/MinUI.zip"
+mkdir -p "$CARD/.tmp_update"
+echo hook > "$CARD/.tmp_update/updater"
+echo signed > "$CARD/unslot-v9.9.9.pak"
+echo signed > "$CARD/unslot-v9.9.9-a133p.pak"
+: > "$CARD/System/led.sh"
+UNSLOT_CHIP=a133p SLOT_ROOT="$CARD" AGS_RUN="$TMP/run" AGS_SLOT="sh $TMP/fake-slot-a133p" \
+	sh "$HERE/System/launch_frontend.sh" > /dev/null 2>&1 || true
+[ "$(cat "$TMP/picked-pak")" = "$CARD/unslot-v9.9.9-a133p.pak" ] ||
+	fail "an A133P card checked another chip's pack"
+[ "$(cat "$CARD/System/slot")" = "new slot" ] || fail "a signed A133P .pak was not installed"
+[ ! -e "$CARD/unslot-v9.9.9-a133p.pak" ] || fail "an installed A133P .pak was left to install again"
+[ -f "$CARD/unslot-v9.9.9.pak" ] || fail "an A133P card took away the H700's pack"
+[ "$(cat "$CARD/.tmp_update/updater" 2> /dev/null)" = hook ] ||
+	fail "installing an A133P update took away the updater the card boots through"
+[ ! -e "$CARD/.tmp_update/unslot" ] && [ ! -e "$CARD/.tmp_update/a133p.sh" ] ||
+	fail "the A133P .pak's unpacked files were left"
+
+# And the H700's installer turns an A133P pack away.
+card
+rm -f "$CARD/MinUI.zip"
+$UNZIP -o "$TMP/MinUI-a133p.zip" ".tmp_update/*" -d "$CARD" > /dev/null 2>&1
+mv "$CARD/.tmp_update/a133p.sh" "$CARD/.tmp_update/h700.sh"
+install && fail "the H700 installed a pack for the A133P"
+[ "$(cat "$CARD/System/slot")" = "old slot" ] || fail "an A133P pack replaced the H700's System"
+
 # slotupdate.sh fetches through curl and checks what it got.
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/curl" <<'EOF'
