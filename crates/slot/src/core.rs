@@ -126,19 +126,10 @@ fn open_remote(
 ) -> std::io::Result<Box<dyn RetroCore>> {
     use std::os::fd::OwnedFd;
     use std::os::unix::net::UnixStream;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     let (ours, theirs) = UnixStream::pair()?;
-    let exe = std::env::current_exe()?;
-    // Run through the loader as slot is, it is the loader that is the exe.
-    let mut cmd = match exe.file_name().and_then(|n| n.to_str()) {
-        Some(n) if n.starts_with("ld-linux") => {
-            let mut cmd = Command::new(&exe);
-            cmd.arg(std::env::args_os().next().unwrap_or_default());
-            cmd
-        }
-        _ => Command::new(&exe),
-    };
+    let mut cmd = crate::self_exec::command()?;
     cmd.env(slot_ftrace::CHILD_VAR, "1")
         .arg("--core-host")
         .arg(root)

@@ -51,6 +51,7 @@ pub mod rewind;
 pub mod root;
 pub mod scrape;
 pub mod search;
+mod self_exec;
 pub mod services;
 pub mod session;
 pub mod shader;
