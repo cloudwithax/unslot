@@ -5,7 +5,7 @@ use slot_store::{Cart, Platform};
 use slot_ui::MOUTH_H;
 
 const PANEL_4_3: (u32, u32) = (640, 480);
-const NATIVE: Canvas = Canvas { w: 640.0, h: 480.0 };
+const NATIVE: Canvas = Canvas { w: 720.0, h: 540.0 };
 
 fn app_with_carts(stems: &[&str], panel: (u32, u32)) -> App {
     let mut a = App::new(

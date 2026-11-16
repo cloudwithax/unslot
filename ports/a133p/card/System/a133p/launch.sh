@@ -73,15 +73,33 @@ for p in /sys/devices/system/cpu/cpufreq/policy*; do
 	echo performance > "$p/scaling_governor" 2> /dev/null
 done
 
-# slot runs Wi-Fi itself, so the firmware's supplicant and lease go.
+# slot runs Wi-Fi itself, so the firmware's supplicant and lease go: two supplicants on wlan0
+# fight over every handshake.
+echo "radio daemons at boot: $(ps w 2> /dev/null | grep -E 'wpa_supplicant|udhcpc|hciattach|bluetoothd|bluealsa' | grep -v grep | tr -s ' ' | tr '\n' ';')"
 /etc/init.d/wpa_supplicant stop > /dev/null 2>&1
-killall udhcpc 2> /dev/null
+killall wpa_supplicant udhcpc 2> /dev/null
 
 # What slotwifi.sh and slotbt.sh call on BaseOS, where TrimUI's firmware has something else.
 command -v rfkill > /dev/null 2>&1 || export AGS_RFKILL="/bin/sh $HERE/rfkill.sh"
 export AGS_SYSTEMCTL="/bin/sh $HERE/systemctl.sh"
 export AGS_SETBT="$HERE/bluetooth.sh"
 export AGS_HCIATTACH=hciattach
+# The firmware's BusyBox (1.27) wants timeout's seconds after -t.
+timeout 1 true 2> /dev/null || export AGS_TIMEOUT="timeout -t"
+
+# While the port is brought up: the radio scripts' every step, the supplicant's debug output,
+# the kernel's log and what the firmware has, all in Logs, a boot's worth at a time.
+export AGS_RADIO_TRACE="$LOGS/radio-trace.log"
+export AGS_WPA_SUPPLICANT="/bin/sh $HERE/wpa_supplicant.sh"
+export AGS_WPA_LOG="$LOGS/wpa_supplicant.log"
+for f in radio-trace.log wpa_supplicant.log dmesg.txt; do
+	[ -f "$LOGS/$f" ] && mv -f "$LOGS/$f" "$LOGS/$f.1"
+done
+/bin/sh "$HERE/diag.sh" "$LOGS/a133p-diag.txt" &
+(while :; do
+	sleep 20
+	dmesg > "$LOGS/dmesg.txt" 2> /dev/null
+done) &
 
 while :; do
 	/bin/sh "$SYS/launch_frontend.sh"

@@ -17,6 +17,8 @@
 # Config/bluetooth on the card after pairing, forgetting and turning off, and back before
 # bluetoothd starts.
 set -u
+# A port bringing up a new handheld can have every step traced into a log.
+[ -z "${AGS_RADIO_TRACE:-}" ] || { exec 2>> "$AGS_RADIO_TRACE"; set -x; }
 
 BTCTL="${AGS_BLUETOOTHCTL:-bluetoothctl}"
 SYSTEMCTL="${AGS_SYSTEMCTL:-systemctl}"

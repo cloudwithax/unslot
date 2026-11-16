@@ -34,7 +34,8 @@ CHIP="${UNSLOT_CHIP:-h700}"
 PAKS="unslot-*.pak"
 [ "$CHIP" = h700 ] || PAKS="unslot-*-$CHIP.pak"
 SLOT_BIN="${AGS_SLOT:-/lib/ld-linux-aarch64.so.1 $SYS/slot}"
-pak="$(ls -1 "$SD"/$PAKS 2>/dev/null | sort -V | tail -n 1)"
+# TrimUI's BusyBox sort has no -V; it fails before it reads, so a plain sort still gets the list.
+pak="$(ls -1 "$SD"/$PAKS 2>/dev/null | { sort -V 2>/dev/null || sort; } | tail -n 1)"
 if [ -n "$pak" ]; then
 	mkdir -p "$SD/.unslot-update"
 	zip="$SD/.unslot-update/pak.zip"

@@ -84,8 +84,8 @@ fn a_host_window_resized_to_4_by_3_lays_the_shelf_out_for_it() {
     f.render(&mut c, (640, 480));
     assert_eq!(
         f.app().canvas(),
-        Canvas { w: 640.0, h: 480.0 },
-        "the shelf kept its 720 layout in a 4:3 window"
+        Canvas { w: 720.0, h: 540.0 },
+        "the shelf kept its 3:2 layout in a 4:3 window"
     );
     assert_eq!(c.frame_size(), (640, 480));
     f.render(&mut c, (1080, 720));
@@ -136,7 +136,9 @@ fn a_title_shows_under_the_cart_when_titles_are_on() {
     f.compose(&mut c);
     let frame = c.read_frame();
     write_png("native-shelf-title", 640, 480, &frame);
-    let y = slot_ui::slot_name_y() as usize + 8;
+    // The canvas is 720 by 540, the 3:2 layout with room above and below, on the 640x480 panel.
+    let canvas = f.app().canvas();
+    let y = ((slot_ui::slot_name_y() + 8.0 + canvas.extra()) * 480.0 / canvas.h) as usize;
     let lit = (100..540)
         .filter(|&x| {
             let o = (y * 640 + x) * 4;

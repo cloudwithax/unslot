@@ -73,14 +73,14 @@ fn a_framed_frame_on_a_4_by_3_panel_is_todays_frame() {
 }
 
 #[test]
-fn a_native_canvas_on_a_4_by_3_panel_is_the_panel_at_480_lines() {
+fn a_native_canvas_on_a_4_by_3_panel_is_the_whole_width_with_room_above_and_below() {
     assert_eq!(
         Canvas::of(Layout::Native, (640, 480)),
-        Canvas { w: 640.0, h: 480.0 }
+        Canvas { w: 720.0, h: 540.0 }
     );
     assert_eq!(
-        Canvas::of(Layout::Native, (1280, 960)),
-        Canvas { w: 640.0, h: 480.0 }
+        Canvas::of(Layout::Native, (1024, 768)),
+        Canvas { w: 720.0, h: 540.0 }
     );
     assert_eq!(Canvas::of(Layout::Framed, (640, 480)), Canvas::FRAMED);
 }
@@ -143,17 +143,17 @@ fn a_part_draws_only_its_window_of_the_texture() {
 }
 
 #[test]
-fn a_native_frame_on_a_4_by_3_panel_is_the_whole_panel() {
+fn a_native_frame_on_a_4_by_3_panel_reaches_the_canvas_right_edge() {
     let Some((_g, _s, mut c)) = compositor() else {
         return;
     };
     c.fit((640, 480));
     c.begin_frame(Layout::Native);
     c.draw_list(&[Draw::Rect {
-        x: 630.0,
+        x: 708.0,
         y: 0.0,
-        w: 10.0,
-        h: 10.0,
+        w: 12.0,
+        h: 12.0,
         colour: [1.0, 1.0, 1.0, 1.0],
     }]);
     assert_eq!(c.frame_size(), (640, 480));
@@ -162,7 +162,7 @@ fn a_native_frame_on_a_4_by_3_panel_is_the_whole_panel() {
     assert_eq!(
         &frame[o..o + 3],
         &[255, 255, 255],
-        "x 635 is not 1:1 in a native frame"
+        "the right of a 720-wide canvas was cut off a 4:3 frame"
     );
 }
 

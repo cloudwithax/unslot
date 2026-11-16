@@ -93,6 +93,13 @@ Look at these on the card:
 |---|---|
 | `Logs/a133p.log` | What `launch.sh` did: the firmware's version, the model it found, and any errors from setting up. |
 | `Logs/slot.log` | slot's own log. |
+| `Logs/a133p-diag.txt` | What the firmware has for Wi-Fi, Bluetooth and the screen: its tools, daemons, modules, rfkill switches, init scripts and kernel log, written at each boot. |
+| `Logs/wpa_supplicant.log` | The supplicant's debug output, without keys. |
+| `Logs/radio-trace.log` | Every step `slotwifi.sh` and `slotbt.sh` took. |
+| `Logs/dmesg.txt` | The kernel's log, written every 20 seconds. |
+
+The last four are there while the port is brought up. `wpa_supplicant.log`, `radio-trace.log` and
+`dmesg.txt` keep the boot before as `.1`.
 
 ## Building
 

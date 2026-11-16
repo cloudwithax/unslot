@@ -8,6 +8,8 @@
 #   slotwifi.sh wlan0 CONNECTED|DISCONNECTED
 #                           what wpa_cli's watcher calls as the link comes and goes
 set -u
+# A port bringing up a new handheld can have every step traced into a log.
+[ -z "${AGS_RADIO_TRACE:-}" ] || { exec 2>> "$AGS_RADIO_TRACE"; set -x; }
 
 NET="${AGS_NET_SYS:-/sys/class/net}"
 RUN="${AGS_RUN:-/run}"
