@@ -1,0 +1,121 @@
+#!/bin/sh
+# Host-only A133P GPU builds. Usage: sh tools/a133p/gpu-cores.sh [CORE...]
+set -eu
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+work="$root/target-a133p"
+cc="$root/tools/a133p/zcc"
+cxx="$root/tools/a133p/zcxx"
+gpu="${A133P_GPU_LIBS:-$work/gpu}"
+export JOBS="${JOBS:-2}"
+export CFLAGS="-Wno-error=date-time -I$work/khronos"
+export CXXFLAGS="$CFLAGS"
+[ "$#" -gt 0 ] || set -- nodosumi parallel_n64 flycast vecx
+build() (
+ name="$1"
+ case "$name" in
+ nodosumi) repo=cloudwithax/nodosumi; commit=984de9dfdbffdd5fd38296f5ed71356a5778c934; flags='-DBUILD_LIBRETRO=ON -DA64_JIT=ON'; renderer='GLES 3.0 (frontend procedure loader)' ;;
+ parallel_n64) repo=libretro/parallel-n64; commit=a8280501a71c1bcd4c85c5b8bfe75cfa62cd6127; flags='platform=unix-gles ARCH=aarch64 WITH_DYNAREC=aarch64'; renderer='GLES 2.0' ;;
+ flycast) repo=flyinghead/flycast; commit=6bb0fc3e18dac4b01694f488c7a71f5930e8a648; flags='-DLIBRETRO=ON -DUSE_GLES=ON -DUSE_VULKAN=OFF -DUSE_OPENMP=OFF -DUSE_HOST_LIBZIP=OFF'; renderer='GLES 3.x (frontend procedure loader)' ;;
+ vecx) repo=libretro/libretro-vecx; commit=8f671cc9d737f2890c3ce19e177e2984dcae121f; flags='platform=unix HAS_GPU=0'; renderer=software ;;
+ *) echo "no GPU recipe for $name" >&2; exit 2 ;;
+ esac
+ if [ "$name" != vecx ]; then
+  mkdir -p "$work/khronos"
+  for dir in GLES2 GLES3 EGL KHR; do
+   cp -R "${KHRONOS_HEADERS:-/usr/include}/$dir" "$work/khronos/"
+  done
+ fi
+ src="$work/src/$name"
+ mkdir -p "$src" "$work/cores" "$work/tmp"
+ export TMPDIR="$work/tmp"
+ [ -d "$src/.git" ] || git init -q "$src"
+ git -C "$src" cat-file -e "$commit^{commit}" 2>/dev/null ||
+  git -C "$src" fetch -q --depth 1 "https://github.com/$repo.git" "$commit"
+ git -C "$src" checkout -q --detach "$commit"
+ cd "$src"
+ if [ "$name" = nodosumi ]; then
+  patch="$root/tools/a133p/nodosumi-gles.patch"
+  if ! git apply --reverse --check "$patch" 2>/dev/null; then
+   git apply --check "$patch"
+   git apply "$patch"
+  fi
+ fi
+ case "$name" in
+ nodosumi|flycast)
+  if [ "$name" = flycast ]; then
+   git submodule update --init --recursive --depth 1
+  fi
+  cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$root/tools/a133p/toolchain.cmake" \
+   -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS" \
+   -DCMAKE_SHARED_LINKER_FLAGS="-L$gpu" $flags
+  target=nodosumi
+  [ "$name" != flycast ] || target=flycast_libretro
+  cmake --build build --target "$target" -j"$JOBS"
+  output="build/${name}_libretro.so"
+  ;;
+ parallel_n64)
+  [ -f "$gpu/libGLESv2.so" ] || { echo "provide firmware libGLESv2.so in $gpu" >&2; exit 1; }
+  make -j"$JOBS" $flags CC="$cc" CXX="$cxx" LD="$cxx" \
+   GL_LIB="-L$gpu -lGLESv2" CPUFLAGS='-DARM -DDONT_WANT_ARM_OPTIMIZATIONS -DARM64'
+  output=parallel_n64_libretro.so
+  ;;
+ vecx)
+  make -j"$JOBS" $flags CC="$cc" CXX="$cxx" LD="$cxx"
+  output=vecx_libretro.so
+  ;;
+ esac
+ readelf -h "$output" | grep -q 'Machine:.*AArch64' ||
+  { echo "not an AArch64 ELF: $output" >&2; exit 1; }
+ sh "$root/tools/a133p/check-glibc.sh" "$output"
+ if readelf -d "$output" | grep -E 'NEEDED.*\[(libGL\.|libOpenGL\.|libGLX\.|libstdc\+\+\.)' ||
+    objdump -T "$output" | grep GLIBCXX; then
+  echo "unexpected desktop GL or dynamic C++ dependency: $name" >&2
+  exit 1
+ fi
+ # Check direct GPU imports against the real firmware drivers, never host GL.
+ # Frontend-loaded procedures (nodosumi/flycast) are not ELF imports.
+ symbols="$(mktemp -d "$work/tmp/gpu-symbols.XXXXXX")"
+ trap 'rm -rf "$symbols"' EXIT HUP INT TERM
+ readelf --dyn-syms --wide "$output" |
+  awk '$7 == "UND" && $8 ~ /^(gl|egl)[A-Z]/ {sub(/@.*/, "", $8); print $8}' |
+  sort -u >"$symbols/imports"
+ if [ -s "$symbols/imports" ]; then
+  for lib in libGLESv2.so libEGL.so; do
+   [ -f "$gpu/$lib" ] || { echo "provide firmware $lib in $gpu" >&2; exit 1; }
+   readelf --dyn-syms --wide "$gpu/$lib"
+  done | awk '$7 != "UND" && $8 ~ /^(gl|egl)[A-Z]/ {sub(/@.*/, "", $8); print $8}' |
+   sort -u >"$symbols/exports"
+  comm -23 "$symbols/imports" "$symbols/exports" >"$symbols/missing"
+  if [ -s "$symbols/missing" ]; then
+   echo "GPU imports missing from firmware drivers:" >&2
+   cat "$symbols/missing" >&2
+   exit 1
+  fi
+ fi
+ cp "$output" "$work/cores/${name}_libretro.so"
+ {
+  echo "repo=https://github.com/$repo"
+  echo "commit=$commit"
+  echo "flags=$flags"
+  echo "compiler=tools/a133p/zcc,zcxx -target aarch64-linux-gnu.2.23 -mcpu=cortex_a53"
+  echo "CFLAGS=$CFLAGS CXXFLAGS=$CXXFLAGS"
+  echo "renderer=$renderer"
+  case "$name" in
+  nodosumi|flycast) echo "CMAKE_BUILD_TYPE=Release CMAKE_SHARED_LINKER_FLAGS=-L$gpu" ;;
+  parallel_n64) echo "GL_LIB=-L$gpu -lGLESv2 CPUFLAGS=-DARM -DDONT_WANT_ARM_OPTIMIZATIONS -DARM64" ;;
+  esac
+  if [ "$name" = nodosumi ]; then
+   echo "patch=tools/a133p/nodosumi-gles.patch"
+   echo "patch_sha256=$(sha256sum "$root/tools/a133p/nodosumi-gles.patch" | cut -d ' ' -f1)"
+  fi
+ } >"$work/cores/${name}_libretro.so.meta"
+)
+if [ "${1:-}" = --build ]; then
+ build "$2"
+ exit
+fi
+failed=0
+for core do
+ if sh "$root/tools/a133p/gpu-cores.sh" --build "$core"; then echo "built $core"; else echo "failed $core" >&2; failed=1; fi
+done
+exit "$failed"

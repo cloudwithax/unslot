@@ -111,40 +111,92 @@ Builds use [Task](https://taskfile.dev), and cross-compile against glibc 2.23 th
 |---|---|
 | `task build:a133p` | slot for the A133P, with cargo-zigbuild. It needs `cargo install cargo-zigbuild`, and `pip install ziglang` or zig on the `PATH`. |
 | `task core:a133p` | mGBA for glibc 2.23, through zig and `tools/a133p/toolchain.cmake`. |
-| `task core:a133p:extra -- pcsx_rearmed fbneo` | Selected extra cores from pinned upstream sources, using zig. Without arguments, attempts all recipes. |
+| `task core:a133p:extra -- pcsx_rearmed fbneo` | Selected extra cores from pinned upstream sources, using zig. Without arguments, attempts all 47 shipped cores other than mGBA. |
+| `task drastic:a133p` | Host-staged DraStic with a source-built PowerVR SDL2 and TrimUI control defaults. The proprietary runner requires glibc 2.27. |
 | `task dist:a133p FROM=<tree>` | The card in `dist-a133p`. |
 
 `dist:a133p` starts from an H700 device tree, `FROM`, which defaults to `dist-device`; an unzipped
 release `unslot-<version>-h700.zip` works too. It puts in the A133P's own slot, every core built in
-`target-a133p/cores/`, and the files the firmware boots through. Run `core:a133p:extra` first to
-replace incompatible H700 cores; extra cores are not built automatically by `dist:a133p`.
+`target-a133p/cores/`, and the files the firmware boots through. Run `core:a133p:extra` first;
+extra cores are not built automatically by `dist:a133p`.
 The builder records each core's source commit and flags in a `.meta` beside its `.so`.
-`dist:a133p` writes `Logs/a133p-glibc.txt`, listing every file that needs a newer glibc than 2.23,
-the oldest firmware's. PPSSPP also needs Khronos headers (`GLES2`, `GLES3`, `EGL`, `KHR`) under
-`/usr/include`, or the directory set by `KHRONOS_HEADERS`; its PNG and zlib are built in.
-It links against the firmware's `libGLESv2.so` and `libEGL.so`; place copies in
-`target-a133p/gpu/`, or set `A133P_GPU_LIBS` to their directory. These libraries are not bundled
-into the core or copied to the card.
+`dist:a133p` checks each replacement's glibc imports before copying it, strips the copy with
+`aarch64-linux-gnu-strip` (or `STRIP`), and keeps its metadata in
+`System/licenses/`. It writes `Logs/a133p-glibc.txt`, listing files above the SDK's glibc 2.23
+baseline. The tested Brick Pro's firmware has glibc 2.33; this report is not a runtime loader test.
+GPU recipes need Khronos headers (`GLES2`, `GLES3`, `EGL`, `KHR`) under `/usr/include`, or the
+directory set by `KHRONOS_HEADERS`. Place firmware `libGLESv2.so` and `libEGL.so` copies in
+`target-a133p/gpu/`, or set `A133P_GPU_LIBS` to their directory. These proprietary libraries are
+link inputs only: they are not bundled into cores or copied to the card.
+
+### DraStic host staging
+
+`drastic:a133p` stages the pinned, unmodified proprietary runner and its BIOS replacements in
+`target-a133p/drastic/`. Its SDL2 is built from Zlib-licensed
+[SDL2_trimui](https://github.com/Ninoh-FOX/SDL2_trimui/tree/5d7213995373e1efaf2dc59571a561fae7f6be96),
+using PowerVR's null native EGL window and the framebuffer's reported size, not H700 Mali pixmaps.
+`dist:a133p` overlays this staging directory when present and keeps `drastic.meta` in
+`System/licenses/`. Existing `Saves/NDS/config` is not overwritten.
+
+The closed runner imports GLIBC 2.27 and GLIBCXX 3.4: unlike rebuilt libraries, it cannot meet
+the SDK's glibc 2.23 baseline. It fits the tested firmware's glibc 2.33, but older firmware is not
+covered. Firmware must supply zlib, ALSA, libstdc++, libgcc and the complete PowerVR runtime.
+SDL and the volume preload import at most GLIBC 2.17. Their ELF checks and SDL symbol closure
+pass on the host; display, sound, controls and the runner itself have not been tested on-device
+in this continuation.
+
+### Nodosumi host verification
+
+The pinned `984de9dfdbffdd5fd38296f5ed71356a5778c934` build applies
+`tools/a133p/nodosumi-gles.patch` and records its hash. It uses the GLES loader and the GLES 3.0
+`glFramebufferTexture2D` attachment, not the desktop loader and an ES 3.2-only call.
+Unbuffered startup diagnostics report the loader result and GPU vendor, renderer and version.
+
+Mesa GLES 3.0 reproduced a null-function crash before the patch; the patched real renderer
+passes an 8×8 red upload/blit check. Native libretro initialization, load, context reset/destroy,
+unload and deinitialization also pass without executing game frames.
+
+A later device trace confirms a **separate frontend launch failure**:
+`/lib/ld-2.33.so: unrecognized option --core-host`, before core initialization. Launching slot
+through `/lib/ld-linux-aarch64.so.1` makes `current_exe()` resolve to `ld-2.33.so`; the old
+`ld-linux`-only recognizer omitted slot's ELF operand and passed `--core-host` to the loader.
+The shared self-execution helper now retains the resolved loader and places the original
+`argv[0]` ELF before mode flags for GPU-core and DraStic menu children. A real host
+versioned-loader subprocess regression and the A133P frontend build pass.
+
+The GLES defect and launcher failure are independently evidenced. Both fixes have since been put
+on the Brick Pro; PowerVR rendering, A64 JIT execution and gameplay remain unverified.
+
+For the renderer check, set `SOURCE` to a patched native checkout with its native core built in
+`build-host/`; Mesa EGL development libraries are required:
+
+```sh
+cc -I "$SOURCE/deps/glad/include" -I "$SOURCE/src" \
+  tools/a133p/nodosumi-gles-smoke.c -o /tmp/nodosumi-gles-smoke -lEGL -ldl
+LIBGL_ALWAYS_SOFTWARE=1 MESA_GLES_VERSION_OVERRIDE=3.0 \
+  /tmp/nodosumi-gles-smoke "$SOURCE/build-host/nodosumi_libretro.so"
+```
 
 ## Known limits
 
 - **Run on a Brick Pro, firmware 1.1.1.** Screen orientation is correct, menu cropping is fixed,
   and the buttons drive the menus. The user confirmed Wi-Fi connectivity and working Bluetooth.
   SSH and SFTP use the stock firmware's server. Smart Pro and Brick remain untested.
-- **Core compatibility is not gameplay verification.** Fifteen replacement cores have been built
-  and deployed: PCSX ReARMed, FBNeo, Snes9x, NeoCD, MAME 2003-Plus, DOSBox Pure, PUAE 2021,
-  HatariB, Beetle PC-FX, NP2kai, PX68k, Retro8, TIC-80, Beetle VB and PPSSPP. All pass the glibc
-  2.23 import check and the Brick Pro's runtime loader check. No on-device gameplay was tested.
-  C++ cores use zig's static libc++; Beetle VB does not import desktop GL, and PPSSPP uses GLES
-  and bundled PNG/zlib. Unreplaced H700 tools can still need unavailable libraries.
-  Consult `Logs/a133p-glibc.txt` and the device loader's `--list` output for a resulting card tree.
+- **Core compatibility is not gameplay verification.** An earlier bring-up phase deployed fifteen
+  replacement cores: PCSX ReARMed, FBNeo, Snes9x, NeoCD, MAME 2003-Plus, DOSBox Pure, PUAE 2021,
+  HatariB, Beetle PC-FX, NP2kai, PX68k, Retro8, TIC-80, Beetle VB and PPSSPP. Those passed the
+  Brick Pro's runtime loader check, not gameplay testing. Further rebuilding is host-only:
+  compilation, ELF imports and software-core API smoke checks do not establish handheld
+  loading, rendering, audio, controls or performance. C++ source builds use zig's static libc++;
+  Beetle VB is software-only, and PPSSPP uses GLES with bundled PNG/zlib.
+  Unreplaced H700 tools can still need unavailable libraries; consult `Logs/a133p-glibc.txt`.
 - **Wi-Fi startup:** the firmware's late-starting `wpa_supplicant` fought unslot's for `wlan0`,
   causing authentication failures and a reported reboot. It is stopped for the first minute
   after boot. Wi-Fi Direct, and so Miracast, is unavailable: the stock supplicant has no P2P.
 - **Bluetooth startup:** the firmware has no `timeout`, so the port brings its own watchdog
   for `bluetoothctl`; the firmware's `hciattach` is left to finish loading the chip's firmware.
 - **Not done yet:**
-  - DraStic, which is the H700's SDL and Mali build;
+  - DraStic runtime verification; its PowerVR SDL and runner are host-staged only;
   - the volume of PortMaster ports, which uses the H700's codec control;
   - headphone detection;
   - TrimUI's RGB LEDs, which stay off;

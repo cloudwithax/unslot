@@ -1,6 +1,6 @@
 #!/bin/sh
-# Which ELF files need a newer glibc than the 2.23 TrimUI's A133P firmware has, by the symbol
-# versions they import.
+# Which ELF files exceed the A133P SDK's glibc 2.23 baseline, by imported symbol
+# versions. This is stricter than the tested Brick Pro firmware's glibc 2.33.
 #
 #   check-glibc.sh FILE...     fail if any of them does
 #   check-glibc.sh -r DIR      list those under DIR, and pass
@@ -30,7 +30,7 @@ bad=0
 for f in "$@"; do
 	v="$(needs "$f")"
 	if over "$v"; then
-		echo "$f needs glibc $v, newer than the A133P firmware's $FLOOR" >&2
+		echo "$f needs glibc $v, newer than the A133P SDK baseline $FLOOR" >&2
 		bad=1
 	fi
 done

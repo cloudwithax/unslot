@@ -1,6 +1,6 @@
 #!/bin/sh
-# A C compiler for TrimUI's A133P firmware: zig's clang, for its Cortex-A53s, against glibc 2.23,
-# the one the firmware has. zig is the one on the PATH or the ziglang Python package.
+# A C compiler for TrimUI's A133P firmware: zig's clang, for its Cortex-A53s,
+# against the SDK's glibc 2.23 baseline. Uses zig on PATH or the ziglang Python package.
 if command -v zig > /dev/null 2>&1; then
 	exec zig cc -target aarch64-linux-gnu.2.23 -mcpu=cortex_a53 "$@"
 fi

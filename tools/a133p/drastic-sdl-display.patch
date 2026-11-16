@@ -1,0 +1,13 @@
+--- a/src/video/mali-fbdev/SDL_malivideo.c
++++ b/src/video/mali-fbdev/SDL_malivideo.c
+@@ -198,8 +198,8 @@
+     window->w = displaydata->native_display.width;
+     window->h = displaydata->native_display.height;
+ #else
+-    window->w = 1280;
+-    window->h = 720;
++    window->w = _this->displays[0].current_mode.w;
++    window->h = _this->displays[0].current_mode.h;
+ #endif
+ 
+     /* OpenGL ES is the law here */

@@ -760,7 +760,7 @@ tasks:
   build:a133p:
     desc: >-
       Build for TrimUI's A133P handhelds, the Smart Pro, Brick and Brick Pro, against the glibc
-      2.23 their firmware has, through zig: cargo install cargo-zigbuild, and pip install ziglang
+      2.23 SDK baseline through zig: cargo install cargo-zigbuild, and pip install ziglang
       or put zig on the PATH
     cmds:
       - >-
@@ -783,9 +783,14 @@ tasks:
       - sh tools/a133p/check-glibc.sh target-a133p/cores/mgba_libretro.so
 
   core:a133p:extra:
-    desc: Rebuild incompatible buildbot cores for A133P (optional CORE arguments)
+    desc: Rebuild shipped cores from pinned sources for A133P (optional CORE arguments)
     cmds:
       - sh tools/a133p/cores.sh {{.CLI_ARGS}}
+
+  drastic:a133p:
+    desc: Host-build PowerVR SDL2 and stage DraStic (closed runner requires glibc 2.27)
+    cmds:
+      - sh tools/a133p/drastic.sh
 
   dist:a133p:
     desc: >-
@@ -802,9 +807,39 @@ tasks:
       - rm -rf {{.OUT}}
       - cp -R {{.FROM}} {{.OUT}}
       - cp target-a133p/aarch64-unknown-linux-gnu/device/slot {{.OUT}}/System/slot
-      - for f in target-a133p/cores/*_libretro.so; do test ! -f "$f" || cp "$f" {{.OUT}}/System/; done
+      - |
+        set -eu
+        mkdir -p "{{.OUT}}/System/licenses"
+        manifest="{{.OUT}}/System/licenses/cores.manifest"
+        for f in target-a133p/cores/*_libretro.so; do
+          test -f "$f" || continue
+          sh tools/a133p/check-glibc.sh "$f"
+          cp "$f" "{{.OUT}}/System/"
+          # Debug symbols stay in target-a133p; ScummVM alone is 757 MB unstripped.
+          ${STRIP:-aarch64-linux-gnu-strip} --strip-unneeded "{{.OUT}}/System/$(basename "$f")"
+          cp "$f.meta" "{{.OUT}}/System/licenses/$(basename "$f").meta"
+          c="$(basename "$f" _libretro.so)"
+          rm -f "{{.OUT}}/System/licenses/$c"-*.meta
+          if test -f "$manifest"; then
+            awk -v core="$c" '$1 != core' "$manifest" > "$manifest.new"
+            mv "$manifest.new" "$manifest"
+          fi
+        done
+        if test -f "$manifest" && ! test -s "$manifest"; then rm "$manifest"; fi
       - cp -R card/System/. {{.OUT}}/System/
       - cp -R ports/a133p/card/. {{.OUT}}/
+      - |
+        set -eu
+        if test -f target-a133p/drastic/drastic.meta; then
+          mkdir -p "{{.OUT}}/System/drastic" "{{.OUT}}/System/licenses"
+          for f in drastic libs system game_database.xml drastic.cfg; do
+            cp -R "target-a133p/drastic/$f" "{{.OUT}}/System/drastic/"
+          done
+          for f in drastic.meta drastic_readme.txt SDL-LICENSE.txt; do
+            cp "target-a133p/drastic/$f" "{{.OUT}}/System/licenses/"
+          done
+          rm -f "{{.OUT}}/System/licenses/drastic.manifest"
+        fi
       - |
         set -eu
         v='{{.VERSION | default ""}}'

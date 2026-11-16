@@ -9,7 +9,10 @@
 - On a 4:3 screen the shelf and menus keep their whole 720-wide layout, with room above and below as on the RG CubeXX, instead of a 640-wide middle that cut off the carts and names at the sides. This is every 4:3 panel: the 640x480 RG35XX family as well as the 1024x768 Brick.
 - Update packs are picked by a plain sort where `sort -V` is missing, as in TrimUI's BusyBox 1.27.
 - A133P startup stops the firmware's competing Wi-Fi supplicant, preserves Bluetooth firmware loading, and supplies the missing `timeout` watchdog.
-- `task core:a133p:extra` rebuilds fifteen incompatible cores from pinned sources. The replacements pass the Brick Pro's loader checks; this does not establish gameplay compatibility.
+- `task core:a133p:extra` rebuilds all 47 shipped cores other than mGBA from pinned sources against the SDK's glibc 2.23, with no `GLIBCXX` or desktop GL imports; `dist:a133p` strips them into the card. Fifteen of them passed the Brick Pro's loader check; none has been gameplay-tested.
+- A133P Nodosumi builds patch a desktop-GL loader and framebuffer call that crash under the requested GLES 3.0 minimum. Host Mesa renderer and context-lifecycle checks pass; PowerVR rendering and gameplay remain unverified.
+- GPU-core and DraStic menu children self-launch correctly through a versioned glibc loader such as `ld-2.33.so`. The old `ld-linux`-only check omitted slot's ELF operand and sent `--core-host` directly to the loader, so Nodosumi failed before it initialised on the Brick Pro.
+- `task drastic:a133p` host-stages the proprietary runner with a source-built, Zlib-licensed PowerVR SDL2 instead of H700 Mali pixmaps. The runner requires glibc 2.27; rebuilt libraries target the SDK's 2.23 baseline. No on-device verification was performed.
 
 ## v2.13.1
 

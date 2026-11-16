@@ -1,17 +1,28 @@
 #!/bin/sh
-# Rebuild incompatible buildbot cores for Cortex-A53 and glibc 2.23.
-# Usage: sh tools/a133p/cores.sh [CORE...]; JOBS defaults to 4.
+# Rebuild shipped cores for Cortex-A53 against the SDK's glibc 2.23.
+# Usage: sh tools/a133p/cores.sh [CORE...]; JOBS defaults to 2.
 set -eu
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 work="$root/target-a133p"
 cc="$root/tools/a133p/zcc"
 cxx="$root/tools/a133p/zcxx"
+export JOBS="${JOBS:-2}"
 export CFLAGS="-Wno-error=date-time"
 export CXXFLAGS="-Wno-error=date-time"
-[ "$#" -gt 0 ] || set -- pcsx_rearmed fbneo snes9x neocd mame2003_plus dosbox_pure puae2021 hatarib mednafen_pcfx np2kai px68k retro8 tic80 mednafen_vb ppsspp
+[ "$#" -gt 0 ] || set -- nodosumi parallel_n64 flycast vecx \
+	pcsx_rearmed fbneo snes9x neocd mame2003_plus dosbox_pure puae2021 hatarib \
+	mednafen_pcfx np2kai px68k retro8 tic80 mednafen_vb ppsspp \
+	gpsp fceumm genesis_plus_gx mednafen_pce_fast race mednafen_wswan handy \
+	pokemini gw picodrive gearsystem mednafen_supergrafx stella2014 a5200 \
+	prosystem gearcoleco freeintv o2em freechaf potator sameduck fmsx bluemsx \
+	vice_x64 fuse cap32 atari800 scummvm
 build() (
 	name="$1" sub= file=Makefile flags= output="${1}_libretro.so"
 	case "$name" in
+	nodosumi|parallel_n64|flycast|vecx)
+		exec sh "$root/tools/a133p/gpu-cores.sh" "$name" ;;
+	gpsp|fceumm|genesis_plus_gx|mednafen_pce_fast|race|mednafen_wswan|handy|pokemini|gw|picodrive|gearsystem|mednafen_supergrafx|stella2014|a5200|prosystem|gearcoleco|freeintv|o2em|freechaf|potator|sameduck|fmsx|bluemsx|vice_x64|fuse|cap32|atari800|scummvm)
+		exec sh "$root/tools/a133p/software-cores.sh" "$name" ;;
 	pcsx_rearmed) repo=libretro/pcsx_rearmed; commit=7b0e8f8fadfbce3d170d195b9d9eecaabfa08c8e; file=Makefile.libretro; flags='ARCH=aarch64 DYNAREC=ari64 USE_MINIZ=1 HAVE_PHYSICAL_CDROM=0' ;;
 	fbneo) repo=libretro/FBNeo; commit=65e63fac2fc6903cc337906db13ea17feeb168dd; sub=src/burner/libretro ;;
 	snes9x) repo=libretro/snes9x; commit=fae2fea08f74180759ef540ee94259213f503480; sub=libretro; flags='arch=arm64 LTO=' ;;

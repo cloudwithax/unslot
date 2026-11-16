@@ -1,0 +1,24 @@
+--- a/Src/Unzip/crypt.h
++++ b/Src/Unzip/crypt.h
+@@ -35 +35 @@
+-static int decrypt_byte(unsigned long* pkeys, const unsigned long* pcrc_32_tab)
++static int decrypt_byte(unsigned long* pkeys, const z_crc_t* pcrc_32_tab)
+@@ -48 +48 @@
+-static int update_keys(unsigned long* pkeys,const unsigned long* pcrc_32_tab,int c)
++static int update_keys(unsigned long* pkeys,const z_crc_t* pcrc_32_tab,int c)
+@@ -65 +65 @@
+-static void init_keys(const char* passwd,unsigned long* pkeys,const unsigned long* pcrc_32_tab)
++static void init_keys(const char* passwd,unsigned long* pkeys,const z_crc_t* pcrc_32_tab)
+@@ -90 +90 @@
+-static int crypthead(const char *passwd, unsigned char *buf, int bufSize, unsigned long *pkeys, const unsigned long *pcrc_32_tab, unsigned long crcForCrypting)
++static int crypthead(const char *passwd, unsigned char *buf, int bufSize, unsigned long *pkeys, const z_crc_t *pcrc_32_tab, unsigned long crcForCrypting)
+--- a/Src/Unzip/unzip.c
++++ b/Src/Unzip/unzip.c
+@@ -150 +150 @@
+-    const unsigned long* pcrc_32_tab;
++    const z_crc_t* pcrc_32_tab;
+--- a/Src/Unzip/zip.c
++++ b/Src/Unzip/zip.c
+@@ -133 +133 @@
+-    const unsigned long* pcrc_32_tab;
++    const z_crc_t* pcrc_32_tab;
