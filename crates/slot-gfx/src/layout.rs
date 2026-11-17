@@ -27,8 +27,8 @@ impl Canvas {
     pub fn of(layout: Layout, panel: (u32, u32)) -> Canvas {
         match layout {
             Layout::Native if framed(panel) => Canvas {
-                w: (OUT_H * panel.0 / panel.1) as f32,
-                h: OUT_H as f32,
+                w: OUT_W as f32,
+                h: (OUT_W * panel.1 / panel.0) as f32,
             },
             Layout::Native if square(panel) => Canvas {
                 w: OUT_W as f32,

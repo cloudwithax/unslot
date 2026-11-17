@@ -23,7 +23,9 @@ use std::time::{Duration, Instant};
 
 use slot_ftrace::{self as ft, ev};
 
-use crate::core::{AvInfo, ButtonMask, CoreError, CoreOption, RetroCore, Sidecar, Sticks};
+use crate::core::{
+    AvInfo, ButtonMask, CoreError, CoreOption, CorePicture, RetroCore, Sidecar, Sticks,
+};
 use crate::ffi::RUMBLE_STRONG;
 use crate::rumble::Rumble;
 
@@ -126,8 +128,11 @@ struct Shm {
 
 impl Shm {
     fn create(name: &std::ffi::CStr) -> Option<Shm> {
-        // SAFETY: a fresh memfd with a NUL-terminated name.
-        let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
+        // SAFETY: a fresh memfd with a NUL-terminated name. Through the syscall, which the 4.9
+        // kernels have, as glibc only wraps it from 2.27 and TrimUI's firmware has 2.23.
+        let fd = unsafe {
+            libc::syscall(libc::SYS_memfd_create, name.as_ptr(), libc::MFD_CLOEXEC) as libc::c_int
+        };
         // SAFETY: a valid fd just made, owned from here on.
         (fd >= 0).then(|| Shm::from(unsafe { OwnedFd::from_raw_fd(fd) }))
     }
@@ -570,6 +575,9 @@ pub struct RemoteCore {
     /// last one is in and how long, when it is in one.
     frames: Vec<Shm>,
     frame: Option<(usize, usize)>,
+    /// Which set of buffers `frames` is: counted up each time the host sends another, so a
+    /// frontend holding images of the last set knows they are stale.
+    frame_generation: u64,
     /// Fds the host sent along with an answer not yet taken up.
     arrived: RefCell<Vec<OwnedFd>>,
     /// Set while a frame run overlapped hasn't been answered.
@@ -583,6 +591,8 @@ pub struct RemoteCore {
     av: AvInfo,
     rumble: Rumble,
     audio: Vec<i16>,
+    /// What the host's caller set up around it, dropped once the host has ended.
+    _kept: Option<Box<dyn Send>>,
 }
 
 impl RemoteCore {
@@ -618,6 +628,7 @@ impl RemoteCore {
             state,
             frames: Vec::new(),
             frame: None,
+            frame_generation: 0,
             arrived: RefCell::new(Vec::new()),
             running: Cell::new(false),
             held: RefCell::new(None),
@@ -631,7 +642,13 @@ impl RemoteCore {
             },
             rumble: Rumble::default(),
             audio: Vec::new(),
+            _kept: None,
         })
+    }
+
+    /// Keeps `guard` until the host has ended, so what was set up for it is undone after.
+    pub fn keep(&mut self, guard: Box<dyn Send>) {
+        self._kept = Some(guard);
     }
 
     /// Does `f` with the stream to the host, unless it is gone or goes, which is said the first
@@ -736,6 +753,7 @@ impl RemoteCore {
                 if new {
                     let fds = std::mem::take(self.arrived.get_mut());
                     self.frames = fds.into_iter().map(Shm::from).collect();
+                    self.frame_generation += 1;
                 }
                 let mapped = self.frames.get_mut(index).is_some_and(|s| s.map(n, false));
                 if !mapped {
@@ -853,6 +871,28 @@ impl RetroCore for RemoteCore {
             (Some(shm), Some((at, n))) => shm.get(at, n),
             _ => &self.video,
         }
+    }
+
+    fn picture(&mut self, fds: bool) -> Option<CorePicture> {
+        let (index, _) = self.frame?;
+        self.frames.get(index)?;
+        let fds = match fds {
+            true => Some(
+                self.frames
+                    .iter()
+                    .map(|s| s.fd.try_clone())
+                    .collect::<io::Result<Vec<_>>>()
+                    .ok()?,
+            ),
+            false => None,
+        };
+        Some(CorePicture {
+            generation: self.frame_generation,
+            index,
+            width: self.size.0,
+            height: self.size.1,
+            fds,
+        })
     }
 
     fn video_size(&self) -> (u32, u32) {

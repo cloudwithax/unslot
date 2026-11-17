@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -33,8 +33,71 @@ pub struct Frames {
     taken: AtomicU64,
 }
 
+/// A picture as it goes from the emulator's thread to the frontend's: the pixels copied out of
+/// the core's buffer, or the buffer itself when the core's own process has the frame in memory
+/// another process can map.
+pub struct Picture {
+    bytes: Option<Vec<u8>>,
+    shared: Option<SharedPicture>,
+}
+
+/// A picture left where the core's GPU put it, in memory the frontend can map and draw from:
+/// which set of buffers it is in, which of them, its size, and the buffers themselves when this
+/// is the first picture of that set to reach the frontend.
+#[derive(Debug)]
+pub struct SharedPicture {
+    /// Which set of buffers the frame is in, counted up by the core each time the buffers change.
+    pub generation: u64,
+    /// Which of the set's buffers holds it.
+    pub index: usize,
+    pub width: u32,
+    pub height: u32,
+    /// The buffers of the set, XRGB8888 top row first, one frame each, when they are new here.
+    pub fds: Option<Vec<OwnedFd>>,
+}
+
+impl Picture {
+    /// The pixels, copied out of the core's buffer.
+    pub fn bytes(bytes: Vec<u8>) -> Picture {
+        Picture {
+            bytes: Some(bytes),
+            shared: None,
+        }
+    }
+
+    /// The core's own buffer, left where it is.
+    pub fn shared(shared: SharedPicture) -> Picture {
+        Picture {
+            bytes: None,
+            shared: Some(shared),
+        }
+    }
+
+    /// Both, for a frontend that has not said whether it can draw the buffer itself: it draws
+    /// whichever it can, and the pixels are there for it not to lose the frame learning that.
+    pub fn both(bytes: Vec<u8>, shared: SharedPicture) -> Picture {
+        Picture {
+            bytes: Some(bytes),
+            shared: Some(shared),
+        }
+    }
+
+    pub fn pixels(&self) -> Option<&[u8]> {
+        self.bytes.as_deref()
+    }
+
+    pub fn buffer(&self) -> Option<&SharedPicture> {
+        self.shared.as_ref()
+    }
+
+    /// The pixels out of it, for the pool they came from.
+    fn take_bytes(&mut self) -> Option<Vec<u8>> {
+        self.bytes.take()
+    }
+}
+
 struct Inner {
-    ready: Option<(Vec<u8>, Shape, u64)>,
+    ready: Option<(Picture, Shape, u64)>,
     /// Pictures published so far, which numbers each one for the trace.
     seq: u64,
     spare: Vec<Vec<u8>>,
@@ -66,24 +129,26 @@ impl Frames {
         }
     }
 
-    /// Makes `buf` the picture to show next, and says which picture it is, counting from 1.
-    pub fn publish(&self, buf: Vec<u8>, shape: Shape) -> u64 {
+    /// Makes `picture` the one to show next, and says which picture it is, counting from 1.
+    pub fn publish(&self, picture: Picture, shape: Shape) -> u64 {
         let mut i = self.lock();
         i.seq += 1;
         let seq = i.seq;
-        if let Some((dropped, _, lost)) = i.ready.replace((buf, shape, seq)) {
+        if let Some((mut dropped, _, lost)) = i.ready.replace((picture, shape, seq)) {
             ft::instant(ev::FRAMES_OVERWRITTEN, lost as i64);
-            i.spare.push(dropped);
+            if let Some(buf) = dropped.take_bytes() {
+                i.spare.push(buf);
+            }
         }
         seq
     }
 
     pub fn latest(self: &Arc<Self>) -> Option<FrameRef> {
-        let (buf, shape, seq) = self.lock().ready.take()?;
+        let (picture, shape, seq) = self.lock().ready.take()?;
         self.taken.fetch_add(1, Ordering::Relaxed);
         Some(FrameRef {
             frames: self.clone(),
-            buf,
+            picture,
             shape,
             seq,
         })
@@ -112,22 +177,28 @@ impl Frames {
 
 pub struct FrameRef {
     frames: Arc<Frames>,
-    buf: Vec<u8>,
+    picture: Picture,
     pub shape: Shape,
     /// Which published picture this is.
     pub seq: u64,
 }
 
-impl Deref for FrameRef {
-    type Target = [u8];
+impl FrameRef {
+    /// The picture's pixels, when they were copied out of the core's buffer.
+    pub fn pixels(&self) -> Option<&[u8]> {
+        self.picture.pixels()
+    }
 
-    fn deref(&self) -> &[u8] {
-        &self.buf
+    /// The buffer the picture is left in, when the core's own process shares one.
+    pub fn buffer(&self) -> Option<&SharedPicture> {
+        self.picture.buffer()
     }
 }
 
 impl Drop for FrameRef {
     fn drop(&mut self) {
-        self.frames.recycle(std::mem::take(&mut self.buf));
+        if let Some(buf) = self.picture.take_bytes() {
+            self.frames.recycle(buf);
+        }
     }
 }

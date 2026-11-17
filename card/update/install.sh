@@ -10,17 +10,19 @@
 #   .tmp_update/unslot/manifest       format=unslot-update/1, target, version, build
 #   .tmp_update/unslot/System.sha256  the sha256 of every file in the payload
 #   .tmp_update/unslot/System/        the new System folder
-#   .tmp_update/h700.sh               this, last in the zip, so the rest is out once it is
+#   .tmp_update/TARGET.sh             this, last in the zip, so the rest is out once it is
 #
-# The System folder it replaces goes to .unslot-update/System.old, with a trial count that
-# System/launch_frontend.sh uses to put it back if the new one never starts. What happened goes
-# in Logs/update.log.
+# It goes in a pack as the chip the pack is for, h700.sh or a133p.sh, and installs only a pack
+# whose manifest names that chip. The System folder it replaces goes to .unslot-update/System.old,
+# with a trial count that System/launch_frontend.sh uses to put it back if the new one never
+# starts. What happened goes in Logs/update.log.
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SD="$(dirname "$HERE")"
 PACK="$HERE/unslot"
 UPD="$SD/.unslot-update"
+TARGET="$(basename "$0" .sh)"
 
 say() {
 	echo "unslot update: $*"
@@ -28,9 +30,10 @@ say() {
 	echo "$(date '+%F %T') $*" >> "$SD/Logs/update.log"
 }
 
-# Takes the unzipped pack off the card, so BaseOS has nothing to run until another comes.
+# Takes the unzipped pack off the card, so BaseOS has nothing to run until another comes. On a
+# TrimUI card .tmp_update keeps the updater that boots it.
 clear_pack() {
-	/bin/rm -rf "$PACK" "$HERE/h700.sh"
+	/bin/rm -rf "$PACK" "$HERE/$TARGET.sh"
 	rmdir "$HERE" 2>/dev/null || true
 	sync
 }
@@ -82,7 +85,7 @@ reject() {
 
 manifest="$PACK/manifest"
 grep -qx 'format=unslot-update/1' "$manifest" 2>/dev/null || reject "this is not an unslot pack"
-grep -qx 'target=h700' "$manifest" || reject "this pack is not for the H700"
+grep -qx "target=$TARGET" "$manifest" || reject "this pack is not for the $TARGET"
 version="$(sed -n 's/^version=//p' "$manifest" | head -n 1)"
 (cd "$PACK" && sha256sum -c System.sha256 > /dev/null 2>&1) ||
 	reject "$version did not match its checksums"

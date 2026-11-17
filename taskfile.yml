@@ -757,6 +757,102 @@ tasks:
         v="$(cat "{{.OUT}}/System/version")"
         cargo run -q --release -p slot --no-default-features --example make_pak --           "{{.PACK}}" "$v" "unslot-$v.pak"
 
+  build:a133p:
+    desc: >-
+      Build for TrimUI's A133P handhelds, the Smart Pro, Brick and Brick Pro, against the glibc
+      2.23 SDK baseline through zig: cargo install cargo-zigbuild, and pip install ziglang
+      or put zig on the PATH
+    cmds:
+      - >-
+        UNSLOT_CHIP=a133p CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=cortex-a53"
+        cargo zigbuild --profile device --target aarch64-unknown-linux-gnu.2.23
+        --target-dir target-a133p -p slot --no-default-features --features device
+      - tools/target-cap/target-cap.sh
+      - sh tools/a133p/check-glibc.sh target-a133p/aarch64-unknown-linux-gnu/device/slot
+      - 'echo "built target-a133p/aarch64-unknown-linux-gnu/device/slot"'
+
+  core:a133p:
+    desc: Build the mGBA core for the A133P handhelds, against their firmware's glibc, through zig
+    status:
+      - test -f target-a133p/cores/mgba_libretro.so
+      - test "$(cat target-a133p/cores/mgba_libretro.so.meta 2>/dev/null)" = "$(sh cores/mgba/build.sh stamp {{.MGBA_COMMIT}})"
+    cmds:
+      - >-
+        CMAKE_TOOLCHAIN_FILE="$PWD/tools/a133p/toolchain.cmake" sh cores/mgba/build.sh build
+        {{.MGBA_COMMIT}} target-a133p/mgba target-a133p/cores/mgba_libretro.so
+      - sh tools/a133p/check-glibc.sh target-a133p/cores/mgba_libretro.so
+
+  core:a133p:extra:
+    desc: Rebuild shipped cores from pinned sources for A133P (optional CORE arguments)
+    cmds:
+      - sh tools/a133p/cores.sh {{.CLI_ARGS}}
+
+  drastic:a133p:
+    desc: Host-build PowerVR SDL2 and stage DraStic (closed runner requires glibc 2.27)
+    cmds:
+      - sh tools/a133p/drastic.sh
+
+  dist:a133p:
+    desc: >-
+      Build the card for TrimUI's A133P handhelds into OUT (default dist-a133p): the H700 tree
+      FROM (default dist-device, from task dist:device or an unzipped unslot-<version>-h700.zip)
+      with the A133P's own slot and mGBA, this checkout's card/System, and the files TrimUI's
+      firmware boots it through. Copy all of OUT, .tmp_update too, to the root of the card
+    deps: [build:a133p, core:a133p]
+    vars:
+      OUT: '{{.OUT | default "dist-a133p"}}'
+      FROM: '{{.FROM | default "dist-device"}}'
+    cmds:
+      - test -f "{{.FROM}}/System/slot" || { echo "{{.FROM}} is not a device tree" >&2; exit 1; }
+      - rm -rf {{.OUT}}
+      - cp -R {{.FROM}} {{.OUT}}
+      - cp target-a133p/aarch64-unknown-linux-gnu/device/slot {{.OUT}}/System/slot
+      - |
+        set -eu
+        mkdir -p "{{.OUT}}/System/licenses"
+        manifest="{{.OUT}}/System/licenses/cores.manifest"
+        for f in target-a133p/cores/*_libretro.so; do
+          test -f "$f" || continue
+          sh tools/a133p/check-glibc.sh "$f"
+          cp "$f" "{{.OUT}}/System/"
+          # Debug symbols stay in target-a133p; ScummVM alone is 757 MB unstripped.
+          ${STRIP:-aarch64-linux-gnu-strip} --strip-unneeded "{{.OUT}}/System/$(basename "$f")"
+          cp "$f.meta" "{{.OUT}}/System/licenses/$(basename "$f").meta"
+          c="$(basename "$f" _libretro.so)"
+          rm -f "{{.OUT}}/System/licenses/$c"-*.meta
+          if test -f "$manifest"; then
+            awk -v core="$c" '$1 != core' "$manifest" > "$manifest.new"
+            mv "$manifest.new" "$manifest"
+          fi
+        done
+        if test -f "$manifest" && ! test -s "$manifest"; then rm "$manifest"; fi
+      - cp -R card/System/. {{.OUT}}/System/
+      - cp -R ports/a133p/card/. {{.OUT}}/
+      - |
+        set -eu
+        if test -f target-a133p/drastic/drastic.meta; then
+          mkdir -p "{{.OUT}}/System/drastic" "{{.OUT}}/System/licenses"
+          for f in drastic libs system game_database.xml drastic.cfg; do
+            cp -R "target-a133p/drastic/$f" "{{.OUT}}/System/drastic/"
+          done
+          for f in drastic.meta drastic_readme.txt SDL-LICENSE.txt; do
+            cp "target-a133p/drastic/$f" "{{.OUT}}/System/licenses/"
+          done
+          rm -f "{{.OUT}}/System/licenses/drastic.manifest"
+        fi
+      - |
+        set -eu
+        v='{{.VERSION | default ""}}'
+        [ -n "$v" ] || v="$(git describe --tags --always --dirty 2>/dev/null || echo unknown)"
+        echo "$v" > "{{.OUT}}/System/version"
+      - |
+        # What in the tree the firmware's glibc is too old for, so a core that will not load is
+        # no surprise.
+        mkdir -p {{.OUT}}/Logs
+        sh tools/a133p/check-glibc.sh -r {{.OUT}}/System > {{.OUT}}/Logs/a133p-glibc.txt
+        echo "$(wc -l < {{.OUT}}/Logs/a133p-glibc.txt) files need a newer glibc; see {{.OUT}}/Logs/a133p-glibc.txt"
+      - 'echo "A133P card ready at {{.OUT}}, copy all of it, .tmp_update too, to the card root"'
+
   deploy:device:
     desc: Build and push onto a device over adb, then restart it. SD defaults to /mnt/sdcard
     deps: [core:device, core:gpsp, core:fetch, services, drastic, portmaster, build:device]

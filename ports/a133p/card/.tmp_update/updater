@@ -1,0 +1,8 @@
+#!/bin/sh
+# What the boot hook runs from the card: unslot, or the firmware's own frontend if the card has
+# lost its System. The name and place are the hook's, which NextUI's cards boot through too.
+SD=/mnt/SDCARD
+if [ -f "$SD/System/a133p/launch.sh" ]; then
+	exec /bin/sh "$SD/System/a133p/launch.sh"
+fi
+exec /usr/trimui/bin/runtrimui-original.sh

@@ -1,0 +1,18 @@
+# Crazy Taxi 2 drive state for ct2-bench.sh, from a resume state on the mode selection menu:
+# Around Apple, work for 10 minutes, the first driver, then wait out the intro and save at the
+# start, in control at about 9'30" on the clock. ct2-bench.bot drives from there downtown and over
+# the bridge. (The state the measurements used was made by hand with these steps, step by step.)
+60
+8 a
+120
+6 down
+10
+6 down
+10
+6 down
+20
+8 a
+180
+8 a
+1500
+save /mnt/SDCARD/prof/ct2-drive.state

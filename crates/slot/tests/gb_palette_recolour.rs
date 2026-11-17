@@ -64,7 +64,10 @@ fn mean_saturation(frame: &[u8]) -> f64 {
 fn until(s: &mut Session, now: &mut Millis, what: &str, cond: impl Fn(&[u8]) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        if s.frame().is_some_and(|f| cond(&f)) {
+        if s.frame()
+            .and_then(|f| f.pixels().map(&cond))
+            .is_some_and(|ok| ok)
+        {
             return;
         }
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
@@ -175,9 +178,10 @@ fn a_palette_picked_behind_the_menu_outlasts_the_menu() {
         std::thread::sleep(Duration::from_millis(1));
     }
     let f = s.frame().expect("no frame");
+    let f = f.pixels().expect("the frame's pixels");
     assert!(
-        mean_saturation(&f) < 4.0,
+        mean_saturation(f) < 4.0,
         "the game went back to SGB 4-H once the menu closed, saturation {}",
-        mean_saturation(&f)
+        mean_saturation(f)
     );
 }

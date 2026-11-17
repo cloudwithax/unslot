@@ -176,8 +176,8 @@ fn the_cards_setting_reaches_the_core_through_the_session() {
         }
         let picture = loop {
             assert!(Instant::now() < deadline, "no frame was ever published");
-            if let Some(f) = s.frame() {
-                break to_rgba(&f);
+            if let Some(pixels) = s.frame().and_then(|f| f.pixels().map(|p| p.to_vec())) {
+                break to_rgba(&pixels);
             }
             now += 16;
             s.feed([], now);

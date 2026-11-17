@@ -318,7 +318,14 @@ impl Playback {
             }
             match self.pcm {
                 Some(pcm) => {
-                    pace.reset();
+                    // Keep the queue at its target. The device behind `plug:default` can be a dmix
+                    // ring several periods deep, which takes a write at once, so the thread would
+                    // drain the queue to nothing between its blocks and the core's rate control
+                    // would quicken the sound to refill it. Each write is given its own period's
+                    // time instead, so the queue is drawn from at the rate it is filled; a device
+                    // running slower holds the thread at its own rate when a write blocks.
+                    let _s = ft::span(ev::AUDIO_NO_PCM_SLEEP, 0);
+                    std::thread::sleep(pace.wait(Instant::now()));
                     ft::begin(ev::AUDIO_WRITE, PERIOD_FRAMES as i64);
                     let wrote = self.write(pcm, &buf);
                     ft::end(ev::AUDIO_WRITE, i64::from(wrote));

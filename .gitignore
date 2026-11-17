@@ -19,6 +19,8 @@
 /target-device-x
 /target-verify
 /dist-device
+/target-a133p
+/dist-a133p
 
 # Parallel implementation worktrees, never content.
 /.worktrees

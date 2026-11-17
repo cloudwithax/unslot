@@ -203,36 +203,7 @@ impl IonFrames {
     /// Ready for frames on the EGL context current on this thread, its display and functions
     /// found through libEGL and libGLESv2 themselves, as the compositor keeps neither.
     pub(crate) fn for_current() -> Result<Self, String> {
-        let open = |names: [&str; 2]| {
-            unsafe {
-                libloading::Library::new(names[0]).or_else(|_| libloading::Library::new(names[1]))
-            }
-            .map_err(|e| e.to_string())
-        };
-        let egl = open(["libEGL.so.1", "libEGL.so"])?;
-        let gles = open(["libGLESv2.so.2", "libGLESv2.so"])?;
-        // SAFETY: each is named for the function it is typed as.
-        let made = unsafe {
-            let display: unsafe extern "C" fn() -> Ptr = *egl
-                .get(b"eglGetCurrentDisplay")
-                .map_err(|e| e.to_string())?;
-            let get_proc: unsafe extern "C" fn(*const std::ffi::c_char) -> *const c_void =
-                *egl.get(b"eglGetProcAddress").map_err(|e| e.to_string())?;
-            let display = display();
-            if display.is_null() {
-                return Err("no EGL display current".into());
-            }
-            IonFrames::new(display, |name| {
-                match gles.get::<unsafe extern "C" fn()>(name.to_bytes()) {
-                    Ok(f) => *f as *const c_void,
-                    Err(_) => get_proc(name.as_ptr()),
-                }
-            })
-        };
-        // The context they serve keeps both loaded; letting go would only drop a reference.
-        std::mem::forget(egl);
-        std::mem::forget(gles);
-        made
+        with_gl(|display, proc| IonFrames::new(display, proc))
     }
 
     /// The `w` by `h` frame in framebuffer `from` into `out` as XRGB8888, top row first, turned
@@ -525,6 +496,223 @@ impl IonFrames {
 }
 
 impl Drop for IonFrames {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+/// `f` with the EGL display of the context current on this thread and a way to find EGL's and
+/// GLES's functions by name, found through libEGL and libGLESv2 themselves, as the compositor
+/// keeps neither. Both libraries stay loaded, as the context they serve keeps them.
+fn with_gl<R>(
+    f: impl FnOnce(Ptr, &dyn Fn(&CStr) -> *const c_void) -> Result<R, String>,
+) -> Result<R, String> {
+    let open = |names: [&str; 2]| {
+        unsafe {
+            libloading::Library::new(names[0]).or_else(|_| libloading::Library::new(names[1]))
+        }
+        .map_err(|e| e.to_string())
+    };
+    let egl = open(["libEGL.so.1", "libEGL.so"])?;
+    let gles = open(["libGLESv2.so.2", "libGLESv2.so"])?;
+    // SAFETY: each is named for the function it is typed as.
+    let (display, get_proc) = unsafe {
+        let current: unsafe extern "C" fn() -> Ptr = *egl
+            .get(b"eglGetCurrentDisplay")
+            .map_err(|e| e.to_string())?;
+        let get_proc: unsafe extern "C" fn(*const std::ffi::c_char) -> *const c_void =
+            *egl.get(b"eglGetProcAddress").map_err(|e| e.to_string())?;
+        (current(), get_proc)
+    };
+    if display.is_null() {
+        return Err("no EGL display current".into());
+    }
+    // SAFETY: a function of one of the two libraries, called as the one it is named for. EGL's
+    // own are libEGL's, which a driver need not hand out through eglGetProcAddress.
+    let proc = |name: &CStr| unsafe {
+        egl.get::<unsafe extern "C" fn()>(name.to_bytes())
+            .or_else(|_| gles.get::<unsafe extern "C" fn()>(name.to_bytes()))
+            .map_or_else(|_| get_proc(name.as_ptr()), |f| *f as *const c_void)
+    };
+    let out = f(display, &proc);
+    // Whatever was found of them stays callable: the context they serve keeps them loaded.
+    std::mem::forget(egl);
+    std::mem::forget(gles);
+    out
+}
+
+/// The images other processes' buffers are imported as, so the GPU samples a frame where its
+/// own process left it: one image and texture per buffer of the set, made again when the set or
+/// the size changes.
+struct ImageFns {
+    display: Ptr,
+    create: unsafe extern "C" fn(Ptr, Ptr, u32, Ptr, *const i32) -> Ptr,
+    destroy: unsafe extern "C" fn(Ptr, Ptr) -> u32,
+    target_texture: unsafe extern "C" fn(u32, Ptr),
+    get_error: unsafe extern "C" fn() -> i32,
+}
+
+/// Pictures left in buffers another process shares, imported as images the GPU draws where they
+/// are: no copy of the frame, neither here nor on its way.
+pub(crate) struct SharedImages {
+    fns: ImageFns,
+    /// Which generation of buffers the images are of, and the size they were made at.
+    generation: u64,
+    size: (u32, u32),
+    images: Vec<Ptr>,
+    textures: Vec<u32>,
+    /// Why the last import failed, for the log that says the frames are copied instead.
+    error: String,
+}
+
+impl SharedImages {
+    /// Ready to import pictures on the EGL context current on this thread.
+    pub(crate) fn for_current() -> Result<Self, String> {
+        with_gl(|display, proc| {
+            // SAFETY: each is named for the function it is typed as.
+            unsafe fn fun<T>(p: *const c_void) -> T {
+                std::mem::transmute_copy(&p)
+            }
+            let f = |name: &CStr| {
+                let p = proc(name);
+                match p.is_null() {
+                    true => Err(format!("no {}", name.to_string_lossy())),
+                    false => Ok(p),
+                }
+            };
+            // SAFETY: `fun` for each field's type.
+            unsafe {
+                Ok(SharedImages {
+                    fns: ImageFns {
+                        display,
+                        create: fun(f(c"eglCreateImageKHR")?),
+                        destroy: fun(f(c"eglDestroyImageKHR")?),
+                        target_texture: fun(f(c"glEGLImageTargetTexture2DOES")?),
+                        get_error: fun(f(c"eglGetError")?),
+                    },
+                    generation: 0,
+                    size: (0, 0),
+                    images: Vec::new(),
+                    textures: Vec::new(),
+                    error: String::new(),
+                })
+            }
+        })
+    }
+
+    /// Which set of buffers the images are of.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// The size the images were made at.
+    pub(crate) fn size(&self) -> (u32, u32) {
+        self.size
+    }
+
+    /// Why the images could not be made of the last set of buffers, or nothing when they were.
+    pub(crate) fn error(&self) -> &str {
+        &self.error
+    }
+
+    /// The buffers `fds`, `w` by `h` XRGB8888, as images of generation `generation`, one per
+    /// buffer, each with a texture of its own. False when one of them cannot be had, the set
+    /// that was there left as it was.
+    pub(crate) fn import(&mut self, generation: u64, (w, h): (u32, u32), fds: &[OwnedFd]) -> bool {
+        if fds.is_empty() || w == 0 || h == 0 {
+            return false;
+        }
+        let f = &self.fns;
+        let mut images = Vec::with_capacity(fds.len());
+        for fd in fds {
+            let attrs = [
+                EGL_WIDTH,
+                w as i32,
+                EGL_HEIGHT,
+                h as i32,
+                EGL_LINUX_DRM_FOURCC_EXT,
+                DRM_FORMAT_XRGB8888,
+                EGL_DMA_BUF_PLANE0_FD_EXT,
+                fd.as_raw_fd(),
+                EGL_DMA_BUF_PLANE0_OFFSET_EXT,
+                0,
+                EGL_DMA_BUF_PLANE0_PITCH_EXT,
+                (w * 4) as i32,
+                EGL_NONE,
+            ];
+            // SAFETY: the display is live and the attributes name a dma-buf this process holds.
+            let image = unsafe {
+                (f.create)(
+                    f.display,
+                    std::ptr::null_mut(),
+                    EGL_LINUX_DMA_BUF_EXT,
+                    std::ptr::null_mut(),
+                    attrs.as_ptr(),
+                )
+            };
+            if image.is_null() {
+                let (destroy, display, get_error) = (f.destroy, f.display, f.get_error);
+                // SAFETY: images of this display, made just now, of no texture yet.
+                let error = unsafe { get_error() };
+                for image in images {
+                    unsafe { destroy(display, image) };
+                }
+                self.error = format!("eglCreateImageKHR: egl error 0x{error:x}");
+                return false;
+            }
+            images.push(image);
+        }
+        let mut textures = vec![0u32; images.len()];
+        // SAFETY: the images are live and the textures are this context's, the binding of the
+        // unit in use left as it was.
+        unsafe {
+            let mut bound = 0;
+            gl::GetIntegerv(gl::TEXTURE_BINDING_2D, &mut bound);
+            gl::GenTextures(images.len() as i32, textures.as_mut_ptr());
+            for (i, &image) in images.iter().enumerate() {
+                gl::BindTexture(gl::TEXTURE_2D, textures[i]);
+                (f.target_texture)(gl::TEXTURE_2D, image);
+                // A texture of an image has no mipmaps, and GL's default minification asks for
+                // them: without this it samples as the incomplete black texture it would be.
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
+            }
+            gl::BindTexture(gl::TEXTURE_2D, bound as u32);
+        }
+        self.release();
+        self.images = images;
+        self.textures = textures;
+        self.generation = generation;
+        self.size = (w, h);
+        self.error.clear();
+        true
+    }
+
+    /// The texture the `index`th buffer of the set was imported as.
+    pub(crate) fn texture(&self, index: usize) -> Option<u32> {
+        self.textures.get(index).copied().filter(|t| *t != 0)
+    }
+
+    fn release(&mut self) {
+        let f = &self.fns;
+        let mut textures = std::mem::take(&mut self.textures);
+        if !textures.is_empty() {
+            // SAFETY: textures of this context, made in `import`, let go once.
+            unsafe { gl::DeleteTextures(textures.len() as i32, textures.as_ptr()) };
+        }
+        textures.clear();
+        // SAFETY: images of this display, made in `import`, of no texture by now.
+        for image in std::mem::take(&mut self.images) {
+            unsafe { (f.destroy)(f.display, image) };
+        }
+        self.generation = 0;
+        self.size = (0, 0);
+    }
+}
+
+impl Drop for SharedImages {
     fn drop(&mut self) {
         self.release();
     }

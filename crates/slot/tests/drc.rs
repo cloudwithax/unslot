@@ -1,13 +1,21 @@
 use slot::drc::Level;
 
 #[test]
-fn the_rate_never_moves_the_pitch_enough_to_hear() {
+fn the_rate_stays_within_its_limits() {
     let mut level = Level::new();
-    for queued in [0, 1, 100, 100_000] {
+    let target = 2048;
+    for queued in [0, 1, 100, 2048, 4096, 100_000] {
         for _ in 0..100 {
-            let r = level.push(1.0 / 60.0, queued, 2048);
+            let r = level.push(1.0 / 60.0, queued, target);
+            // A queue close to full may be drained below the 1% a pitch may move by: see
+            // Level::FULL_MIN.
+            let floor = if queued > target * 3 / 2 {
+                Level::FULL_MIN
+            } else {
+                Level::MIN
+            };
             assert!(
-                (Level::MIN..=Level::MAX).contains(&r),
+                (floor..=Level::MAX).contains(&r),
                 "rate {r} out of bounds for queued={queued}"
             );
         }

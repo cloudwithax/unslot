@@ -353,7 +353,11 @@ fn a_published_frame_is_the_splash(
 
     let watch = Instant::now() + Duration::from_secs(3);
     while Instant::now() < watch {
-        if emu.latest_frame().is_some_and(|f| common::mostly_lit(&f)) {
+        if emu
+            .latest_frame()
+            .and_then(|f| f.pixels().map(common::mostly_lit))
+            .is_some_and(|lit| lit)
+        {
             return true;
         }
         std::thread::sleep(Duration::from_millis(4));
@@ -861,7 +865,10 @@ fn a_paused_refresh_shows_a_colour_change_on_the_first_toggle() {
         assert!(Instant::now() < deadline, "the core never paused");
         std::thread::sleep(Duration::from_millis(2));
     }
-    let shown = |emu: &EmuHandle| saturation(&emu.latest_frame().expect("no frame"));
+    let shown = |emu: &EmuHandle| {
+        let frame = emu.latest_frame().expect("no frame");
+        saturation(frame.pixels().expect("the frame's pixels"))
+    };
     let refreshed = |emu: &EmuHandle, on: bool| {
         let before = emu.published_count();
         emu.set_option(

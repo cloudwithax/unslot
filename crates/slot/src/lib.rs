@@ -15,6 +15,7 @@ pub mod cheevos;
 pub mod core;
 pub mod core_downloads;
 pub mod core_picker;
+pub mod cpus;
 #[cfg(unix)]
 pub mod crash;
 #[cfg(not(unix))]
@@ -52,11 +53,13 @@ pub mod rewind;
 pub mod root;
 pub mod scrape;
 pub mod search;
+mod self_exec;
 pub mod services;
 pub mod session;
 pub mod shader;
 pub mod slot_skin;
 pub mod state_writer;
+pub mod thermal;
 pub mod thumb;
 pub mod update;
 pub mod upload;

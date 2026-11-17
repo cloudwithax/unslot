@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.15.0
+
+- Sound is paced by the output thread again on a device whose ALSA `plug:default` ends in dmix: TrimUI's firmware gives it a 170 ms ring, so slot's writes returned at once, its own 66 ms queue drained between them, and the rate control that keeps that queue at its target played the sound up to 1% fast to refill it, heard as a warbling, sharp pitch. Each write now waits out its own period. Over two-minute Crazy Taxi 2 drives on the Brick Pro the sound's rate measured -0.04% on average with peaks of +0.99%, against +0.42% and +10.5% before, with the queue holding its target instead of slamming between empty and full. The codec's clock itself is accurate: 60.28 s measured for 60 s of audio.
+- Nodosumi `v1.4.0` ships for Dreamcast (`core:nodosumi` fetches it for H700, and A133P builds pin it): the A64 JIT predicts and inline-links each indirect branch's first target, the sound CPU runs in 1 ms quanta, and GLES 3.0 entry points and FBO attachments work cleanly.
+- The sound-rate controller may quicken a nearly full queue by up to 5% (`Level::FULL_MIN`) so a full queue no longer holds up the next frame.
+- On a 4:3 screen the shelf and menus keep their whole 720-wide layout, with room above and below as on the RG CubeXX, instead of a 640-wide middle that cut off the carts and names at the sides. This is every 4:3 panel: the 640x480 RG35XX family as well as the 1024x768 Brick.
+- A GPU core running in slot's core host leaves its frames in ION buffers, and slot draws them directly as EGL images (`EGL_LINUX_DMA_BUF_EXT`) where supported instead of copying each frame twice; cores/drivers without shared buffers or frame blending fall back to copying as before.
+- A port to TrimUI's A133P handhelds, the Smart Pro, Brick and Brick Pro, on their stock firmware, built with `task dist:a133p` (verified on the Brick Pro, including Crazy Taxi 2 benchmarks and live play; Smart Pro and Brick untested). See `ports/a133p/README.md`.
+- Update packs carry the chip they are for (`unslot-<version>-a133p.pak` on A133P, `unslot-<version>.pak` on H700), installed by `card/update/install.sh` (which also works without `sort -V`), and `coresave.sh` finds the card from its own path.
+- GPU-core and DraStic menu children self-launch correctly through a versioned glibc loader such as `ld-2.33.so`.
+- A133P Dreamcast tuning (`cpus.rs` thread placement and `SCHED_RR` priority 10, `thermal.rs` 75 °C passive trip while Nodosumi runs with `System/dc-thermal-stock.on` opt-out), ftrace recording (`System/trace-ftrace.on`, `System/trace-ftrace-fine.on`), and `tools/a133p/ct2-bench.sh` / `pcsample`.
+
 ## v2.14.0
 
 - Sleep After and Power Off After under Settings → Power. Sleep After (Off by default, or 1, 3, 5 or 10 minutes) puts the handheld to sleep after that long without input, on the shelf, in menus or in games, as a tap of Power does: the game is saved and its cart stays in. Link sessions, Gallery videos, playing music, casting and downloads keep it awake. Power Off After sets how long it stays asleep before powering off: 1, 3 (the old fixed time, and still the default), 5, 10 or 30 minutes, or Never.

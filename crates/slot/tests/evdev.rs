@@ -286,6 +286,47 @@ fn a_bluetooth_pad_maps_its_buttons_by_their_xbox_letters() {
 }
 
 #[test]
+fn a_trimui_handhelds_own_pad_maps_its_buttons_by_their_printed_letters() {
+    let expected = [
+        (0x130, Btn::B),
+        (0x131, Btn::A),
+        (0x133, Btn::Y),
+        (0x134, Btn::X),
+        (0x136, Btn::L1),
+        (0x137, Btn::R1),
+        (0x13a, Btn::Select),
+        (0x13b, Btn::Start),
+        (0x13c, Btn::Menu),
+        (0x13d, Btn::L3),
+        (0x13e, Btn::R3),
+        (172, Btn::Menu),
+        (115, Btn::VolUp),
+        (114, Btn::VolDown),
+    ];
+    for (code, want) in expected {
+        assert_eq!(
+            decode(&packet(EV_KEY, code, 1)).and_then(slot::input::evdev::trimui_to_raw),
+            Some(RawEvent::Down(want)),
+            "code {code:#x}"
+        );
+    }
+}
+
+#[test]
+fn a_trimui_pads_triggers_on_z_and_rz_are_l2_and_r2() {
+    let mut triggers = slot::input::evdev::Triggers::on([0x02, 0x05], [255, 255]);
+    let ev = |code, value| slot::input::evdev::Ev {
+        kind: slot::input::evdev::EV_ABS,
+        code,
+        value,
+    };
+    assert!(triggers.takes(0x02) && triggers.takes(0x05) && !triggers.takes(0x00));
+    assert_eq!(triggers.feed(ev(0x02, 200)), Some(RawEvent::Down(Btn::L2)));
+    assert_eq!(triggers.feed(ev(0x05, 255)), Some(RawEvent::Down(Btn::R2)));
+    assert_eq!(triggers.feed(ev(0x02, 0)), Some(RawEvent::Up(Btn::L2)));
+}
+
+#[test]
 fn a_pads_analog_triggers_are_l2_and_r2_past_half_their_pull() {
     let mut triggers = slot::input::evdev::Triggers::new([1023, 1023]);
     let ev = |code, value| slot::input::evdev::Ev {

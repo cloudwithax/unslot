@@ -67,14 +67,16 @@ impl Pass {
     }
 
     fn frame(&self) -> Option<Vec<u8>> {
-        self.session.frame().map(|f| f.to_vec())
+        self.session
+            .frame()
+            .and_then(|f| f.pixels().map(|p| p.to_vec()))
     }
 
     fn expect_running(&mut self) {
         self.until("a first frame", |s| s.frame().is_some());
         let held = self.frame();
         self.until("the picture to move", move |s| {
-            s.frame().map(|f| f.to_vec()) != held
+            s.frame().and_then(|f| f.pixels().map(|p| p.to_vec())) != held
         });
     }
 

@@ -1,0 +1,15 @@
+# Crazy Taxi 2 bench drive for ct2-bench.sh, the H700 profiling loop (Nodosumi's
+# tools/ftrace/ct2-drive.bot): wait out the resume, load the drive state, then a fixed loop of
+# gas and turns
+60
+load /mnt/SDCARD/prof/ct2-drive.state
+mark
+240 r
+30 r jx=0.6
+240 r
+30 r jx=-0.6
+180 r
+20 r jx=1
+120 r
+25 r jx=-1
+loop

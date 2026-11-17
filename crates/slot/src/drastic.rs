@@ -199,7 +199,7 @@ fn pause_for_menu(root: &Path, game: i32) -> bool {
         }
     }
     let exited = menu_command(root, &frame)
-        .status()
+        .and_then(|mut command| command.status())
         .map_err(|e| eprintln!("slot: drastic menu: {e}"))
         .is_ok_and(|s| s.code() == Some(MENU_EXIT));
     let _ = std::fs::remove_file(&frame);
@@ -224,23 +224,10 @@ fn frame_file() -> PathBuf {
 }
 
 /// This binary again, through the loader it was started with when it was.
-fn menu_command(root: &Path, frame: &Path) -> std::process::Command {
-    let me = std::env::args_os().next().unwrap_or_default();
-    let exe = std::env::current_exe().unwrap_or_default();
-    let loader = exe
-        .file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|n| n.starts_with("ld-linux"));
-    let mut c = match loader {
-        true => {
-            let mut c = std::process::Command::new(&exe);
-            c.arg(&me);
-            c
-        }
-        false => std::process::Command::new(&me),
-    };
+fn menu_command(root: &Path, frame: &Path) -> std::io::Result<std::process::Command> {
+    let mut c = crate::self_exec::command()?;
     c.arg("--drastic-menu").arg(frame).env("SLOT_ROOT", root);
-    c
+    Ok(c)
 }
 
 /// Waits for DraStic to close itself, as the shim asks it to, and closes it if it does not.

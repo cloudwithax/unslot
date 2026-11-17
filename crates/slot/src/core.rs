@@ -126,19 +126,10 @@ fn open_remote(
 ) -> std::io::Result<Box<dyn RetroCore>> {
     use std::os::fd::OwnedFd;
     use std::os::unix::net::UnixStream;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     let (ours, theirs) = UnixStream::pair()?;
-    let exe = std::env::current_exe()?;
-    // Run through the loader as slot is, it is the loader that is the exe.
-    let mut cmd = match exe.file_name().and_then(|n| n.to_str()) {
-        Some(n) if n.starts_with("ld-linux") => {
-            let mut cmd = Command::new(&exe);
-            cmd.arg(std::env::args_os().next().unwrap_or_default());
-            cmd
-        }
-        _ => Command::new(&exe),
-    };
+    let mut cmd = crate::self_exec::command()?;
     cmd.env(slot_ftrace::CHILD_VAR, "1")
         .arg("--core-host")
         .arg(root)
@@ -148,8 +139,15 @@ fn open_remote(
         .arg(if colour { "1" } else { "0" })
         .args(paths)
         .stdin(Stdio::from(OwnedFd::from(theirs)));
+    // Slot's threads keep off the CPUs the plan gives the core's, from before the host starts,
+    // which takes the same, until the game ends with the host.
+    let confined = crate::cpus::plan(core).map(|plan| crate::cpus::confine_slot(&plan));
+    let raised = crate::thermal::raise(root, core);
     let child = cmd.spawn()?;
-    let remote = slot_retro::RemoteCore::new(child, ours)?;
+    let mut remote = slot_retro::RemoteCore::new(child, ours)?;
+    if confined.is_some() || raised.is_some() {
+        remote.keep(Box::new((confined, raised)));
+    }
     eprintln!("slot: {} runs in a core host", core.as_str());
     Ok(Box::new(remote))
 }
@@ -169,6 +167,9 @@ pub fn host(args: &[String]) -> Result<(), String> {
     let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
     // Gone with slot, whatever it was doing.
     unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) };
+    if let Some(plan) = crate::cpus::plan(core) {
+        crate::cpus::place_host(plan);
+    }
     // SAFETY: slot hands the socket over as stdin and nothing else here reads it.
     let stream = UnixStream::from(unsafe { OwnedFd::from_raw_fd(0) });
     let opened = open_here(

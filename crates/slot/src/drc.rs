@@ -7,7 +7,8 @@ pub fn drc_target(capacity_frames: usize) -> usize {
 /// running low is played slower so the core doesn't run dry, and one running high is played
 /// faster so the delay doesn't grow and nothing overflows.
 ///
-/// Stretching moves the pitch, so it is kept to 1%, too little to hear. A core that falls further
+/// Stretching moves the pitch, so it is kept to 1%, too little to hear, but for a queue about to
+/// overflow (see `FULL_MIN`). A core that falls further
 /// behind than that runs the queue dry instead: a short gap is gone at once, where a pitch dropped
 /// to match it is heard for as long as the core is slow and glides back after.
 ///
@@ -44,6 +45,15 @@ impl Level {
     pub const MIN: f64 = 0.99;
     pub const MAX: f64 = 1.01;
 
+    /// How far it may be quickened once the queue is close to full. Past that the thread running
+    /// the core waits for room and the next frame is late, which is seen, where this much pitch
+    /// for the moment it takes to drain is hardly heard.
+    pub const FULL_MIN: f64 = 0.95;
+    /// How far over its target, as a part of it, the queue is when that starts and when it is all
+    /// allowed.
+    const FULL_FROM: f64 = 0.25;
+    const FULL_BY: f64 = 0.75;
+
     /// Takes `dt` since the last update and the queue's level, and gives the rate to play at.
     pub fn push(&mut self, dt: f64, queued_frames: usize, target_frames: usize) -> f64 {
         if target_frames == 0 {
@@ -57,7 +67,9 @@ impl Level {
         };
         self.learned =
             (self.learned + Self::LEARN * error * dt).clamp(Self::LEARNED_MIN, Self::LEARNED_MAX);
-        (1.0 + Self::PROPORTION * error + self.learned).clamp(Self::MIN, Self::MAX)
+        let full = ((-error - Self::FULL_FROM) / (Self::FULL_BY - Self::FULL_FROM)).clamp(0.0, 1.0);
+        let min = Self::MIN - (Self::MIN - Self::FULL_MIN) * full;
+        (1.0 + Self::PROPORTION * error + self.learned).clamp(min, Self::MAX)
     }
 
     /// Forgets the learned rate, for when the core stops running at its own pace.
@@ -128,6 +140,35 @@ mod tests {
     }
 
     #[test]
+    fn a_core_well_ahead_is_quickened_before_the_queue_fills() {
+        // 2% ahead, as after presents that missed their refresh: more than the 1% that is never
+        // heard can take, and left alone the queue fills and holds the core's thread up.
+        let mut level = Level::new();
+        let produce = 1.02 * 800.0 * 48000.0 / 44100.0;
+        let consume = 800.0 * 48000.0 / 44100.0;
+        let mut queued = 3200usize;
+        for _ in 0..1200 {
+            let rate = level.push(1.0 / 60.0, queued, 3200);
+            assert!(rate >= Level::FULL_MIN, "quickened to {rate}");
+            queued = (queued as f64 + produce * rate - consume).max(0.0) as usize;
+            assert!(
+                queued + 900 < 6400,
+                "no room left for a frame's sound at {queued}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_queue_near_its_target_is_never_quickened_enough_to_hear() {
+        let mut level = Level::new();
+        for queued in [3200, 3600, 4000] {
+            for _ in 0..600 {
+                assert!(level.push(1.0 / 60.0, queued, 3200) >= Level::MIN);
+            }
+        }
+    }
+
+    #[test]
     fn a_queue_with_no_target_is_left_alone() {
         let mut level = Level::new();
         assert_eq!(level.push(1.0 / 60.0, 0, 0), 1.0);
@@ -140,7 +181,7 @@ mod tests {
             for _ in 0..100 {
                 let rate = level.push(1.0 / 60.0, queued, 3200);
                 assert!(
-                    (Level::MIN..=Level::MAX).contains(&rate),
+                    (Level::FULL_MIN..=Level::MAX).contains(&rate),
                     "rate {rate} out of bounds for queued={queued}"
                 );
             }

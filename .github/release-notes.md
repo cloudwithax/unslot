@@ -1,11 +1,11 @@
 ## Changes
 
-- **Sleep After** (Settings → Power): the handheld can now go to sleep on its own after 1, 3, 5 or 10 minutes without input, on the shelf, in menus or in games. Sleeping saves the game, as a tap of Power does. It stays awake during a link session, a Gallery video, music playback, casting and downloads. It is Off by default, so nothing changes until you turn it on.
-- **Power Off After** (Settings → Power): how long the handheld stays asleep before powering off, from 1 to 30 minutes, or Never. The default is 3 minutes, as before.
-- **Hostname** (Settings → Network): rename the handheld on your network (`<name>.local`) with the on-screen keyboard. The name is checked as BaseOS checks it and saved in `baseos.conf`; it takes effect after a restart.
-- **Boot Logo** (Settings → General): choose unslot's logo, BaseOS's original, or your own PNG, JPEG or BMP from the new `Bootlogos/` folder. A picture larger than the screen is scaled down to fit and centred on the colour of its top-left pixel. Upload from Phone has a new Boot logo option that sends a picture straight there.
+- **Dreamcast (Nodosumi v1.4.0)**: ships Nodosumi 1.4.0 for H700 (as well as A133P), adding A64 JIT first-target indirect branch prediction, 1 ms ARM7 sound CPU batching, and GLES 3.0 entry-point/FBO fixes.
+- **Audio pacing & rate control**: output thread paces writes on deep ALSA dmix rings so the queue does not drain and trigger sharp pitch/warble, and the rate controller drains a nearly full queue faster (`Level::FULL_MIN`) without holding up the next frame.
+- **4:3 screen layout**: 640×480 and 1024×768 4:3 panels keep the full 720-wide shelf and menu layout with room above and below instead of cropping the sides.
+- **Zero-copy GPU frames & TrimUI A133P port**: imports shared ION/DMA-BUF GPU frames directly as EGL images when supported (falling back cleanly to copy on H700 Mali), plus experimental TrimUI A133P (Brick Pro / Brick / Smart Pro) support (`task dist:a133p`).
 
-Verified on RG CubeXX: Sleep After at 1 minute slept after a minute without input and woke on Power; a hostname with a space was refused and a valid one changed only its line in `baseos.conf`; choosing a picture, uploading one from the phone page, and switching back to unslot's logo each rewrote the boot partition's logo, with the last restoring the original byte for byte. Not verified on hardware: Power Off After actually powering the handheld off, and the new name and logo after a full reboot. Both are covered by tests.
+Verified on TrimUI Brick Pro (Nodosumi v1.4.0 / Crazy Taxi 2); H700 targets inherit Nodosumi v1.4.0, the 4:3 layout fix, and the audio pacing/rate-control updates and are covered by CI checks and host unit tests.
 
 ## New card: flash the image
 

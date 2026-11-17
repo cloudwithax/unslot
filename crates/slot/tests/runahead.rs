@@ -156,6 +156,8 @@ fn present(emu: &EmuHandle) -> Vec<u8> {
     );
     emu.latest_frame()
         .expect("the tick published nothing")
+        .pixels()
+        .expect("the frame's pixels")
         .to_vec()
 }
 

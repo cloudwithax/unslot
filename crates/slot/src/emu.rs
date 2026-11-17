@@ -17,11 +17,12 @@ use slot_store::RUN_AHEAD_MAX;
 
 use crate::audio::Ring;
 use crate::drc::{drc_target, Level};
-use crate::frames::{FrameRef, Frames, Shape};
+use crate::frames::{FrameRef, Frames, Picture, Shape, SharedPicture};
 use crate::link_state;
 use crate::persist::Snapshot;
 use crate::resample::Resampler;
 use crate::rewind::{RewindThread, REWIND_BYTES};
+use slot_gfx::SharedGame;
 
 const PRESENT: Duration = Duration::from_nanos(16_666_667);
 
@@ -47,6 +48,15 @@ const RATE_WINDOW: u32 = 300;
 const TRACE_EVERY: u64 = 300;
 
 const MAX_LINK_PACKETS_PER_PRESENT: u32 = 256;
+
+/// Whether the frontend can draw a frame left in a buffer the core's own process shares, in
+/// `Shared::drawable`. It has not said so yet: the frames come out copied as well as shared,
+/// which costs a frame's copy rather than a frame lost to asking.
+const DRAWABLE_UNKNOWN: u8 = 0;
+/// It draws them where they are: the emu thread copies nothing out.
+const DRAWABLE_YES: u8 = 1;
+/// It cannot: the emu thread copies every frame out, as it always did.
+const DRAWABLE_NO: u8 = 2;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Speed {
@@ -138,6 +148,11 @@ struct Shared {
     ff_sound: AtomicBool,
     runahead: AtomicU8,
     published: AtomicU64,
+    /// Whether the frontend draws frames left in the core's own buffers where they are.
+    drawable: AtomicU8,
+    /// The set of those buffers the frontend has images of, which it needs the fds of when it
+    /// does not: the emu thread sends them along until it agrees.
+    have_generation: AtomicU64,
     resume_refused: AtomicBool,
     sav_refused: AtomicBool,
     link_lost: AtomicBool,
@@ -210,6 +225,8 @@ impl EmuHandle {
             ff_sound: AtomicBool::new(false),
             runahead: AtomicU8::new(0),
             published: AtomicU64::new(0),
+            drawable: AtomicU8::new(DRAWABLE_UNKNOWN),
+            have_generation: AtomicU64::new(0),
             resume_refused: AtomicBool::new(false),
             sav_refused: AtomicBool::new(false),
             link_lost: AtomicBool::new(false),
@@ -396,6 +413,27 @@ impl EmuHandle {
 
     pub fn latest_frame(&self) -> Option<FrameRef> {
         self.frames.latest()
+    }
+
+    /// What the frontend made of a picture left in a buffer the core's own process shares: drawn
+    /// where it was, or not, and which set of buffers it now has images of. Until it says it can
+    /// draw them, the emu thread copies the picture out as well, so none is lost to learning it.
+    pub fn picture_drawn(&self, generation: u64, outcome: SharedGame) {
+        match outcome {
+            SharedGame::Drawn => {
+                self.shared
+                    .have_generation
+                    .store(generation, Ordering::Relaxed);
+                self.shared.drawable.store(DRAWABLE_YES, Ordering::Relaxed);
+            }
+            SharedGame::NeedFds => {
+                // No images of that set here: the fds of it are wanted with the next picture.
+                self.shared.have_generation.store(0, Ordering::Relaxed);
+            }
+            SharedGame::Unsupported => {
+                self.shared.drawable.store(DRAWABLE_NO, Ordering::Relaxed);
+            }
+        }
     }
 
     pub fn set_speed(&self, speed: Speed) {
@@ -833,7 +871,7 @@ impl Worker {
                     }
                     core.set_frame_skip(false);
                     core.run_frame(ButtonMask(0));
-                    self.publish(core.video_xrgb8888(), shape_of(core.as_ref()));
+                    self.publish_core(core.as_mut());
                 }
                 self.shared
                     .rewind_fill
@@ -1001,8 +1039,8 @@ impl Worker {
                 }
                 flush_outbound(&mut transport, &link);
                 match shown {
-                    true => self.publish(&runahead.video, runahead.shape),
-                    false => self.publish(core.video_xrgb8888(), shape_of(core.as_ref())),
+                    true => self.publish_copied(&runahead.video, runahead.shape),
+                    false => self.publish_core(core.as_mut()),
                 }
                 if core.av_info() != av {
                     av = core.av_info();
@@ -1247,7 +1285,7 @@ impl Worker {
                     core.run_frame(ButtonMask(0));
                     core.set_frame_skip(false);
                     core.run_frame(ButtonMask(0));
-                    self.publish(core.video_xrgb8888(), shape_of(core));
+                    self.publish_core(&mut *core);
                     let _ = core.take_audio();
                     if let Err(e) = core.unserialize(&state) {
                         eprintln!("slot: refresh: {e}");
@@ -1360,15 +1398,72 @@ impl Worker {
         }
     }
 
-    fn publish(&self, video: &[u8], shape: Shape) {
+    /// Publishes `picture` as the frame to show next, and says which frame it is.
+    fn publish(&self, picture: Picture, shape: Shape) -> u64 {
+        let seq = self.frames.publish(picture, shape);
+        self.shared.published.fetch_add(1, Ordering::Relaxed);
+        crate::latency::published();
+        seq
+    }
+
+    /// Publishes the picture of `video`, copied out of the core's buffer, the trace's span
+    /// around the copy.
+    fn publish_copied(&self, video: &[u8], shape: Shape) {
         ft::begin(ev::EMU_PUBLISH, video.len() as i64);
         let mut buf = self.frames.take_write();
         buf.clear();
         buf.extend_from_slice(video);
-        let seq = self.frames.publish(buf, shape);
+        let seq = self.publish(Picture::bytes(buf), shape);
         ft::end(ev::EMU_PUBLISH, seq as i64);
-        self.shared.published.fetch_add(1, Ordering::Relaxed);
-        crate::latency::published();
+    }
+
+    /// Publishes the frame the core last ran: as the buffer its own process left it in, for a
+    /// frontend that draws one where it is, else as pixels copied out of it. 1.2 MB a frame
+    /// through the CPU is most of what the emu thread has left over a frame's worth of time, so
+    /// the copy is only made when the frontend has no use for the buffer itself.
+    fn publish_core(&self, core: &mut dyn RetroCore) {
+        let shape = shape_of(core);
+        if self.shared.drawable.load(Ordering::Relaxed) != DRAWABLE_NO {
+            let have = self.shared.have_generation.load(Ordering::Relaxed);
+            if let Some(mut picture) = core.picture(false) {
+                if have != picture.generation {
+                    match core.picture(true) {
+                        Some(fresh) => picture = fresh,
+                        // The buffers cannot be duplicated: the pixels will have to do.
+                        None => return self.publish_copied(core.video_xrgb8888(), shape),
+                    }
+                }
+                let shared = SharedPicture {
+                    generation: picture.generation,
+                    index: picture.index,
+                    width: picture.width,
+                    height: picture.height,
+                    fds: picture.fds,
+                };
+                let bytes = shape.width as i64 * shape.height as i64 * 4;
+                match self.shared.drawable.load(Ordering::Relaxed) {
+                    // The frontend draws the core's own buffer: the frame is published with not
+                    // one pixel of it copied.
+                    DRAWABLE_YES => {
+                        ft::begin(ev::EMU_PUBLISH, bytes);
+                        let seq = self.publish(Picture::shared(shared), shape);
+                        ft::end(ev::EMU_PUBLISH, seq as i64);
+                    }
+                    // Not known to be drawable yet: the pixels come with it, so the frame is
+                    // shown either way while the frontend finds out.
+                    _ => {
+                        ft::begin(ev::EMU_PUBLISH, bytes);
+                        let mut buf = self.frames.take_write();
+                        buf.clear();
+                        buf.extend_from_slice(core.video_xrgb8888());
+                        let seq = self.publish(Picture::both(buf, shared), shape);
+                        ft::end(ev::EMU_PUBLISH, seq as i64);
+                    }
+                }
+                return;
+            }
+        }
+        self.publish_copied(core.video_xrgb8888(), shape);
     }
 
     fn speed(&self) -> Speed {

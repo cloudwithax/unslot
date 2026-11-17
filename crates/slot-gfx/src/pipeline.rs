@@ -24,6 +24,10 @@ pub struct GamePass {
     ghost: Ghost,
     /// The size the game texture was made at, which follows the frames uploaded into it.
     texels: (u32, u32),
+    /// The picture drawn in place of the uploaded textures: a texture of a core's own buffer,
+    /// imported so the GPU samples it where the core's process left it, which saves the upload.
+    /// None draws the uploaded ones.
+    picture: Option<gl::types::GLuint>,
     u_src: gl::types::GLint,
     /// How wide the picture should look against its height, or None to fill the screen rect
     /// the way the Game Boy family's 240x160 canvas does.
@@ -100,6 +104,7 @@ impl GamePass {
             lcd: Lcd::Gba,
             ghost: Ghost::new((SRC_W, SRC_H))?,
             texels: (SRC_W, SRC_H),
+            picture: None,
             u_src,
             aspect: None,
             rotation: 0,
@@ -256,15 +261,8 @@ impl GamePass {
         if w == 0 || h == 0 || xrgb8888.len() < (w * h * 4) as usize {
             return;
         }
-        if self.texels != (w, h) {
-            let game = [0, 1]
-                .map(|_| crate::gl::texture(w, h, gl::NEAREST, gl::CLAMP_TO_EDGE, gl::BGRA, None));
-            unsafe { gl::DeleteTextures(2, self.game.as_ptr()) };
-            self.game = game;
-            self.texels = (w, h);
-            self.ghost.resize((w, h));
-            self.held = 0;
-        }
+        self.picture = None;
+        self.resized((w, h));
         let last = self.game[self.at];
         self.at = 1 - self.at;
         let game = self.game[self.at];
@@ -292,6 +290,39 @@ impl GamePass {
         }
     }
 
+    /// The picture left in `tex`, a texture of a buffer imported from the core's own memory, `w`
+    /// by `h`, drawn in place of the uploaded ones until `upload` is called again. False when it
+    /// cannot be drawn so: a size the pass was never built for, or a blend that reads the frame
+    /// before.
+    pub(crate) fn show_image(&mut self, tex: gl::types::GLuint, (w, h): (u32, u32)) -> bool {
+        if w == 0 || h == 0 || tex == 0 || self.blend != FrameBlend::Off {
+            return false;
+        }
+        self.resized((w, h));
+        self.picture = Some(tex);
+        true
+    }
+
+    /// The textures this pass uploads into, made for `w` by `h` frames, as the frames' own size
+    /// changes; a picture drawn where it is needs them the size of the frames it draws.
+    fn resized(&mut self, (w, h): (u32, u32)) {
+        if self.texels == (w, h) {
+            return;
+        }
+        let game = [0, 1]
+            .map(|_| crate::gl::texture(w, h, gl::NEAREST, gl::CLAMP_TO_EDGE, gl::BGRA, None));
+        unsafe { gl::DeleteTextures(2, self.game.as_ptr()) };
+        self.game = game;
+        self.texels = (w, h);
+        self.ghost.resize((w, h));
+        self.held = 0;
+    }
+
+    /// How the pass blends one frame with the last.
+    pub(crate) fn blend(&self) -> FrameBlend {
+        self.blend
+    }
+
     pub fn draw(&self, quad: &Quad) {
         let src = match self.effect {
             // The whole-texel fit pairs the texture's width with the screen's, which a quarter
@@ -301,7 +332,9 @@ impl GamePass {
             }
             _ => self.src,
         };
-        let game = self.game[self.at];
+        // The picture left in the core's own buffer, when the pass was given one, is the newest
+        // frame; the uploaded textures hold it otherwise.
+        let game = self.picture.unwrap_or(self.game[self.at]);
         let shown = match self.blend {
             FrameBlend::Off => game,
             FrameBlend::Mix | FrameBlend::Ghosting => self.ghost.texture().unwrap_or(game),

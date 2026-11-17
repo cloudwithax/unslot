@@ -26,19 +26,28 @@ log() {
 # against the version and checksum it signed, and writes the zip out untouched. That is then
 # unpacked and installed as BaseOS installs a MinUI.zip. A pack that does not check out is left
 # as .bad, and System is not touched.
+#
+# UNSLOT_CHIP, which only System/a133p/launch.sh sets, says which chip's packs these are: an
+# A133P's are unslot-<version>-a133p.pak and install through .tmp_update/a133p.sh. Only the
+# pack's own files leave .tmp_update, as a TrimUI card boots from the updater beside them.
+CHIP="${UNSLOT_CHIP:-h700}"
+PAKS="unslot-*.pak"
+[ "$CHIP" = h700 ] || PAKS="unslot-*-$CHIP.pak"
 SLOT_BIN="${AGS_SLOT:-/lib/ld-linux-aarch64.so.1 $SYS/slot}"
-pak="$(ls -1 "$SD"/unslot-*.pak 2>/dev/null | sort -V | tail -n 1)"
+# TrimUI's BusyBox sort has no -V; it fails before it reads, so a plain sort still gets the list.
+pak="$(ls -1 "$SD"/$PAKS 2>/dev/null | { sort -V 2>/dev/null || sort; } | tail -n 1)"
 if [ -n "$pak" ]; then
 	mkdir -p "$SD/.unslot-update"
 	zip="$SD/.unslot-update/pak.zip"
 	if version="$($SLOT_BIN --unpack-pak "$pak" "$zip" 2>> "$LOGS/update.log")"; then
-		rm -rf "$SD/.tmp_update"
-		if unzip -o -q "$zip" '.tmp_update/*' -d "$SD" && sh "$SD/.tmp_update/h700.sh" > /dev/null 2>&1; then
-			rm -f "$SD"/unslot-*.pak
+		rm -rf "$SD/.tmp_update/unslot" "$SD/.tmp_update/$CHIP.sh"
+		if unzip -o -q "$zip" '.tmp_update/*' -d "$SD" && sh "$SD/.tmp_update/$CHIP.sh" > /dev/null 2>&1; then
+			rm -f "$SD"/$PAKS
 		else
 			echo "$(date '+%F %T') $version did not install; left as $(basename "$pak").bad" >> "$LOGS/update.log"
 			mv -f "$pak" "$pak.bad"
-			rm -rf "$SD/.tmp_update"
+			rm -rf "$SD/.tmp_update/unslot" "$SD/.tmp_update/$CHIP.sh"
+			rmdir "$SD/.tmp_update" 2>/dev/null
 		fi
 	else
 		echo "$(date '+%F %T') $(basename "$pak") is not an update unslot signed; left as .bad" >> "$LOGS/update.log"
@@ -74,8 +83,9 @@ if [ -f "$UPD/trial" ] && [ -d "$UPD/System.old" ]; then
 	sync
 fi
 
+# The power LED, through BaseOS's AXP2202 driver; TrimUI's firmware does not let it be set.
 pid="$(cat "$RUN/slot-led.pid" 2>/dev/null)"
-if [ -z "$pid" ] || [ ! -d "/proc/$pid" ]; then
+if [ "$CHIP" = h700 ] && { [ -z "$pid" ] || [ ! -d "/proc/$pid" ]; }; then
 	sh "$SYS/led.sh" once
 	sh "$SYS/led.sh" loop > /dev/null 2>&1 &
 	echo $! > "$RUN/slot-led.pid"
@@ -147,6 +157,26 @@ if [ -f "$SD/.unslot-port" ]; then
 			log "port ended $?"
 		fi
 	fi
+fi
+
+# Profiling. With System/trace-ftrace.on, slot records its frame trace (SLOT_FTRACE, which its core
+# host joins), Nodosumi its own (NODOSUMI_FTRACE) and slot logs its pacing and input latency, all
+# for tools/ftrace_dump.py and Nodosumi's tools/ftrace/analyze.py. They go to Logs/ftrace; a start
+# after one where a core recorded keeps that one, with its slot.log, in Logs/ftrace.1. With
+# System/trace-ftrace-fine.on as well, Nodosumi also times the zones it enters thousands of times
+# a frame and counts each frame's SH4 and ARM7 instructions and the SH4's loads and stores that
+# miss fastmem, which costs more.
+if [ -f "$SYS/trace-ftrace.on" ]; then
+	TRACE="$LOGS/ftrace"
+	if [ -f "$TRACE/nodo-trace.bin" ]; then
+		rm -rf "$TRACE.1"
+		mv "$TRACE" "$TRACE.1"
+		[ -f "$LOGS/slot.log" ] && cp "$LOGS/slot.log" "$TRACE.1/slot.log"
+	fi
+	mkdir -p "$TRACE"
+	export SLOT_FTRACE="$TRACE/slot-trace.bin" NODOSUMI_FTRACE="$TRACE/nodo-trace.bin" SLOT_TRACE_LATENCY=1
+	[ -f "$SYS/trace-ftrace-fine.on" ] && export NODOSUMI_FTRACE_FINE=1 NODOSUMI_COUNT_INSTRS=1
+	log "tracing to $TRACE${NODOSUMI_FTRACE_FINE:+, fine}"
 fi
 
 [ -f "$LOGS/slot.log" ] && mv -f "$LOGS/slot.log" "$LOGS/slot.log.1"

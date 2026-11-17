@@ -112,6 +112,8 @@ fn main() {
         _ => {}
     }
     slot::crash::install();
+    // A trip a slot that went down mid-game left raised goes back first.
+    slot::thermal::restore_left();
     // Opens the trace, if SLOT_FTRACE asks for one, before a core host is spawned to join it.
     slot_ftrace::enabled();
 

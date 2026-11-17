@@ -1,4 +1,5 @@
 use crate::draw::{Draw, Sprites, TexId};
+use crate::ghost::FrameBlend;
 use crate::grade::{blue_light_gain, contrast_boost, dim_gain, saturation_boost};
 use crate::pipeline::GamePass;
 use crate::quad::Quad;
@@ -59,6 +60,27 @@ pub struct Compositor {
     cast_ion: Option<crate::ion::IonFrames>,
     #[cfg(target_os = "linux")]
     cast_ion_tried: bool,
+    /// The images a core's own frame buffers are imported as, made the first time one is asked
+    /// for; `shared_images_tried` once that has been tried.
+    #[cfg(target_os = "linux")]
+    shared_images: Option<crate::ion::SharedImages>,
+    #[cfg(target_os = "linux")]
+    shared_images_tried: bool,
+    /// What the last frame said of the core's own buffers, so the log says it once when it
+    /// changes rather than once a frame.
+    #[cfg(target_os = "linux")]
+    shared_reported: Option<SharedGame>,
+}
+
+/// What became of a picture left in a buffer the core's process shares.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum SharedGame {
+    /// Drawn where it is: no pixel of it was copied.
+    Drawn,
+    /// Its set of buffers is not imported here: the same picture is needed again, with them.
+    NeedFds,
+    /// Such a picture cannot be drawn here: the pixels have to be uploaded.
+    Unsupported,
 }
 
 impl Compositor {
@@ -140,6 +162,12 @@ impl Compositor {
                 cast_ion: None,
                 #[cfg(target_os = "linux")]
                 cast_ion_tried: false,
+                #[cfg(target_os = "linux")]
+                shared_images: None,
+                #[cfg(target_os = "linux")]
+                shared_images_tried: false,
+                #[cfg(target_os = "linux")]
+                shared_reported: None,
             })
         }
     }
@@ -167,6 +195,102 @@ impl Compositor {
 
     pub fn upload_game(&mut self, xrgb8888: &[u8], size: (u32, u32)) {
         self.game.upload(xrgb8888, size, &self.quad);
+    }
+
+    /// The game's next picture, left in a buffer the core's own process shares, so that no pixel
+    /// of it is copied: the `index`th buffer of `generation`'s set, `w` by `h`, drawn where it
+    /// is, the images of the set made from `fds` when this frontend has none of it yet.
+    #[cfg(target_os = "linux")]
+    pub fn draw_game_shared(
+        &mut self,
+        generation: u64,
+        index: usize,
+        w: u32,
+        h: u32,
+        fds: Option<&[std::os::fd::OwnedFd]>,
+    ) -> SharedGame {
+        let drawn = self.draw_game_shared_at(generation, index, (w, h), fds);
+        // Which of the two it is, said once per change, so the log tells a copy from no copy.
+        if self.shared_reported != Some(drawn) {
+            self.shared_reported = Some(drawn);
+            match drawn {
+                SharedGame::Drawn => {
+                    eprintln!("slot: gpu core: {w}x{h} frames are drawn where the core leaves them")
+                }
+                SharedGame::NeedFds => {
+                    eprintln!("slot: gpu core: frames are copied until their buffers arrive")
+                }
+                SharedGame::Unsupported => {
+                    let why = match self.shared_images.as_ref() {
+                        Some(images) if !images.error().is_empty() => images.error(),
+                        Some(_) if self.game.blend() != FrameBlend::Off => "frames are blended",
+                        Some(_) => "the sizes are not the game pass's",
+                        None => "no EGL images here",
+                    };
+                    eprintln!("slot: gpu core: frames are copied every frame: {why}")
+                }
+            }
+        }
+        drawn
+    }
+
+    /// The same, saying what became of it.
+    #[cfg(target_os = "linux")]
+    fn draw_game_shared_at(
+        &mut self,
+        generation: u64,
+        index: usize,
+        (w, h): (u32, u32),
+        fds: Option<&[std::os::fd::OwnedFd]>,
+    ) -> SharedGame {
+        if self.game.blend() != FrameBlend::Off {
+            return SharedGame::Unsupported;
+        }
+        let Some(images) = self.shared_images() else {
+            return SharedGame::Unsupported;
+        };
+        if images.generation() != generation || images.size() != (w, h) {
+            let Some(fds) = fds else {
+                return SharedGame::NeedFds;
+            };
+            if !images.import(generation, (w, h), fds) {
+                return SharedGame::Unsupported;
+            }
+        }
+        let Some(tex) = images.texture(index) else {
+            return SharedGame::Unsupported;
+        };
+        match self.game.show_image(tex, (w, h)) {
+            true => SharedGame::Drawn,
+            false => SharedGame::Unsupported,
+        }
+    }
+
+    /// Where the frame buffers of a core running in another process are imported, made the first
+    /// time one is asked for, and never tried again when the device has no such thing.
+    #[cfg(target_os = "linux")]
+    fn shared_images(&mut self) -> Option<&mut crate::ion::SharedImages> {
+        if !self.shared_images_tried {
+            self.shared_images_tried = true;
+            match crate::ion::SharedImages::for_current() {
+                Ok(images) => self.shared_images = Some(images),
+                Err(e) => eprintln!("slot: gpu core: frames copied every frame: {e}"),
+            }
+        }
+        self.shared_images.as_mut()
+    }
+
+    /// The same, where there is no such thing to import.
+    #[cfg(not(target_os = "linux"))]
+    pub fn draw_game_shared(
+        &mut self,
+        _generation: u64,
+        _index: usize,
+        _w: u32,
+        _h: u32,
+        _fds: Option<&[std::os::fd::OwnedFd]>,
+    ) -> SharedGame {
+        SharedGame::Unsupported
     }
 
     pub fn set_game_aspect(&mut self, aspect: Option<f32>) {
