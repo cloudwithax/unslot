@@ -171,4 +171,21 @@ launch
 ! grep -qs -- --port "$TMP/asked" || fail "DraStic's launch looked for runtimes or read the volume"
 [ ! -e "$TMP/fs/roms" ] || fail "DraStic's launch linked PortMaster's folders"
 
+# A firmware without /etc/ssl/certs/ca-certificates.crt gets the card's CA bundle; one with its own keeps it.
+setup
+mkdir -p "$TMP/card/System/ssl" "$TMP/card/Ports"
+echo bundle > "$TMP/card/System/ssl/ca-certificates.crt"
+printf '#!/bin/sh\necho "${SSL_CERT_FILE:-}:${CURL_CA_BUNDLE:-}" > certs\n' > "$TMP/card/Ports/Certs.sh"
+printf '%s' "$TMP/card/Ports/Certs.sh" > "$TMP/card/.unslot-port"
+(unset SSL_CERT_FILE CURL_CA_BUNDLE; launch)
+[ "$(cat "$TMP/card/Ports/certs")" = "$TMP/card/System/ssl/ca-certificates.crt:$TMP/card/System/ssl/ca-certificates.crt" ] ||
+	fail "the card's CA bundle was not exported when the firmware had none: $(cat "$TMP/card/Ports/certs")"
+
+mkdir -p "$TMP/fs/etc/ssl/certs"
+echo system > "$TMP/fs/etc/ssl/certs/ca-certificates.crt"
+printf '%s' "$TMP/card/Ports/Certs.sh" > "$TMP/card/.unslot-port"
+(unset SSL_CERT_FILE CURL_CA_BUNDLE; launch)
+[ "$(cat "$TMP/card/Ports/certs")" = ":" ] ||
+	fail "the card's CA bundle overrode the firmware's own: $(cat "$TMP/card/Ports/certs")"
+
 echo "launch: all passed"

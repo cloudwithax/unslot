@@ -31,6 +31,7 @@ log() {
 # A133P's are unslot-<version>-a133p.pak and install through .tmp_update/a133p.sh. Only the
 # pack's own files leave .tmp_update, as a TrimUI card boots from the updater beside them.
 CHIP="${UNSLOT_CHIP:-h700}"
+[ "$CHIP" = a133p ] && [ ! -f "$SYS/trace-radio.on" ] && unset AGS_RADIO_TRACE AGS_WPA_LOG
 PAKS="unslot-*.pak"
 [ "$CHIP" = h700 ] || PAKS="unslot-*-$CHIP.pak"
 SLOT_BIN="${AGS_SLOT:-/lib/ld-linux-aarch64.so.1 $SYS/slot}"
@@ -111,6 +112,13 @@ echo 1 > /sys/class/devfreq/gpu/device/scenectrl/command 2>/dev/null
 # has not got for download, on screen, and the port is not run without them. While it runs, slot
 # reads the volume keys and sets the codec's volume by them, as ports play through ALSA alone.
 FS="${SLOT_FS:-}"
+
+# A firmware with no root certificates of its own (TrimUI's stock OS has no /etc/ssl) uses the
+# Mozilla CA bundle on the card, so curl, Syncthing, Tailscale and ports can verify HTTPS.
+if [ ! -f "$FS/etc/ssl/certs/ca-certificates.crt" ] && [ -f "$SYS/ssl/ca-certificates.crt" ]; then
+	export SSL_CERT_FILE="$SYS/ssl/ca-certificates.crt"
+	export CURL_CA_BUNDLE="$SSL_CERT_FILE"
+fi
 
 # link TARGET AT: AT made a link to TARGET, unless something other than a link is there.
 link() {

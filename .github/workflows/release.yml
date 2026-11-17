@@ -111,9 +111,11 @@ jobs:
           file "$out/System/bin/bash" | grep -q 'aarch64.*statically linked'
           file "$out/System/bin/zip" | grep -q aarch64
           for f in portmaster.manifest portmaster-MIT.txt portmaster-gptokeyb-LICENSE.txt portmaster-gptokeyb2-LICENSE.txt \
-            portmaster-love-LICENSE.txt libopenal1-copyright.txt bash-copyright.txt zip-copyright.txt; do
+            portmaster-love-LICENSE.txt libopenal1-copyright.txt bash-copyright.txt zip-copyright.txt \
+            ca-certificates-copyright.txt; do
             test -s "$out/System/licenses/$f"
           done
+          test -s "$out/System/ssl/ca-certificates.crt"
 
       - name: Package
         id: package

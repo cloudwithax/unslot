@@ -3,7 +3,7 @@
 - **Dreamcast (Nodosumi v1.4.0)**: ships Nodosumi 1.4.0 for H700 (as well as A133P), adding A64 JIT first-target indirect branch prediction, 1 ms ARM7 sound CPU batching, and GLES 3.0 entry-point/FBO fixes.
 - **Audio pacing & rate control**: output thread paces writes on deep ALSA dmix rings so the queue does not drain and trigger sharp pitch/warble, and the rate controller drains a nearly full queue faster (`Level::FULL_MIN`) without holding up the next frame.
 - **4:3 screen layout**: 640×480 and 1024×768 4:3 panels keep the full 720-wide shelf and menu layout with room above and below instead of cropping the sides.
-- **Zero-copy GPU frames & TrimUI A133P port**: imports shared ION/DMA-BUF GPU frames directly as EGL images when supported (falling back cleanly to copy on H700 Mali), plus experimental TrimUI A133P (Brick Pro / Brick / Smart Pro) support (`task dist:a133p`).
+- **Zero-copy GPU frames & TrimUI A133P port**: imports shared ION/DMA-BUF GPU frames directly as EGL images when supported (falling back cleanly to copy on H700 Mali), plus experimental TrimUI A133P (Brick Pro / Brick / Smart Pro) support (`task dist:a133p`), bundled Mozilla CA certificates (`System/ssl/ca-certificates.crt`) for firmwares without `/etc/ssl/certs`, and paused GPU swaps while asleep (`Doze`).
 
 Verified on TrimUI Brick Pro (Nodosumi v1.4.0 / Crazy Taxi 2); H700 targets inherit Nodosumi v1.4.0, the 4:3 layout fix, and the audio pacing/rate-control updates and are covered by CI checks and host unit tests.
 

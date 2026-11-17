@@ -100,8 +100,8 @@ Look at these on the card:
 | `Logs/radio-trace.log` | Every step `slotwifi.sh` and `slotbt.sh` took. |
 | `Logs/dmesg.txt` | The kernel's log, written every 20 seconds. |
 
-The last four are there while the port is brought up. `wpa_supplicant.log`, `radio-trace.log` and
-`dmesg.txt` keep the boot before as `.1`.
+The last four are recorded when an empty `System/trace-radio.on` is present on the card.
+`wpa_supplicant.log`, `radio-trace.log` and `dmesg.txt` keep the boot before as `.1`.
 
 ## Building
 

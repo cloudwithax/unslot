@@ -178,6 +178,7 @@ pub fn run() {
             slot::root::sweep_temps(&card);
         });
     let mut drawn = false;
+    let mut dozed_blank = false;
     frontend.drive_emulator();
     let mut pacer = Pacer::new();
     let (mut frames, mut missed, mut early) = (0u32, 0u32, 0u32);
@@ -212,6 +213,14 @@ pub fn run() {
             frontend.switch_display();
             return;
         }
+        let dozing = frontend.dozing() && !frontend.app().shutting_down();
+        if dozing && dozed_blank {
+            std::thread::sleep(Duration::from_millis(50));
+            continue;
+        }
+        if !dozing {
+            dozed_blank = false;
+        }
         {
             let _s = ft::span(ev::PRESENT_STEP, 0);
             frontend.step_emulator(pacer.period, STEP_TIMEOUT);
@@ -230,6 +239,11 @@ pub fn run() {
         if let Err(e) = swapped {
             eprintln!("slot: {e}");
             return;
+        }
+        if dozing {
+            dozed_blank = true;
+            pacer.last_return = None;
+            continue;
         }
         slot::latency::swapped(swap_took.as_secs_f64() * 1000.0);
         let dropped = pacer.swapped(work, swap_took > Duration::from_millis(1));

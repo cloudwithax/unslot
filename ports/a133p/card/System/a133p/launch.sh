@@ -34,6 +34,10 @@ export BASEOS_MODEL="$model"
 export UNSLOT_CHIP=a133p
 export PATH="$SYS/bin:/usr/trimui/bin:$PATH"
 export LD_LIBRARY_PATH="/usr/trimui/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+if [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ -f "$SYS/ssl/ca-certificates.crt" ]; then
+	export SSL_CERT_FILE="$SYS/ssl/ca-certificates.crt"
+	export CURL_CA_BUNDLE="$SSL_CERT_FILE"
+fi
 
 # slot and its scripts keep their pids and sockets in /run, which is in memory on BaseOS.
 grep -q ' /run ' /proc/mounts || { mkdir -p /run && mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run; }
@@ -107,22 +111,22 @@ if ! timeout 1 true 2> /dev/null; then
 	fi
 fi
 
-# While the port is brought up: the radio scripts' every step, the supplicant's debug output,
-# the kernel's log and what the firmware has, all in Logs, a boot's worth at a time.
-export AGS_RADIO_TRACE="$LOGS/radio-trace.log"
-export AGS_WPA_SUPPLICANT="/bin/sh $HERE/wpa_supplicant.sh"
-export AGS_WPA_LOG="$LOGS/wpa_supplicant.log"
-for f in radio-trace.log wpa_supplicant.log dmesg.txt; do
-	[ -f "$LOGS/$f" ] && mv -f "$LOGS/$f" "$LOGS/$f.1"
-done
-# The diagnostics and the dmesg every 5 s run at nice 19, so they give way to everything else: the
-# dmesg loop runs through games too, and a Crazy Taxi 2 trace showed its emulator off the CPU and
-# slot's drawing slowed every 5.3 s. TrimUI's BusyBox has nice but no renice or taskset.
-nice -n 19 /bin/sh "$HERE/diag.sh" "$LOGS/a133p-diag.txt" &
-nice -n 19 /bin/sh -c 'while :; do
-	sleep 5
-	dmesg > "$1/dmesg.txt" 2> /dev/null
-done' sh "$LOGS" &
+# With System/trace-radio.on: the radio scripts' every step, the supplicant's debug output, the
+# kernel's log and what the firmware has, all in Logs, a boot's worth at a time. Off by default so
+# normal runs do not rewrite the card every few seconds.
+if [ -f "$SYS/trace-radio.on" ]; then
+	export AGS_RADIO_TRACE="$LOGS/radio-trace.log"
+	export AGS_WPA_SUPPLICANT="/bin/sh $HERE/wpa_supplicant.sh"
+	export AGS_WPA_LOG="$LOGS/wpa_supplicant.log"
+	for f in radio-trace.log wpa_supplicant.log dmesg.txt; do
+		[ -f "$LOGS/$f" ] && mv -f "$LOGS/$f" "$LOGS/$f.1"
+	done
+	nice -n 19 /bin/sh "$HERE/diag.sh" "$LOGS/a133p-diag.txt" &
+	nice -n 19 /bin/sh -c 'while :; do
+		sleep 5
+		dmesg > "$1/dmesg.txt" 2> /dev/null
+	done' sh "$LOGS" &
+fi
 
 while :; do
 	/bin/sh "$SYS/launch_frontend.sh"

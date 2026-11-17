@@ -1030,6 +1030,10 @@ impl Frontend {
         self.start.elapsed().as_millis() as Millis
     }
 
+    pub fn dozing(&self) -> bool {
+        self.session.dozing()
+    }
+
     pub fn powering_off(&self) -> bool {
         self.session.app().ready_to_power_off()
     }

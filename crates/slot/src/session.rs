@@ -480,7 +480,7 @@ impl Session {
             || self.app.shutting_down()
     }
 
-    fn dozing(&self) -> bool {
+    pub fn dozing(&self) -> bool {
         matches!(self.app.phase(), Phase::Doze { .. })
     }
 

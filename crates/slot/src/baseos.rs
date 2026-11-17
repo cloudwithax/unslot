@@ -119,7 +119,7 @@ fn with_config_root<T>(
 ) -> std::io::Result<T> {
     const DEVICE: &str = "/dev/mmcblk0p7";
     const MOUNT: &str = "/tmp/slot-tf1-config";
-    if !Path::new(DEVICE).exists() {
+    if crate::pak::CHIP != "h700" || !Path::new(DEVICE).exists() {
         return f(root);
     }
     let mounts = std::fs::read_to_string("/proc/self/mounts")?;
