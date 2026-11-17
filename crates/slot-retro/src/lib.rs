@@ -16,8 +16,8 @@ mod rtc;
 mod rumble;
 
 pub use core::{
-    AvInfo, ButtonMask, CoreError, CoreOption, RetroCore, SharedFrame, Sidecar, Sticks, GBA_H,
-    GBA_W,
+    AvInfo, ButtonMask, CoreError, CoreOption, CorePicture, RetroCore, SharedFrame, Sidecar,
+    Sticks, GBA_H, GBA_W,
 };
 pub use ffi::{
     NETPACKET_BROADCAST, NETPACKET_FLUSH_HINT, NETPACKET_RELIABLE, NETPACKET_UNRELIABLE,

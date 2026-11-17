@@ -23,7 +23,9 @@ use std::time::{Duration, Instant};
 
 use slot_ftrace::{self as ft, ev};
 
-use crate::core::{AvInfo, ButtonMask, CoreError, CoreOption, RetroCore, Sidecar, Sticks};
+use crate::core::{
+    AvInfo, ButtonMask, CoreError, CoreOption, CorePicture, RetroCore, Sidecar, Sticks,
+};
 use crate::ffi::RUMBLE_STRONG;
 use crate::rumble::Rumble;
 
@@ -573,6 +575,9 @@ pub struct RemoteCore {
     /// last one is in and how long, when it is in one.
     frames: Vec<Shm>,
     frame: Option<(usize, usize)>,
+    /// Which set of buffers `frames` is: counted up each time the host sends another, so a
+    /// frontend holding images of the last set knows they are stale.
+    frame_generation: u64,
     /// Fds the host sent along with an answer not yet taken up.
     arrived: RefCell<Vec<OwnedFd>>,
     /// Set while a frame run overlapped hasn't been answered.
@@ -623,6 +628,7 @@ impl RemoteCore {
             state,
             frames: Vec::new(),
             frame: None,
+            frame_generation: 0,
             arrived: RefCell::new(Vec::new()),
             running: Cell::new(false),
             held: RefCell::new(None),
@@ -747,6 +753,7 @@ impl RemoteCore {
                 if new {
                     let fds = std::mem::take(self.arrived.get_mut());
                     self.frames = fds.into_iter().map(Shm::from).collect();
+                    self.frame_generation += 1;
                 }
                 let mapped = self.frames.get_mut(index).is_some_and(|s| s.map(n, false));
                 if !mapped {
@@ -864,6 +871,28 @@ impl RetroCore for RemoteCore {
             (Some(shm), Some((at, n))) => shm.get(at, n),
             _ => &self.video,
         }
+    }
+
+    fn picture(&mut self, fds: bool) -> Option<CorePicture> {
+        let (index, _) = self.frame?;
+        self.frames.get(index)?;
+        let fds = match fds {
+            true => Some(
+                self.frames
+                    .iter()
+                    .map(|s| s.fd.try_clone())
+                    .collect::<io::Result<Vec<_>>>()
+                    .ok()?,
+            ),
+            false => None,
+        };
+        Some(CorePicture {
+            generation: self.frame_generation,
+            index,
+            width: self.size.0,
+            height: self.size.1,
+            fds,
+        })
     }
 
     fn video_size(&self) -> (u32, u32) {

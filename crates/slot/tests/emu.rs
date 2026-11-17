@@ -303,7 +303,7 @@ fn every_speed_publishes_the_frame_the_core_last_ran() {
             .unserialize(&frames.to_le_bytes())
             .expect("the reference core refused the frame count");
         assert_eq!(
-            &shown[..],
+            shown.pixels().expect("the frame's pixels"),
             reference.video_xrgb8888(),
             "at a ceiling of {ceiling} the picture shown is not frame {frames}"
         );
@@ -482,6 +482,7 @@ fn a_captured_thumbnail_is_the_unfiltered_core_frame() {
     let mut buf = vec![0u8; reader.output_buffer_size()];
     reader.next_frame(&mut buf).expect("decode");
 
+    let frame = frame.pixels().expect("the frame's pixels");
     for (i, px) in frame.chunks_exact(4).enumerate() {
         assert_eq!(
             &buf[i * 3..i * 3 + 3],
@@ -497,7 +498,10 @@ fn the_renderer_is_handed_whole_gba_frames() {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         if let Some(frame) = emu.latest_frame() {
-            assert_eq!(frame.len(), 240 * 160 * 4);
+            assert_eq!(
+                frame.pixels().expect("the frame's pixels").len(),
+                240 * 160 * 4
+            );
             return;
         }
         assert!(Instant::now() < deadline, "no frame was published in 2s");

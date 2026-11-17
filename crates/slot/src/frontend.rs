@@ -763,7 +763,27 @@ impl Frontend {
         if let Some(frame) = self.session.frame() {
             ft::instant(ev::RENDER_FRAME, frame.seq as i64);
             let _s = ft::span(ev::GFX_UPLOAD_GAME, frame.seq as i64);
-            compositor.upload_game(&frame, (frame.shape.width, frame.shape.height));
+            let size = (frame.shape.width, frame.shape.height);
+            let mut drawn = false;
+            if let Some(shared) = frame.buffer() {
+                // A core in another process left the frame in a buffer its GPU draws into: the
+                // GPU here draws it where it is, so nothing is copied of it at all.
+                let outcome = compositor.draw_game_shared(
+                    shared.generation,
+                    shared.index,
+                    size.0,
+                    size.1,
+                    shared.fds.as_deref(),
+                );
+                drawn = outcome == slot_gfx::SharedGame::Drawn;
+                self.session.picture_drawn(shared.generation, outcome);
+            }
+            if !drawn {
+                // Copied out of the core's buffer, or one this frontend cannot draw where it is.
+                if let Some(pixels) = frame.pixels() {
+                    compositor.upload_game(pixels, size);
+                }
+            }
             self.game_aspect = frame.shape.aspect;
             self.game_rotation = frame.shape.rotation;
             crate::latency::taken();

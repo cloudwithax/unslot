@@ -6,7 +6,8 @@
 #
 #   sh tools/a133p/ct2-bench.sh setup
 #   sh tools/a133p/ct2-bench.sh run NAME SECS [core=LOCAL.so] [trace=coarse|fine|off] [sample=0]
-#                                   [bot=FILE] [cool=DEGREES] [pre=CMD] [post=CMD] [VAR=value...]
+#                                   [pcsample=1] [bot=FILE] [cool=DEGREES] [pre=CMD] [post=CMD]
+#                                   [VAR=value...]
 #   sh tools/a133p/ct2-bench.sh table DIR...
 #   sh tools/a133p/ct2-bench.sh restore
 #
@@ -48,18 +49,21 @@ setup)
 	put "$here/ct2-bench-device.sh" "$P/bench.sh"
 	mkdir -p "$OUT"
 	"$here/zcc" -O2 -o "$OUT/pin" "$here/pin.c"
+	"$here/zcc" -O2 -shared -fPIC -o "$OUT/pcsample.so" "$here/pcsample.c" -lpthread -lrt
 	put "$OUT/pin" "$P/pin"
+	put "$OUT/pcsample.so" "$P/pcsample.so"
 	dev "chmod +x $P/pin && sh $P/bench.sh setup"
 	;;
 run)
 	name="$2" secs="$3"
 	shift 3
-	core='' trace=coarse sample=1 bot="$here/ct2-bench.bot" env='' pre='' post='' cool=50
+	core='' trace=coarse sample=1 pcsample=0 bot="$here/ct2-bench.bot" env='' pre='' post='' cool=50
 	for a do
 		case "$a" in
 		core=*) core="${a#core=}" ;;
 		trace=*) trace="${a#trace=}" ;;
 		sample=*) sample="${a#sample=}" ;;
+		pcsample=*) pcsample="${a#pcsample=}" ;;
 		bot=*) bot="${a#bot=}" ;;
 		pre=*) pre="${a#pre=}" ;;
 		post=*) post="${a#post=}" ;;
@@ -85,6 +89,9 @@ export $a" ;;
 	fi
 	{
 		echo "export NODOSUMI_BOT=$P/bot.txt SLOT_TRACE_LATENCY=1"
+		if [ "$pcsample" = 1 ]; then
+			echo "export LD_PRELOAD=$P/pcsample.so PCSAMPLE_OUT=$T NODOSUMI_PERF=1"
+		fi
 		if [ "$trace" != off ]; then
 			echo "export SLOT_FTRACE=$T/slot-trace.bin NODOSUMI_FTRACE=$T/nodo-trace.bin"
 		fi

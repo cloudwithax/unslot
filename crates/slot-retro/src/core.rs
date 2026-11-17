@@ -65,6 +65,22 @@ pub struct SharedFrame {
     pub buffers: Option<Vec<OwnedFd>>,
 }
 
+/// A frame's picture left in memory of the core's own, which another process can map and its GPU
+/// draw from: which set of buffers holds it, which of them, its size, and the buffers themselves
+/// when the caller wants them.
+pub struct CorePicture {
+    /// Which set of buffers the picture is in, a new number each time the buffers change, so a
+    /// frontend drawing one of them knows the ones it holds are stale.
+    pub generation: u64,
+    /// Which of the set's buffers holds the newest frame.
+    pub index: usize,
+    pub width: u32,
+    pub height: u32,
+    /// The buffers, one frame each, XRGB8888 top row first, when they were asked for; the same
+    /// fds may be asked for again until the generation changes.
+    pub fds: Option<Vec<OwnedFd>>,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct AvInfo {
     pub fps: f64,
@@ -119,6 +135,13 @@ pub trait RetroCore: Send {
     /// Where the last frame's picture is, for a core that can leave it in memory another process
     /// maps rather than copy it into `video_xrgb8888`; asking has it do so from the next frame on.
     fn shared_frame(&mut self) -> Option<SharedFrame> {
+        None
+    }
+    /// The last frame's picture, for a core that leaves it in memory of another process's, which
+    /// a frontend can draw where it is rather than take a copy of it. `fds` asks for the buffers
+    /// along with it, which is one map per generation of them. None for the cores whose last
+    /// frame is only in this process's own memory.
+    fn picture(&mut self, _fds: bool) -> Option<CorePicture> {
         None
     }
     /// The width and height of what `video_xrgb8888` holds.

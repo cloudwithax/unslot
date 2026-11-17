@@ -216,6 +216,8 @@ Coarse traces go to `/tmp`, not the card. Each run starts at 52 °C or cooler.
 | Stock trip, plan plus every other thread and IRQ on CPUs 0–1 | 63.5% | 17.3 / 22.0 ms | 1,401 MHz | 4.0% |
 | Trip 70 °C (2 runs) | 34.0%, 34.6% | 16.1 / 21.3 ms | 1,727 MHz | 3.1–3.2% |
 | Trip 75 °C (2 runs, one by the shipped slot) | 24.6%, 24.5% | 15.6 / 20.6 ms | 1,914 MHz | 1.7–2.2% |
+| Trip 75 °C, indirect-branch cache in the JIT (2 runs) | 18.7%, 19.2% | 15.2 / 20.9 ms | 1,989–2,000 MHz | 1.7–1.9% |
+| Trip 75 °C, cache and frames drawn where the core left them (2 runs) | 2.4%, 3.8% | 12.6 / 18.2–18.9 ms | 2,000 MHz | 0.19–0.64% |
 
 - **Thermal throttling is the main cause.** TrimUI's CPU zone throttles from 63 °C, stepping down
   to 1.2 GHz, and the Brick Pro idles near 51 °C. While Nodosumi runs, slot now raises that trip
@@ -225,6 +227,34 @@ Coarse traces go to `/tmp`, not the card. Each run starts at 52 °C or cooler.
 - **The emu thread is mostly waiting on memory.** Over the same frames, going from 1,444 to
   1,918 MHz cuts its CPU time only from 17.0 to 15.6 ms per frame. So about 11 ms of each frame
   does not scale with the clock. The kernel has no huge pages to cut TLB misses.
+- **An indirect branch's first target is now a direct branch.** Nodosumi's A64 JIT compares an
+  indirect branch against the target it went to first and takes a linked branch straight to it,
+  with the call that made the guess turned into a nop
+  (`tools/a133p/nodosumi-a64-indirect-cache.patch`). Over the same drive, frames over 16.7 ms
+  fall from 24.1% to 18.7–19.2%, and the CPU state hash over 3,000 frames of the cpu tool's bot
+  is unchanged. The mean CPU clock rose from 1,962 to 1,989–2,000 MHz over those runs, so the emu
+  work change (15.56 to 15.19–15.27 ms) is within what the clock alone could account for.
+- **The rest of the frame was copying.** A Dreamcast frame used to cost 3.3 ms in Nodosumi's video
+  thread to write into an ION buffer, 3.3 ms in slot's emu thread to copy it out of the shared
+  memory (`emu.publish`), and 3.3 ms in slot's render thread to upload it into a texture
+  (`gfx.upload_game`) — all inside the 16.7 ms a frame has. slot now imports the core's buffer set
+  as EGL images (`EGL_LINUX_DMA_BUF_EXT`, XRGB8888) and points the game texture at the newest
+  one, so the GPU samples the frame where the core's own process left it: `emu.publish` falls
+  from 3.3 to 0.00 ms and `gfx.upload_game` from 3.3 to 0.00 ms. The three buffers a core shares
+  take turns, so slot's images are made again whenever the core sends a new set of them (a new
+  "generation" in `CorePicture`), and a frontend that cannot import them, a core that shares none
+  (H700's Mali, the software cores), or a frame blend that reads the frame before, copies every
+  frame as before. Until a frontend says it can draw a shared frame, the frames carry their pixels
+  too, so no frame is lost to finding that out. The copies' cache traffic had also been slowing
+  Nodosumi itself: with the same core, its work per frame falls from 14.7–15.3 to 12.6–12.7 ms,
+  frames over 16.7 ms from 14.9–19.2% to 2.4–3.8%, and repeated presents from 90–136 of 7,200 to
+  14–46 of 7,182.
+- **What is left is the core's own work.** With the copies gone, Nodosumi's emu thread spends
+  12.9 ms of each 16.7 ms frame (SH4 10.1, ARM7 0.9, AICA 0.5, texture sources 0.4) and then waits
+  15.6 ms on its pacing clock; the drives' 14 remaining repeats come from the 2.4% of frames that
+  still run over 16.7 ms (p90 15.3, p99 19.0 ms). Continuing towards no repeats means the JIT's
+  context loads and stores, which a PC sample puts at 31% of its time, and the ARM7 and AICA's
+  1.4 ms on the same thread.
 - **The CPU plan** (`crates/slot/src/cpus.rs`) is kept: emu on CPU 3, the renderer on CPU 2.
   Throttling dominates the differences between the plan, `SLOT_CPUS=off` and full isolation, so
   the comparison is within noise. The ~900 involuntary switches a second in the first traces came

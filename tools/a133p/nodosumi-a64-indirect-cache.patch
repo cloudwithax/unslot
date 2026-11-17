@@ -1,0 +1,94 @@
+diff --git a/src/jit/backend/a64/a64_backend.cc b/src/jit/backend/a64/a64_backend.cc
+index c7a87f1..378c274 100644
+--- a/src/jit/backend/a64/a64_backend.cc
++++ b/src/jit/backend/a64/a64_backend.cc
+@@ -411,9 +411,22 @@ void a64_backend_emit_branch(struct a64_backend *backend, MacroAssembler &e,
+       e.dc32((uint32_t)target->i32);
+     } break;
+     case 2: {
+-      /* same lookup as the dynamic thunk, inline, so each indirect branch
+-         gets its own predictor entry rather than sharing the thunk's */
+-      if (!target) {
++      /* an indirect branch first compares with the target it went to the
++         first time, and on a match takes a direct branch, linked like a static
++         one. the guess starts as 1, which no pc matches, and the call after
++         makes it, then becomes a nop. a miss does the same lookup as the
++         dynamic thunk, inline, so each indirect branch gets its own predictor
++         entry rather than sharing the thunk's */
++      if (target) {
++        ExactAssemblyScope scope(&e, (A64_PREDICT_CALL + 1) * 4);
++        e.movz(w16, 1, 0);
++        e.movk(w16, 0, 16);
++        e.cmp(pc, w16);
++        e.b(A64_PREDICT_CALL - 3, ne);
++        a64_emit_bl(e, backend->dispatch_static);
++        e.dc32(1);
++        a64_emit_bl(e, backend->dispatch_predict);
++      } else {
+         e.Ldr(pc, MemOperand(a64_guestctx, guest->offset_pc));
+       }
+       int width = 32 - backend->cache_shift - clz32(backend->cache_mask);
+diff --git a/src/jit/backend/a64/a64_dispatch.cc b/src/jit/backend/a64/a64_dispatch.cc
+index 3cffeca..48680a0 100644
+--- a/src/jit/backend/a64/a64_dispatch.cc
++++ b/src/jit/backend/a64/a64_dispatch.cc
+@@ -37,6 +37,21 @@ void a64_dispatch_patch_edge(struct jit_backend *base, void *code, void *dst) {
+   __builtin___clear_cache((char *)code, (char *)code + 4);
+ }
+ 
++/* an indirect branch's guess, see a64_backend_emit_branch: the first target
++   seen becomes the one it compares with, linked like a direct branch, and the
++   call that made the guess turns into a nop */
++static void a64_dispatch_predict(struct a64_backend *backend, uint32_t *call) {
++  struct jit_guest *guest = backend->base.guest;
++  uint32_t pc = *(uint32_t *)((uint8_t *)guest->ctx + guest->offset_pc);
++  uint32_t *site = call - A64_PREDICT_CALL;
++
++  site[0] = 0x52800010 | ((pc & 0xffff) << 5);         /* movz w16, lo */
++  site[1] = 0x72a00010 | ((pc >> 16) << 5);            /* movk w16, hi, lsl 16 */
++  site[A64_PREDICT_CALL - 1] = pc;                     /* the link's target */
++  site[A64_PREDICT_CALL] = 0xd503201f;                 /* nop */
++  __builtin___clear_cache((char *)site, (char *)(site + A64_PREDICT_CALL + 1));
++}
++
+ void a64_dispatch_invalidate_code(struct jit_backend *base, uint32_t addr) {
+   struct a64_backend *backend = container_of(base, struct a64_backend, base);
+   *cache_slot(backend, addr) = backend->dispatch_compile;
+@@ -86,6 +101,14 @@ void a64_dispatch_emit_thunks(struct a64_backend *backend) {
+   masm.Blr(x16);
+   branch_back(masm, backend->dispatch_dynamic);
+ 
++  /* an indirect branch's first run: make its guess, then dispatch */
++  backend->dispatch_predict = masm_pc(masm);
++  masm.Ldr(x0, (uint64_t)backend);
++  masm.Sub(x1, x30, 4);
++  masm.Ldr(x16, (uint64_t)&a64_dispatch_predict);
++  masm.Blr(x16);
++  branch_back(masm, backend->dispatch_dynamic);
++
+   /* compile thunk: default cache entry for uncompiled blocks. the guest may
+      run the code instead of compiling, returning the cycles it took, and then
+      the budget/irqs are checked as after a block */
+diff --git a/src/jit/backend/a64/a64_local.h b/src/jit/backend/a64/a64_local.h
+index a0706ce..eb2f4da 100644
+--- a/src/jit/backend/a64/a64_local.h
++++ b/src/jit/backend/a64/a64_local.h
+@@ -37,6 +37,7 @@ struct a64_backend {
+   void *dispatch_static;
+   void *dispatch_compile;
+   void *dispatch_interrupt;
++  void *dispatch_predict;
+   void (*dispatch_enter)(int32_t);
+   void *dispatch_exit;
+ 
+@@ -54,6 +55,10 @@ struct a64_backend {
+ 
+ #define A64_THUNK_SIZE 16384
+ 
++/* an indirect branch's guess: movz/movk w16, cmp, b.ne, bl dispatch_static
++   and its target word, then the bl dispatch_predict at this word index */
++#define A64_PREDICT_CALL 6
++
+ /* stack frame: saved lr/fp + callee-saved regs, then scratch for ir locals */
+ #define A64_STACK_LOCALS 160
+ #define A64_STACK_SIZE 2048

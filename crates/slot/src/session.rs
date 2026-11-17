@@ -141,6 +141,14 @@ impl Session {
         self.emu.as_ref().and_then(|e| e.latest_frame())
     }
 
+    /// Tells the emulator's thread what the frontend made of the newest picture, when it was one
+    /// left in a buffer the core's own process shares: drawn where it is, or not.
+    pub fn picture_drawn(&self, generation: u64, outcome: slot_gfx::SharedGame) {
+        if let Some(emu) = &self.emu {
+            emu.picture_drawn(generation, outcome);
+        }
+    }
+
     pub fn core_settling(&self) -> bool {
         self.emu
             .as_ref()
