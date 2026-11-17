@@ -30,7 +30,7 @@ build() (
  opt=''
  patches=''
  case "$name" in
- nodosumi) repo=cloudwithax/nodosumi; commit=984de9dfdbffdd5fd38296f5ed71356a5778c934; flags='-DBUILD_LIBRETRO=ON -DA64_JIT=ON'; renderer='GLES 3.0 (frontend procedure loader)'; opt='-fomit-frame-pointer -fno-math-errno'; patches='nodosumi-gles.patch nodosumi-threads-trace.patch nodosumi-bot-frames.patch nodosumi-a64-indirect-cache.patch nodosumi-arm7-quantum.patch' ;;
+ nodosumi) repo=cloudwithax/nodosumi; commit=70c5be7b1cd0a2a0d497ad7fcae735784dbbe8a5; flags='-DBUILD_LIBRETRO=ON -DA64_JIT=ON'; renderer='GLES 3.0 (frontend procedure loader)'; opt='-fomit-frame-pointer -fno-math-errno'; patches='' ;;
  parallel_n64) repo=libretro/parallel-n64; commit=a8280501a71c1bcd4c85c5b8bfe75cfa62cd6127; flags='platform=unix-gles ARCH=aarch64 WITH_DYNAREC=aarch64'; renderer='GLES 2.0' ;;
  flycast) repo=flyinghead/flycast; commit=6bb0fc3e18dac4b01694f488c7a71f5930e8a648; flags='-DLIBRETRO=ON -DUSE_GLES=ON -DUSE_VULKAN=OFF -DUSE_OPENMP=OFF -DUSE_HOST_LIBZIP=OFF'; renderer='GLES 3.x (frontend procedure loader)' ;;
  vecx) repo=libretro/libretro-vecx; commit=8f671cc9d737f2890c3ce19e177e2984dcae121f; flags='platform=unix HAS_GPU=0'; renderer=software ;;
