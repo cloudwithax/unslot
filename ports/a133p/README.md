@@ -251,6 +251,19 @@ Coarse traces go to `/tmp`, not the card. Each run starts at 52 °C or cooler.
   14–46 of 7,182.
 - **Remaining stutters are not all SH4 execution.** Existing traces include scheduling delays,
   renderer stalls, and benchmark-only logging stalls. Zero repeated frames has not been achieved.
+- **Sound was played fast to refill its own queue.** TrimUI's `plug:default` ends in dmix with a
+  170 ms ring, so a write returns at once; slot's output thread used to empty its 66 ms queue
+  into that ring and then block, and the rate control that keeps that queue at its target played
+  the sound up to its 1% limit to refill it — the warbling, sharp pitch. Each 512-frame write now
+  waits out its own period. On the same device and the same drive, the sound's rate measured
+  `emu.ratio_ppm` mean +4,235 / p99 +104,713 before and −445 / +9,875 after, with the queue's
+  p99 level falling from 6,219 frames (its 6,400 capacity) to 3,841 around its 3,200 target. The
+  codec's clock is accurate: 60.28 s of wall time for 60 s of audio on `hw:0,0`, and the same
+  through `plug:default`.
+- **What is left of the gaps is disc reads.** A CD read stalls the emu thread for up to 67 ms
+  (`chd_wait`), which drains a 66 ms queue about 100 times a minute; the queue is filled with
+  silence as before. Deeper buffering rides those out at the cost of latency, and neither the
+  buffer nor the read path has been changed.
 - **The CPU plan** (`crates/slot/src/cpus.rs`) keeps emulation on CPU 3 and rendering on CPU 2.
   The emulation thread uses `SCHED_RR` priority 10; failure leaves its existing scheduling intact.
   `SLOT_CPUS=off` disables the plan. Other processes and IRQ affinities are not changed.
