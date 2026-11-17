@@ -1,0 +1,88 @@
+diff --git a/src/guest/arm7/arm7.c b/src/guest/arm7/arm7.c
+index 8c49484..f267cb2 100644
+--- a/src/guest/arm7/arm7.c
++++ b/src/guest/arm7/arm7.c
+@@ -36,6 +36,9 @@ struct arm7 {
+ 
+   /* interrupts */
+   uint32_t requested_interrupts;
++
++  /* time it has been given and not yet run, see arm7_run */
++  int64_t owed_ns;
+ };
+ 
+ static void arm7_update_pending_interrupts(struct arm7 *arm);
+@@ -176,6 +179,7 @@ void arm7_reset(struct arm7 *arm) {
+   arm->ctx.r[R13_IRQ] = 0x03007fa0;
+   arm->ctx.r[R13_SVC] = 0x03007fe0;
+   arm->ctx.r[CPSR] = F_MASK | MODE_SYS;
++  arm->owed_ns = 0;
+ 
+   arm->runif.running = 1;
+ }
+@@ -191,10 +195,17 @@ void arm7_load_running(struct arm7 *arm, int resetting) {
+   arm->runif.running = !resetting && (arm->ctx.r[CPSR] & M_MASK) != 0;
+ }
+ 
+-static void arm7_run(struct device *dev, int64_t ns) {
+-  struct arm7 *arm = (struct arm7 *)dev;
++/* the sound cpu and the sh4 only meet at interrupts and in sound ram, so it
++   isn't run a slice at a time between the sh4's, where each finds its code and
++   data pushed out of the cache by the other's: its time is saved up and run
++   when it has an interrupt to take, a quantum is owed, or the frame ends
++   (arm7_flush), which also leaves nothing owed for a state to carry */
++#define ARM7_QUANTUM_NS INT64_C(1000000)
++
++static void arm7_run_owed(struct arm7 *arm) {
+   static int64_t ARM7_CLOCK_FREQ = INT64_C(20000000);
+-  int cycles = (int)NANO_TO_CYCLES(ns, ARM7_CLOCK_FREQ);
++  int cycles = (int)NANO_TO_CYCLES(arm->owed_ns, ARM7_CLOCK_FREQ);
++  arm->owed_ns = 0;
+ 
+   FZ_B(z_arm7);
+   jit_run(arm->jit, cycles);
+@@ -203,6 +214,21 @@ static void arm7_run(struct device *dev, int64_t ns) {
+   prof_counter_add(COUNTER_arm7_instrs, arm->ctx.ran_instrs);
+ }
+ 
++static void arm7_run(struct device *dev, int64_t ns) {
++  struct arm7 *arm = (struct arm7 *)dev;
++
++  arm->owed_ns += ns;
++  if (arm->owed_ns >= ARM7_QUANTUM_NS || arm->ctx.pending_interrupts) {
++    arm7_run_owed(arm);
++  }
++}
++
++void arm7_flush(struct arm7 *arm) {
++  if (arm->owed_ns > 0 && arm->runif.running) {
++    arm7_run_owed(arm);
++  }
++}
++
+ static void arm7_guest_destroy(struct jit_guest *guest) {
+   free((struct armv3_guest *)guest);
+ }
+diff --git a/src/guest/arm7/arm7.h b/src/guest/arm7/arm7.h
+index bb6796e..219eb24 100644
+--- a/src/guest/arm7/arm7.h
++++ b/src/guest/arm7/arm7.h
+@@ -23,6 +23,7 @@ void arm7_destroy(struct arm7 *arm);
+ 
+ void arm7_debug_menu(struct arm7 *arm);
+ void arm7_suspend(struct arm7 *arm);
++void arm7_flush(struct arm7 *arm);
+ void arm7_load_running(struct arm7 *arm, int resetting);
+ void arm7_reset(struct arm7 *arm);
+ void arm7_raise_interrupt(struct arm7 *arm, enum arm7_interrupt intr);
+--- a/src/emulator.c
++++ b/src/emulator.c
+@@ -795,6 +795,8 @@
+   while (emu->state == EMU_RUNFRAME || emu->state == EMU_DRAWFRAME) {
+     dc_tick(emu->dc, step);
+   }
++
++  arm7_flush(emu->dc->arm7);
+ }
+ 
+ static int64_t g_stat_ta;
