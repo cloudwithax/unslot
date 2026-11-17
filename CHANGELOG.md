@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A133P Nodosumi's emulation thread uses `SCHED_RR` priority 10, retaining normal scheduling if permission is denied. Four existing Crazy Taxi 2 runs recorded 6–25 repeated frames and 0–6 starved audio frames per two-minute window, versus 8–33 and 23–74 across ten baseline runs. These ranges overlap; zero stutter is not achieved. No extra frame delay, CPU isolation, or experimental texture hashing is shipped.
 - On the Brick Pro, Nodosumi runs the Dreamcast sound CPU in 1 ms batches instead of between every SH4 slice (`nodosumi-arm7-quantum.patch`, audio output matches the old one within about 1% in a 30 s check), and the sound-rate controller may quicken a nearly full queue by up to 5% so a full queue no longer holds up the next frame. In the Crazy Taxi 2 bench, repeated frames fell from 14-46 to 15-22 in 120 s; measured on the bench only, listen for pitch.
 - A port to TrimUI's A133P handhelds, the Smart Pro, Brick and Brick Pro, on their stock firmware, built with `task dist:a133p`. The Brick Pro boots with corrected screen cropping and user-confirmed Wi-Fi and Bluetooth; other models remain untested. See `ports/a133p/README.md`.
 - Update packs carry the chip they are for. A133P builds look for `unslot-<version>-a133p.pak`; the H700's packs keep their name, `unslot-<version>.pak`.

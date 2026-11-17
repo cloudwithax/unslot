@@ -122,7 +122,10 @@ mod os {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
-    use super::{host_thread, slot_thread_nice, Plan};
+    use super::{host_thread, slot_thread_nice, Place, Plan};
+
+    /// The priority the emu thread runs at.
+    const RT_PRIO: i32 = 10;
 
     /// How many games have slot's threads confined, and the nices they had before the first, so
     /// the last game to end puts them back.
@@ -151,6 +154,19 @@ mod os {
             match io::Error::last_os_error() {
                 e if e.raw_os_error().unwrap_or(0) != 0 => Err(e),
                 _ => Ok(n),
+            }
+        }
+    }
+
+    /// Gives thread `tid` the real-time round robin scheduler at `prio`, so the kernel's workers
+    /// and the firmware's daemons on its CPU wait for it rather than it for them.
+    fn set_rt(tid: i32, prio: i32) -> io::Result<()> {
+        // SAFETY: a plain sched_param with only the field its policy reads set.
+        unsafe {
+            let param = libc::sched_param { sched_priority: prio };
+            match libc::sched_setscheduler(tid, libc::SCHED_RR, &param) {
+                0 => Ok(()),
+                _ => Err(io::Error::last_os_error()),
             }
         }
     }
@@ -272,6 +288,13 @@ mod os {
                         }
                         let (at, nice_to) = host_thread(*tid == pid, comm);
                         place(*tid, comm, &plan.cpus(at), nice_to, &mut Vec::new());
+                        if at == Place::Emu {
+                            // Prefer the emulator to normal-policy work on its CPU. Higher-priority
+                            // real-time threads and the kernel's RT runtime limit still apply.
+                            if let Err(e) = set_rt(*tid, RT_PRIO) {
+                                eprintln!("slot: cpus: {comm} ({tid}) keeps its scheduling: {e}");
+                            }
+                        }
                         placed.insert(*tid, comm.clone());
                     }
                     placed.retain(|tid, _| now.iter().any(|(t, _)| t == tid));

@@ -249,17 +249,14 @@ Coarse traces go to `/tmp`, not the card. Each run starts at 52 °C or cooler.
   Nodosumi itself: with the same core, its work per frame falls from 14.7–15.3 to 12.6–12.7 ms,
   frames over 16.7 ms from 14.9–19.2% to 2.4–3.8%, and repeated presents from 90–136 of 7,200 to
   14–46 of 7,182.
-- **What is left is the core's own work.** With the copies gone, Nodosumi's emu thread spends
-  12.9 ms of each 16.7 ms frame (SH4 10.1, ARM7 0.9, AICA 0.5, texture sources 0.4) and then waits
-  15.6 ms on its pacing clock; the drives' 14 remaining repeats come from the 2.4% of frames that
-  still run over 16.7 ms (p90 15.3, p99 19.0 ms). Continuing towards no repeats means the JIT's
-  context loads and stores, which a PC sample puts at 31% of its time, and the ARM7 and AICA's
-  1.4 ms on the same thread.
-- **The CPU plan** (`crates/slot/src/cpus.rs`) is kept: emu on CPU 3, the renderer on CPU 2.
-  Throttling dominates the differences between the plan, `SLOT_CPUS=off` and full isolation, so
-  the comparison is within noise. The ~900 involuntary switches a second in the first traces came
-  from writing traces to the SD card: its IRQ thread and `mmcqd` ran on CPU 3. With traces in
-  RAM, the plan gives about 70 a second; moving everything else off CPUs 2–3 gives 5.
+- **Remaining stutters are not all SH4 execution.** Existing traces include scheduling delays,
+  renderer stalls, and benchmark-only logging stalls. Zero repeated frames has not been achieved.
+- **The CPU plan** (`crates/slot/src/cpus.rs`) keeps emulation on CPU 3 and rendering on CPU 2.
+  The emulation thread uses `SCHED_RR` priority 10; failure leaves its existing scheduling intact.
+  `SLOT_CPUS=off` disables the plan. Other processes and IRQ affinities are not changed.
+  Across four existing two-minute Crazy Taxi 2 runs, repeats were 6–25 and starved audio frames
+  were 0–6, compared with 8–33 and 23–74 in ten baseline runs. Ranges overlap; this is not proof
+  of zero stutter. No additional frame delay or unfinished texture-hash optimization is included.
 - **Compiler.** Not compared on hardware. The H700 core lacks the frame-locked bot. This host's
   GCC 14 links against glibc 2.41, while the firmware has glibc 2.33.
 - `launch.sh`'s diagnostics and `dmesg` loop now start under `nice -n 19`. TrimUI's BusyBox has
