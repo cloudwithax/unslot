@@ -29,6 +29,15 @@ P=/mnt/SDCARD/prof
 T=/tmp/bench-out
 NODO="${NODOSUMI_SRC:-$HOME/nodosumi}"
 dev() { sshpass -p tina ssh $O "$H" "$@"; }
+# Slot owns Wi-Fi, so stopping or starting it drops this connection: the next command waits for it.
+dev_wait() {
+	n=0
+	while ! dev true 2> /dev/null; do
+		n=$((n + 3))
+		[ "$n" -lt 90 ] || { echo "the device did not come back" >&2; exit 1; }
+		sleep 3
+	done
+}
 put() { sshpass -p tina scp $O "$1" "$H:$2"; }
 get() { sshpass -p tina scp $O "$H:$1" "$2"; }
 
@@ -80,7 +89,8 @@ export $a" ;;
 	o="$OUT/$name"
 	rm -rf "$o"
 	mkdir -p "$o"
-	dev "sh $P/bench.sh stop"
+	dev "sh $P/bench.sh stop" || true
+	dev_wait
 	put "$bot" "$P/bot.txt"
 	if [ -n "$core" ]; then
 		put "$core" /mnt/SDCARD/System/nodosumi_libretro.so
@@ -103,7 +113,8 @@ export $a" ;;
 	put "$o/bench.env" "$P/bench.env"
 	dev "sh $P/bench.sh cool $cool" | tee "$o/cool.txt"
 	[ -z "$pre" ] || dev "$pre"
-	dev "sh $P/bench.sh start"
+	dev "sh $P/bench.sh start" || true
+	dev_wait
 	t=0
 	until dev "grep -aq 'nodosumi: bot \(load\|save\)' /mnt/SDCARD/Logs/slot.log 2> /dev/null"; do
 		t=$((t + 2))
