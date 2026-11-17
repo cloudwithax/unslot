@@ -58,6 +58,7 @@ pub mod session;
 pub mod shader;
 pub mod slot_skin;
 pub mod state_writer;
+pub mod thermal;
 pub mod thumb;
 pub mod update;
 pub mod upload;

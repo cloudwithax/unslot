@@ -115,21 +115,14 @@ export AGS_WPA_LOG="$LOGS/wpa_supplicant.log"
 for f in radio-trace.log wpa_supplicant.log dmesg.txt; do
 	[ -f "$LOGS/$f" ] && mv -f "$LOGS/$f" "$LOGS/$f.1"
 done
-# low PID: the process, and all it starts, gives way to everything else, on CPUs 0 and 1, where
-# slot keeps what isn't a Dreamcast game's own (crates/slot/src/cpus.rs). The dmesg every 5 s
-# runs through games too, and a Crazy Taxi 2 trace showed its emulator off the CPU and slot's
-# drawing slowed every 5.3 s.
-low() {
-	renice -n 19 -p "$1" > /dev/null 2>&1
-	taskset -p 3 "$1" > /dev/null 2>&1
-}
-/bin/sh "$HERE/diag.sh" "$LOGS/a133p-diag.txt" &
-low "$!"
-(while :; do
+# The diagnostics and the dmesg every 5 s run at nice 19, so they give way to everything else: the
+# dmesg loop runs through games too, and a Crazy Taxi 2 trace showed its emulator off the CPU and
+# slot's drawing slowed every 5.3 s. TrimUI's BusyBox has nice but no renice or taskset.
+nice -n 19 /bin/sh "$HERE/diag.sh" "$LOGS/a133p-diag.txt" &
+nice -n 19 /bin/sh -c 'while :; do
 	sleep 5
-	dmesg > "$LOGS/dmesg.txt" 2> /dev/null
-done) &
-low "$!"
+	dmesg > "$1/dmesg.txt" 2> /dev/null
+done' sh "$LOGS" &
 
 while :; do
 	/bin/sh "$SYS/launch_frontend.sh"

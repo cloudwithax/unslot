@@ -142,10 +142,11 @@ fn open_remote(
     // Slot's threads keep off the CPUs the plan gives the core's, from before the host starts,
     // which takes the same, until the game ends with the host.
     let confined = crate::cpus::plan(core).map(|plan| crate::cpus::confine_slot(&plan));
+    let raised = crate::thermal::raise(root, core);
     let child = cmd.spawn()?;
     let mut remote = slot_retro::RemoteCore::new(child, ours)?;
-    if let Some(confined) = confined {
-        remote.keep(Box::new(confined));
+    if confined.is_some() || raised.is_some() {
+        remote.keep(Box::new((confined, raised)));
     }
     eprintln!("slot: {} runs in a core host", core.as_str());
     Ok(Box::new(remote))

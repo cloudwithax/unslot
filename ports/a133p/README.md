@@ -202,38 +202,38 @@ start slot again to stop tracing.
 
 ### Dreamcast performance
 
-These changes come from reading one Crazy Taxi 2 trace on the Brick Pro, the source and both
-cores' disassembly. **None of them has been run on the hardware.**
+Measured on a Brick Pro with `tools/a133p/ct2-bench.sh`: slot restarts into Crazy Taxi 2,
+Nodosumi's bot loads a drive state (`prof/ct2-drive.state`, made with `ct2-mkstate.bot`) and
+drives `ct2-bench.bot`'s loop downtown and over the bridge. `nodosumi-bot-frames.patch` presses
+the bot's pad as each emulated frame starts, so every run plays the same frames; two runs of one
+configuration agree within a point. `ct2-bench-table.py` reads frames 300 to 7,500 after the load.
+Coarse traces go to `/tmp`, not the card. Each run starts at 52 °C or cooler.
 
-- **Compiler.** The H700 core is GCC 9.4 (Ubuntu 20.04), `-O3`, with `-march=armv8-a
-  -mtune=cortex-a53`. This one is zig's clang 22, `-O3`, with `-mcpu=cortex-a53`. Neither uses
-  LTO, sanitizer traps or outline atomics. Ubuntu's GCC adds a stack protector, which zig leaves
-  out. The JIT emits the same code in both. The hot C helpers (`ta_poly_write32`, `sh4_ccn_pref`,
-  `sh4_read32`) compile to equivalent code, so the compiler does not explain the gap. The recipe
-  now adds `-fomit-frame-pointer`, as GCC does, and `-fno-math-errno`, which removes zig's software
-  `sqrtf` from the FSQRT and FSRRA fallbacks.
-- **CPUs.** While Nodosumi runs in its core host, `crates/slot/src/cpus.rs` puts it on dedicated
-  cores:
-  - CPU 3 runs only the emu thread, at nice -10.
-  - CPU 2 runs only the core host's main thread, which draws the frames, at nice -5.
-  - CPUs 0 and 1 run everything else: slot's threads, the core host's other threads and the
-    `dmesg` loop in `launch.sh`, which now runs at nice 19.
+| Configuration | Frames > 16.7 ms | Emu work mean / p99 | Mean CPU clock | Repeated presents |
+|---|---:|---:|---:|---:|
+| Stock trip 63 °C, CPU plan on (2 runs) | 57.9%, 57.1% | 17.1 / 22.6 ms | 1,444 MHz | 5.5–6.2% |
+| Stock trip, `SLOT_CPUS=off` | 66.2% | 17.6 / 26.2 ms | 1,409 MHz | 5.2% |
+| Stock trip, plan plus every other thread and IRQ on CPUs 0–1 | 63.5% | 17.3 / 22.0 ms | 1,401 MHz | 4.0% |
+| Trip 70 °C (2 runs) | 34.0%, 34.6% | 16.1 / 21.3 ms | 1,727 MHz | 3.1–3.2% |
+| Trip 75 °C (2 runs, one by the shipped slot) | 24.6%, 24.5% | 15.6 / 20.6 ms | 1,914 MHz | 1.7–2.2% |
 
-  `slot-audio` runs at nice -10 and the CHD reader at -5. Nodosumi names its `emu`, `conv` and
-  `nodo-ftrace` threads for this (`tools/a133p/nodosumi-threads-trace.patch`). A thread whose CPUs
-  or nice cannot be set is left as it was. `SLOT_CPUS=off` turns the plan off.
-- **SH4.** Frames before a dip spent 4.2 ms more in `z_sh4`. The trace accounts for 4.0 ms of it:
-  - 2.6 ms is extra geometry. These frames sent 416 KB of TA parameters instead of 295 KB, and the
-    SH4 costs 2.2 ms per 100 KB.
-  - 1.2 ms is time off the CPU, which counts inside the zone.
-  - 0.25 ms comes from running on CPU 0.
-
-  JIT compiles, invalidations and fastmem faults add 0.17 ms in total. The CPU plan addresses the
-  off-CPU time and the CPU 0 cost. The geometry cost is the game's own work.
-- **Sound.** The 191 underruns during play came after the ring had drained. In the 200 ms before
-  one, the ring held 1,092 frames, against 2,678 typically. In the 300 ms before one, 57% had a
-  slot emu step over 30 ms, against 20% at random times. The buffer size is unchanged, because
-  the underruns follow the emulator falling behind.
+- **Thermal throttling is the main cause.** TrimUI's CPU zone throttles from 63 °C, stepping down
+  to 1.2 GHz, and the Brick Pro idles near 51 °C. While Nodosumi runs, slot now raises that trip
+  to 75 °C and restores it when the game ends, or at slot's next start if it went down mid-game
+  (`crates/slot/src/thermal.rs`). The 90 °C critical trip is never touched. The SoC peaked at
+  77 °C in the 75 °C run. `System/dc-thermal-stock.on` keeps the stock trip.
+- **The emu thread is mostly waiting on memory.** Over the same frames, going from 1,444 to
+  1,918 MHz cuts its CPU time only from 17.0 to 15.6 ms per frame. So about 11 ms of each frame
+  does not scale with the clock. The kernel has no huge pages to cut TLB misses.
+- **The CPU plan** (`crates/slot/src/cpus.rs`) is kept: emu on CPU 3, the renderer on CPU 2.
+  Throttling dominates the differences between the plan, `SLOT_CPUS=off` and full isolation, so
+  the comparison is within noise. The ~900 involuntary switches a second in the first traces came
+  from writing traces to the SD card: its IRQ thread and `mmcqd` ran on CPU 3. With traces in
+  RAM, the plan gives about 70 a second; moving everything else off CPUs 2–3 gives 5.
+- **Compiler.** Not compared on hardware. The H700 core lacks the frame-locked bot. This host's
+  GCC 14 links against glibc 2.41, while the firmware has glibc 2.33.
+- `launch.sh`'s diagnostics and `dmesg` loop now start under `nice -n 19`. TrimUI's BusyBox has
+  no `renice` or `taskset`, so the earlier `low()` did nothing.
 
 ## Known limits
 
