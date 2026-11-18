@@ -95,8 +95,11 @@ fn screen_shows_the_palette_only_when_palettes_are_live() {
     assert_eq!(
         a.in_game_hidden(),
         &[
+            QuickRow::ShaderParams,
             QuickRow::Palette,
             QuickRow::Bezel,
+            QuickRow::Scale,
+            QuickRow::Stretch,
             QuickRow::Disc,
             QuickRow::PlayCast
         ]
@@ -104,7 +107,14 @@ fn screen_shows_the_palette_only_when_palettes_are_live() {
     a.set_palette_live(true);
     assert_eq!(
         a.in_game_hidden(),
-        &[QuickRow::Bezel, QuickRow::Disc, QuickRow::PlayCast]
+        &[
+            QuickRow::ShaderParams,
+            QuickRow::Bezel,
+            QuickRow::Scale,
+            QuickRow::Stretch,
+            QuickRow::Disc,
+            QuickRow::PlayCast
+        ]
     );
 }
 
@@ -640,4 +650,43 @@ fn a_shipped_bezel_for_the_panel_gives_any_system_a_bezel_to_pick() {
     a.set_panel((720, 480));
     assert_eq!(a.resolved_bezel(Platform::Gba), BezelPick::None);
     assert!(a.in_game_hidden().contains(&QuickRow::Bezel));
+}
+
+/// Closing the menu is one motion: the panel stays on the screen while its strip slides away,
+/// and only leaves once the strip has gone.
+#[test]
+fn the_panel_and_its_strip_leave_together() {
+    let (_d, mut a) = playing();
+    a.apply(Action::QuickMenu);
+    a.update(0.3);
+    assert_eq!(a.in_game_menu_panel(), Some(QuickRow::Resume));
+    assert!(a.menu_strip() >= 0.99, "the strip did not slide in");
+
+    press(&mut a, Btn::B);
+    assert_eq!(a.in_game_menu(), None);
+    let mut last = a.menu_strip();
+    let mut steps = 0;
+    for _ in 0..60 {
+        a.update(1.0 / 60.0);
+        let now = a.menu_strip();
+        assert!(
+            now <= last + 0.001,
+            "the strip went back up, from {last} to {now}"
+        );
+        if now <= 0.0 {
+            assert_eq!(
+                a.in_game_menu_panel(),
+                None,
+                "the panel is still up with the strip gone"
+            );
+            break;
+        }
+        assert!(
+            a.in_game_menu_panel().is_some(),
+            "the panel left before its strip did, at {now}"
+        );
+        last = now;
+        steps += 1;
+    }
+    assert!(steps > 2, "the strip did not slide out at all");
 }

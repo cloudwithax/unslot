@@ -61,6 +61,14 @@ pub struct Apps {
     note: Option<String>,
 }
 
+/// Whether `stem` names one of the built-in apps rather than a port.
+pub fn built_in(stem: &str) -> bool {
+    BUILT_IN.iter().any(|b| b.0 == stem)
+}
+
+/// The app that walks the whole card, and runs any script on it as a port.
+pub const FILES: &str = BUILT_IN[0].0;
+
 /// The Apps shelf: the built-in apps, then the ports. A built-in one has no file; each can have
 /// a label in `Labels/APPS`, named as the shelf names it.
 pub fn carts(root: &Path) -> Vec<Cart> {

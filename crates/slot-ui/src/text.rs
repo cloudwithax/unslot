@@ -103,7 +103,33 @@ pub fn draw_centred(dst: &mut [u8], dst_w: u32, dst_h: u32, layout: &Layout, col
     }
 }
 
+pub fn draw_left(
+    dst: &mut [u8],
+    dst_w: u32,
+    dst_h: u32,
+    layout: &Layout,
+    pen: f32,
+    colour: [u8; 3],
+) {
+    for (i, a) in coverage_left(dst_w, dst_h, layout, pen)
+        .into_iter()
+        .enumerate()
+    {
+        if a > 0 {
+            blend(&mut dst[i * 4..i * 4 + 4], a as u32, colour);
+        }
+    }
+}
+
 pub fn coverage(dst_w: u32, dst_h: u32, layout: &Layout) -> Vec<u8> {
+    coverage_from(dst_w, dst_h, layout, None)
+}
+
+pub fn coverage_left(dst_w: u32, dst_h: u32, layout: &Layout, pen: f32) -> Vec<u8> {
+    coverage_from(dst_w, dst_h, layout, Some(pen))
+}
+
+fn coverage_from(dst_w: u32, dst_h: u32, layout: &Layout, left: Option<f32>) -> Vec<u8> {
     let mut out = vec![0u8; (dst_w * dst_h) as usize];
     let Some(font) = label_font() else { return out };
     let Some(vm) = font.horizontal_line_metrics(layout.px) else {
@@ -114,7 +140,9 @@ pub fn coverage(dst_w: u32, dst_h: u32, layout: &Layout) -> Vec<u8> {
     let mut baseline = (dst_h as f32 - block_h) / 2.0 + vm.ascent;
 
     for line in &layout.lines {
-        let mut pen = (dst_w as f32 - line_width(font, line, layout.px, layout.tracking)) / 2.0;
+        let mut pen = left.unwrap_or_else(|| {
+            (dst_w as f32 - line_width(font, line, layout.px, layout.tracking)) / 2.0
+        });
         for ch in line.chars() {
             let (m, cov) = font.rasterize(ch, layout.px);
             stamp(
@@ -151,7 +179,7 @@ pub fn line_width(font: &Font, line: &str, px: f32, tracking: f32) -> f32 {
     w + tracking * (n as f32 - 1.0).max(0.0)
 }
 
-fn tracking_for(px: f32) -> f32 {
+pub(crate) fn tracking_for(px: f32) -> f32 {
     (px * 0.10).round()
 }
 

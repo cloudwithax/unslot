@@ -606,6 +606,11 @@ impl Session {
         );
         self.app.set_named_core(opened.named);
         launch("core opened");
+        if cfg!(feature = "device") && !opened.named {
+            // Its log line says why. The cart comes out with the alert of a game that would not
+            // open, where a test pattern and a tone made it look as if the game ran.
+            return;
+        }
         let (sav, sav_unread) = match persist::read_sav(&self.root, platform, stem) {
             Ok(sav) => (sav, false),
             Err(e) => {

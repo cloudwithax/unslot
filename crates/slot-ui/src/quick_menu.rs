@@ -6,7 +6,7 @@ use crate::plate::{
 use crate::power_menu::{MENU_H, MENU_INK, MENU_PAD, MENU_PX};
 use crate::slot_chrome::{opening, MOUTH_H};
 use crate::text;
-use slot_store::Platform;
+use slot_store::{Platform, Scale, Stretch};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum QuickRow {
@@ -63,9 +63,12 @@ pub enum QuickRow {
     PlayScreen,
     PlayGameplay,
     Shader,
+    ShaderParams,
     ColourCorrection,
     Palette,
     Bezel,
+    Scale,
+    Stretch,
     /// Which disc of a multi-disc game is in the drive.
     Disc,
     Network,
@@ -95,6 +98,10 @@ pub enum QuickRow {
     GameArt,
     /// Signing in to RetroAchievements, or out.
     Achievements,
+    /// 3D Trophy Room displaying cached RetroAchievements sets and unlocks.
+    TrophyRoom,
+    /// Kiosk lock settings: PIN/password, system/game restrictions, and ESRB limit.
+    Kiosk,
     /// Whether RetroAchievements runs in hardcore.
     Hardcore,
     /// Restart, Shut Down and Reload unslot.
@@ -106,13 +113,16 @@ pub enum QuickRow {
     /// A platform's own page under Screen, and the rows on it.
     ScreenOf(Platform),
     ShaderOf(Platform),
+    ShaderParamsOf(Platform),
     ColourCorrectionOf(Platform),
     BezelOf(Platform),
     BlendingOf(Platform),
+    ScaleOf(Platform),
+    StretchOf(Platform),
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 67] = [
+const GENERIC: [QuickRow; 72] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -139,9 +149,12 @@ const GENERIC: [QuickRow; 67] = [
     QuickRow::PlayScreen,
     QuickRow::PlayGameplay,
     QuickRow::Shader,
+    QuickRow::ShaderParams,
     QuickRow::ColourCorrection,
     QuickRow::Palette,
     QuickRow::Bezel,
+    QuickRow::Scale,
+    QuickRow::Stretch,
     QuickRow::Disc,
     QuickRow::Network,
     QuickRow::Wifi,
@@ -159,6 +172,8 @@ const GENERIC: [QuickRow; 67] = [
     QuickRow::ShutDown,
     QuickRow::Reload,
     QuickRow::Achievements,
+    QuickRow::TrophyRoom,
+    QuickRow::Kiosk,
     QuickRow::Cast,
     QuickRow::PlayCast,
     QuickRow::TvSound,
@@ -182,9 +197,9 @@ const GENERIC: [QuickRow; 67] = [
     QuickRow::PowerOffAfter,
 ];
 
-/// How many rows each platform has of its own: its page, shader, colour correction, bezel and
-/// frame blending.
-const PER_PLATFORM: usize = 5;
+/// How many rows each platform has of its own: page, shader, shader parameters, colour correction,
+/// bezel, frame blending, scale, and stretch.
+const PER_PLATFORM: usize = 8;
 
 /// The order the Screen page lists the platforms in, which is not the shelves' order.
 const SCREEN_ORDER: [Platform; Platform::COUNT] = [
@@ -264,9 +279,12 @@ impl QuickRow {
             let at = GENERIC.len() + p;
             all[at] = QuickRow::ScreenOf(platform);
             all[at + Platform::COUNT] = QuickRow::ShaderOf(platform);
-            all[at + 2 * Platform::COUNT] = QuickRow::ColourCorrectionOf(platform);
-            all[at + 3 * Platform::COUNT] = QuickRow::BezelOf(platform);
-            all[at + 4 * Platform::COUNT] = QuickRow::BlendingOf(platform);
+            all[at + 2 * Platform::COUNT] = QuickRow::ShaderParamsOf(platform);
+            all[at + 3 * Platform::COUNT] = QuickRow::ColourCorrectionOf(platform);
+            all[at + 4 * Platform::COUNT] = QuickRow::BezelOf(platform);
+            all[at + 5 * Platform::COUNT] = QuickRow::BlendingOf(platform);
+            all[at + 6 * Platform::COUNT] = QuickRow::ScaleOf(platform);
+            all[at + 7 * Platform::COUNT] = QuickRow::StretchOf(platform);
             p += 1;
         }
         all
@@ -300,17 +318,18 @@ impl QuickRow {
         QuickRow::Hostname,
     ];
 
-    pub const ONLINE: [QuickRow; 7] = [
+    pub const ONLINE: [QuickRow; 8] = [
         QuickRow::Upload,
         QuickRow::GameArt,
         QuickRow::ArtAsleep,
         QuickRow::Achievements,
+        QuickRow::TrophyRoom,
         QuickRow::Updates,
         QuickRow::Cores,
         QuickRow::AutoCores,
     ];
 
-    pub const GENERAL: [QuickRow; 14] = [
+    pub const GENERAL: [QuickRow; 15] = [
         QuickRow::Wallpaper,
         QuickRow::WallpaperTint,
         QuickRow::Theme,
@@ -325,6 +344,7 @@ impl QuickRow {
         QuickRow::TvSound,
         QuickRow::Saturation,
         QuickRow::Contrast,
+        QuickRow::Kiosk,
     ];
 
     pub const GAME: [QuickRow; 12] = [
@@ -352,28 +372,34 @@ impl QuickRow {
 
     pub const SETTINGS: [QuickRow; 2] = [QuickRow::PlayScreen, QuickRow::PlayGameplay];
 
-    pub const PLAY_SCREEN: [QuickRow; 7] = [
+    pub const PLAY_SCREEN: [QuickRow; 10] = [
         QuickRow::Shader,
+        QuickRow::ShaderParams,
         QuickRow::ColourCorrection,
         QuickRow::Palette,
         QuickRow::Blending,
         QuickRow::Bezel,
+        QuickRow::Scale,
+        QuickRow::Stretch,
         QuickRow::PlaySaturation,
         QuickRow::PlayContrast,
     ];
 
-    /// The Screen page: one row for each platform a core runs, which leaves out Apps and the DS.
+    /// The Screen page: one row for each platform a core runs, leaving out Apps, DS, and PSP.
     pub fn screen_page() -> Vec<QuickRow> {
         SCREEN_ORDER
             .into_iter()
-            .filter(|p| !matches!(p, Platform::Apps | Platform::Nds))
+            .filter(|p| !matches!(p, Platform::Apps | Platform::Nds | Platform::Psp))
             .map(QuickRow::ScreenOf)
             .collect()
     }
 
     /// A platform's page under Screen.
     pub fn screen_of(platform: Platform) -> Vec<QuickRow> {
-        let mut rows = vec![QuickRow::ShaderOf(platform)];
+        let mut rows = vec![
+            QuickRow::ShaderOf(platform),
+            QuickRow::ShaderParamsOf(platform),
+        ];
         if platform.spec().colour_correction {
             rows.push(QuickRow::ColourCorrectionOf(platform));
         }
@@ -382,6 +408,10 @@ impl QuickRow {
         }
         rows.push(QuickRow::BlendingOf(platform));
         rows.push(QuickRow::BezelOf(platform));
+        if !platform.spec().native {
+            rows.push(QuickRow::ScaleOf(platform));
+        }
+        rows.push(QuickRow::StretchOf(platform));
         rows
     }
 
@@ -390,9 +420,12 @@ impl QuickRow {
         match self {
             QuickRow::ScreenOf(p) => own(0, p),
             QuickRow::ShaderOf(p) => own(1, p),
-            QuickRow::ColourCorrectionOf(p) => own(2, p),
-            QuickRow::BezelOf(p) => own(3, p),
-            QuickRow::BlendingOf(p) => own(4, p),
+            QuickRow::ShaderParamsOf(p) => own(2, p),
+            QuickRow::ColourCorrectionOf(p) => own(3, p),
+            QuickRow::BezelOf(p) => own(4, p),
+            QuickRow::BlendingOf(p) => own(5, p),
+            QuickRow::ScaleOf(p) => own(6, p),
+            QuickRow::StretchOf(p) => own(7, p),
             row => GENERIC
                 .iter()
                 .position(|r| *r == row)
@@ -405,9 +438,12 @@ impl QuickRow {
         match self {
             QuickRow::ScreenOf(p)
             | QuickRow::ShaderOf(p)
+            | QuickRow::ShaderParamsOf(p)
             | QuickRow::ColourCorrectionOf(p)
             | QuickRow::BezelOf(p)
-            | QuickRow::BlendingOf(p) => Some(p),
+            | QuickRow::BlendingOf(p)
+            | QuickRow::ScaleOf(p)
+            | QuickRow::StretchOf(p) => Some(p),
             QuickRow::GbPalettes => Platform::ALL.into_iter().find(|p| p.spec().palettes),
             _ => None,
         }
@@ -417,9 +453,12 @@ impl QuickRow {
         match self {
             QuickRow::ScreenOf(_) => QuickRow::screen_page(),
             QuickRow::ShaderOf(_)
+            | QuickRow::ShaderParamsOf(_)
             | QuickRow::ColourCorrectionOf(_)
             | QuickRow::BezelOf(_)
             | QuickRow::BlendingOf(_)
+            | QuickRow::ScaleOf(_)
+            | QuickRow::StretchOf(_)
             | QuickRow::GbPalettes => match self.platform() {
                 Some(p) => QuickRow::screen_of(p),
                 None => QuickRow::MAIN.to_vec(),
@@ -449,7 +488,8 @@ impl QuickRow {
             | QuickRow::ShowTitles
             | QuickRow::BatteryDisplay
             | QuickRow::Saturation
-            | QuickRow::Contrast => QuickRow::GENERAL.to_vec(),
+            | QuickRow::Contrast
+            | QuickRow::Kiosk => QuickRow::GENERAL.to_vec(),
             QuickRow::Resume
             | QuickRow::States
             | QuickRow::Settings
@@ -467,6 +507,7 @@ impl QuickRow {
             | QuickRow::GameArt
             | QuickRow::ArtAsleep
             | QuickRow::Achievements
+            | QuickRow::TrophyRoom
             | QuickRow::Updates
             | QuickRow::Cores
             | QuickRow::AutoCores => QuickRow::ONLINE.to_vec(),
@@ -476,9 +517,12 @@ impl QuickRow {
             | QuickRow::ShutDown
             | QuickRow::Reload => QuickRow::POWER.to_vec(),
             QuickRow::Shader
+            | QuickRow::ShaderParams
             | QuickRow::ColourCorrection
             | QuickRow::Palette
             | QuickRow::Bezel
+            | QuickRow::Scale
+            | QuickRow::Stretch
             | QuickRow::Blending
             | QuickRow::PlaySaturation
             | QuickRow::PlayContrast => QuickRow::PLAY_SCREEN.to_vec(),
@@ -587,10 +631,13 @@ impl QuickRow {
             QuickRow::PlayScreen => "Screen",
             QuickRow::PlayGameplay => "Gameplay",
             QuickRow::Shader | QuickRow::ShaderOf(_) => "Shader",
+            QuickRow::ShaderParams | QuickRow::ShaderParamsOf(_) => "Shader Parameters",
             QuickRow::ColourCorrection | QuickRow::ColourCorrectionOf(_) => "Color Correction",
             QuickRow::Palette => "Palette",
             QuickRow::Bezel | QuickRow::BezelOf(_) => "Bezel",
             QuickRow::Blending | QuickRow::BlendingOf(_) => "Frame Blending",
+            QuickRow::Scale | QuickRow::ScaleOf(_) => "Scale",
+            QuickRow::Stretch | QuickRow::StretchOf(_) => "Stretch",
             QuickRow::ScreenOf(p) => p.name(),
             QuickRow::Disc => "Disc",
             QuickRow::Network => "Network",
@@ -608,6 +655,8 @@ impl QuickRow {
             QuickRow::Upload => "Upload from Phone",
             QuickRow::GameArt => "Game Art",
             QuickRow::Achievements => "RetroAchievements",
+            QuickRow::TrophyRoom => "Trophy Room",
+            QuickRow::Kiosk => "Kiosk Mode",
             QuickRow::Hardcore => "Hardcore Achievements",
             QuickRow::Power => "Power",
             QuickRow::Restart => "Restart",
@@ -626,12 +675,15 @@ impl QuickRow {
                 | QuickRow::Screen
                 | QuickRow::Game
                 | QuickRow::General
+                | QuickRow::Kiosk
                 | QuickRow::Resume
                 | QuickRow::States
                 | QuickRow::Settings
                 | QuickRow::ExitGame
                 | QuickRow::PlayScreen
                 | QuickRow::PlayGameplay
+                | QuickRow::ShaderParams
+                | QuickRow::ShaderParamsOf(_)
                 | QuickRow::ScreenOf(_)
                 | QuickRow::Network
                 | QuickRow::Online
@@ -645,6 +697,7 @@ impl QuickRow {
                 | QuickRow::Cores
                 | QuickRow::GameArt
                 | QuickRow::Achievements
+                | QuickRow::TrophyRoom
                 | QuickRow::Power
                 | QuickRow::Restart
                 | QuickRow::ShutDown
@@ -705,6 +758,11 @@ pub enum QuickValue {
     Level9,
     Mix,
     Ghosting,
+    SpScreen,
+    Integer,
+    Fit,
+    FullScreen,
+    Classic,
     Min1,
     Min3,
     Min5,
@@ -714,7 +772,7 @@ pub enum QuickValue {
 }
 
 impl QuickValue {
-    pub const ALL: [QuickValue; 46] = [
+    pub const ALL: [QuickValue; 51] = [
         QuickValue::Speed1_5,
         QuickValue::Speed2,
         QuickValue::Speed3,
@@ -755,6 +813,11 @@ impl QuickValue {
         QuickValue::Level9,
         QuickValue::Mix,
         QuickValue::Ghosting,
+        QuickValue::SpScreen,
+        QuickValue::Integer,
+        QuickValue::Fit,
+        QuickValue::FullScreen,
+        QuickValue::Classic,
         QuickValue::Min1,
         QuickValue::Min3,
         QuickValue::Min5,
@@ -815,6 +878,27 @@ impl QuickValue {
             QuickValue::Level9 => "9",
             QuickValue::Mix => "Mix",
             QuickValue::Ghosting => "Ghosting",
+            QuickValue::SpScreen => "SP Screen",
+            QuickValue::Integer => "Integer",
+            QuickValue::Fit => "Fit",
+            QuickValue::FullScreen => "Full Screen",
+            QuickValue::Classic => "Classic",
+        }
+    }
+
+    pub fn scale(scale: Scale) -> QuickValue {
+        match scale {
+            Scale::SpFrame => QuickValue::SpScreen,
+            Scale::Integer => QuickValue::Integer,
+            Scale::Fit => QuickValue::Fit,
+            Scale::FullScreen => QuickValue::FullScreen,
+        }
+    }
+
+    pub fn stretch(stretch: Stretch) -> QuickValue {
+        match stretch {
+            Stretch::Classic => QuickValue::Classic,
+            Stretch::FullScreen => QuickValue::FullScreen,
         }
     }
 
@@ -894,7 +978,7 @@ const TYPE_DROP: f32 = 4.0;
 const CARET_GAP: f32 = 14.0;
 const CARET_PX: f32 = 24.0;
 const LEGEND_Y: f32 = 427.0;
-const DIM_INK: [u8; 3] = [0x9a, 0x9a, 0xa4];
+pub(crate) const DIM_INK: [u8; 3] = [0x9a, 0x9a, 0xa4];
 const PANEL_GAP: f32 = 12.0;
 
 pub fn quick_label_face(row: QuickRow, lit: bool) -> UndoFace {
@@ -948,7 +1032,7 @@ pub fn value_face(text: &str, lit: bool) -> UndoFace {
     quick_text_face(text, if lit { MENU_INK } else { DIM_INK })
 }
 
-fn quick_text_face(label: &str, colour: [u8; 3]) -> UndoFace {
+pub(crate) fn quick_text_face(label: &str, colour: [u8; 3]) -> UndoFace {
     let Some(font) = text::label_font() else {
         return UndoFace {
             rgba: Vec::new(),
@@ -1065,7 +1149,7 @@ fn with_hint(button: UndoFace, label: &str, ink: Option<[u8; 3]>, hint_on_right:
     UndoFace { rgba, w, h }
 }
 
-fn button_face(which: ButtonLegend) -> UndoFace {
+pub(crate) fn button_face(which: ButtonLegend) -> UndoFace {
     let (rgba, w, h) = button_legend(which);
     UndoFace {
         rgba: rgba.to_vec(),
@@ -1074,7 +1158,7 @@ fn button_face(which: ButtonLegend) -> UndoFace {
     }
 }
 
-fn button_pair(left: ButtonLegend, right: ButtonLegend) -> UndoFace {
+pub(crate) fn button_pair(left: ButtonLegend, right: ButtonLegend) -> UndoFace {
     let (a, aw, ah) = button_legend(left);
     let (b, bw, bh) = button_legend(right);
     let (w, h) = (aw + bw, ah.max(bh));

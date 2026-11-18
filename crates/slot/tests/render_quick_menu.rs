@@ -274,24 +274,26 @@ fn the_screen_page_sets_gb_palettes_in_line_with_the_rows_above() {
     let mut f = Frontend::boot(Box::new(SimPlatform::at(d.path().to_path_buf())));
     f.upload_faces(&mut c);
     let mut input = Script(VecDeque::new());
+    // A shader without parameters hides its Shader Parameters row, so the page is walked as shown.
+    let hidden = f.app().hidden_rows();
     tap(&mut f, &mut input, Btn::Menu);
     for _ in 0..QuickRow::Screen.position(&[]) {
         tap(&mut f, &mut input, Btn::Down);
     }
     tap(&mut f, &mut input, Btn::A);
-    for _ in 0..QuickRow::ScreenOf(Platform::Gb).position(&[]) {
+    for _ in 0..QuickRow::ScreenOf(Platform::Gb).position(&hidden) {
         tap(&mut f, &mut input, Btn::Down);
     }
     tap(&mut f, &mut input, Btn::A);
-    for _ in 0..QuickRow::GbPalettes.position(&[]) {
+    for _ in 0..QuickRow::GbPalettes.position(&hidden) {
         tap(&mut f, &mut input, Btn::Down);
     }
     let px = composed(&mut f, &mut c, "screen-page");
 
-    let top = quick_row_top(QuickRow::GbPalettes, &[]) as usize;
+    let top = quick_row_top(QuickRow::GbPalettes, &hidden) as usize;
     beside("Palettes", pointer(&px, top));
-    for row in QuickRow::screen_of(Platform::Gb) {
-        let top = quick_row_top(row, &[]) as usize;
+    for row in QuickRow::GbPalettes.shown(&hidden) {
+        let top = quick_row_top(row, &hidden) as usize;
         if row != QuickRow::GbPalettes {
             assert!(pointer(&px, top).is_none(), "a pointer at {row:?} as well");
         }

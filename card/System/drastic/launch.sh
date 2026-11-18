@@ -14,6 +14,14 @@ done
 # there being no udev on BaseOS to say the pad is one. DraStic writes its settings back, so the
 # defaults go in only once.
 [ -f config/drastic.cfg ] || cp "$here/drastic.cfg" config/drastic.cfg
+# In kiosk mode DraStic's own menu, which can load any game on the card, is unbound for the
+# session and its binding put back after; a session cut short puts it back at the next launch.
+keep=config/drastic.cfg.kiosk
+[ -f "$keep" ] && mv "$keep" config/drastic.cfg
+if grep -q '^active=1$' "${SLOT_ROOT:-/mnt/sdcard}/Config/kiosk.conf" 2>/dev/null; then
+	cp config/drastic.cfg "$keep"
+	sed -i 's/^\(controls_[ab]\[CONTROL_INDEX_MENU\]\) = .*/\1 = 65535/' config/drastic.cfg
+fi
 # DraStic has no volume of its own, so slot reads the volume keys while it runs and leaves the
 # level in UNSLOT_VOLUME, which libunslot-drastic.so scales DraStic's sound by and shows. slot
 # reads Menu too, and opens its own menu over the game; DraStic's is on Select + X.
@@ -24,3 +32,4 @@ LD_LIBRARY_PATH="$here/libs" LD_PRELOAD="$here/libs/libunslot-drastic.so" SDL_LI
 	"$here/drastic" "$1"
 kill "$volume" 2>/dev/null
 rm -f "$UNSLOT_VOLUME"
+if [ -f "$keep" ]; then mv "$keep" config/drastic.cfg; fi

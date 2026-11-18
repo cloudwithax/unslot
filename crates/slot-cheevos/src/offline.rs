@@ -565,6 +565,247 @@ fn queued(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+/// One RetroAchievements trophy read from the offline cache + unlocks log.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct TrophyItem {
+    pub id: u64,
+    pub title: String,
+    pub description: String,
+    pub points: u32,
+    pub badge_name: String,
+    pub unlocked_at: Option<u64>,
+    pub hardcore: bool,
+}
+
+/// One game's cached RetroAchievements set under `Config/retroachievements`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct CachedGameTrophies {
+    pub game_id: u64,
+    pub console_id: u32,
+    pub title: String,
+    pub icon_url: Option<String>,
+    pub trophies: Vec<TrophyItem>,
+}
+
+fn read_unlocks_map(
+    ra_dir: &Path,
+    user: Option<&str>,
+) -> std::collections::HashMap<u64, (u64, bool)> {
+    let mut map: std::collections::HashMap<u64, (u64, bool)> = std::collections::HashMap::new();
+    let mut record = |id: u64, when: u64, hardcore: bool| {
+        map.entry(id)
+            .and_modify(|e| {
+                e.0 = e.0.max(when);
+                e.1 |= hardcore;
+            })
+            .or_insert((when, hardcore));
+    };
+
+    // Cached startsession answers.
+    if let Ok(entries) = std::fs::read_dir(ra_dir.join("cache")) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if !name.starts_with("startsession-") || !name.ends_with(".json") {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) else {
+                continue;
+            };
+            for (key, hardcore) in [("Unlocks", false), ("HardcoreUnlocks", true)] {
+                if let Some(arr) = val.get(key).and_then(|v| v.as_array()) {
+                    for item in arr {
+                        let Some(id) = item.get("ID").and_then(|v| v.as_u64()) else {
+                            continue;
+                        };
+                        let when = item.get("When").and_then(|v| v.as_u64()).unwrap_or(0);
+                        record(id, when, hardcore);
+                    }
+                }
+            }
+        }
+    }
+
+    // Local unlocks/<user>.txt files.
+    let unlocks_dir = ra_dir.join("unlocks");
+    let files: Vec<PathBuf> = match user.filter(|u| !u.is_empty()) {
+        Some(u) => vec![unlocks_dir.join(format!("{}.txt", file_safe(u)))],
+        None => std::fs::read_dir(&unlocks_dir)
+            .ok()
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .collect(),
+    };
+    for path in files {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for line in text.lines() {
+            let mut fields = line.split(' ');
+            let (Some(id), Some(when)) = (fields.next(), fields.next()) else {
+                continue;
+            };
+            if let (Ok(id), Ok(when)) = (id.parse::<u64>(), when.parse::<u64>()) {
+                record(id, when, fields.next() == Some("h"));
+            }
+        }
+    }
+
+    // Unsent queued awards.
+    for path in queued(ra_dir) {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let mut lines = text.lines();
+        let when = lines
+            .next()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+        let _url = lines.next();
+        let Some(body) = lines.next() else {
+            continue;
+        };
+        let ps = params(body);
+        if param(&ps, "r") == Some("awardachievement") {
+            if let Some(id) = param(&ps, "a").and_then(|s| s.parse::<u64>().ok()) {
+                record(id, when, param(&ps, "h") == Some("1"));
+            }
+        }
+    }
+    map
+}
+
+fn parse_cached_game(
+    val: &serde_json::Value,
+    unlocks: &std::collections::HashMap<u64, (u64, bool)>,
+) -> Option<CachedGameTrophies> {
+    if val.get("Success").and_then(|v| v.as_bool()) == Some(false) {
+        return None;
+    }
+    // Modern `achievementsets` schema or legacy `PatchData` wrapper.
+    let root = val.get("PatchData").unwrap_or(val);
+    let game_id = root
+        .get("GameId")
+        .or_else(|| root.get("ID"))
+        .and_then(|v| v.as_u64())?;
+    let console_id = root
+        .get("ConsoleId")
+        .or_else(|| root.get("ConsoleID"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+    let title = root
+        .get("Title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let icon_url = root
+        .get("ImageIconUrl")
+        .or_else(|| root.get("ImageIcon"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+
+    let mut trophy_list: Option<&Vec<serde_json::Value>> =
+        root.get("Achievements").and_then(|v| v.as_array());
+    if trophy_list.is_none() {
+        if let Some(sets) = root.get("Sets").and_then(|v| v.as_array()) {
+            let core_set = sets
+                .iter()
+                .find(|s| s.get("Type").and_then(|t| t.as_str()) == Some("core"))
+                .or_else(|| sets.first());
+            trophy_list = core_set
+                .and_then(|s| s.get("Achievements"))
+                .and_then(|v| v.as_array());
+        }
+    }
+    let arr = trophy_list?;
+    let mut trophies = Vec::new();
+    for item in arr {
+        let flags = item.get("Flags").and_then(|v| v.as_u64());
+        if matches!(flags, Some(f) if f != 3) {
+            continue;
+        }
+        let Some(id) = item.get("ID").and_then(|v| v.as_u64()) else {
+            continue;
+        };
+        let unlocked = unlocks.get(&id).copied();
+        trophies.push(TrophyItem {
+            id,
+            title: item
+                .get("Title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            description: item
+                .get("Description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            points: item.get("Points").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            badge_name: item
+                .get("BadgeName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            unlocked_at: unlocked.map(|(t, _)| t),
+            hardcore: unlocked.is_some_and(|(_, h)| h),
+        });
+    }
+    Some(CachedGameTrophies {
+        game_id,
+        console_id,
+        title,
+        icon_url,
+        trophies,
+    })
+}
+
+/// Reads cached RetroAchievements game sets and unlock states from `ra_dir`.
+pub fn read_trophy_catalog(ra_dir: &Path, user: Option<&str>) -> Vec<CachedGameTrophies> {
+    let unlocks = read_unlocks_map(ra_dir, user);
+    let mut games: BTreeMap<u64, CachedGameTrophies> = BTreeMap::new();
+    let Ok(entries) = std::fs::read_dir(ra_dir.join("cache")) else {
+        return Vec::new();
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if (!name.starts_with("achievementsets-") && !name.starts_with("patch-"))
+            || !name.ends_with(".json")
+        {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let Some(parsed) = parse_cached_game(&val, &unlocks) else {
+            continue;
+        };
+        games
+            .entry(parsed.game_id)
+            .and_modify(|cur| {
+                if parsed.trophies.len() > cur.trophies.len() {
+                    *cur = parsed.clone();
+                }
+            })
+            .or_insert(parsed);
+    }
+    let mut out: Vec<CachedGameTrophies> = games.into_values().collect();
+    out.sort_by(|a, b| {
+        a.console_id
+            .cmp(&b.console_id)
+            .then_with(|| a.title.cmp(&b.title))
+    });
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -597,5 +838,37 @@ mod tests {
     fn a_percent_escape_at_the_end_is_kept() {
         assert_eq!(decode("a%20b%2"), "a b%2");
         assert_eq!(decode("x+y"), "x y");
+    }
+
+    #[test]
+    fn reads_cached_game_trophies_with_unlocks_and_queued_awards() {
+        let dir = PathBuf::from(format!(
+            "/tmp/slot-cheevos-trophies-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("cache")).unwrap();
+        std::fs::create_dir_all(dir.join("unlocks")).unwrap();
+        std::fs::create_dir_all(dir.join("queue")).unwrap();
+        let json = r#"{"Success":true,"GameId":100,"Title":"Super Metroid","ConsoleId":3,"Sets":[{"Type":"core","Achievements":[{"ID":5001,"Title":"First","Description":"Grab Morph Ball","Flags":3,"Points":10,"BadgeName":"00001"},{"ID":5002,"Title":"Boss","Description":"Defeat Kraid","Flags":3,"Points":25,"BadgeName":"00002"},{"ID":5003,"Title":"Unofficial","Description":"Skip","Flags":5,"Points":5,"BadgeName":"00003"}]}]}"#;
+        std::fs::write(dir.join("cache/achievementsets-0001.json"), json).unwrap();
+        std::fs::write(dir.join("unlocks/Benni.txt"), "5001 1700000010 h\n").unwrap();
+        std::fs::write(
+            dir.join("queue/00001-0-0.txt"),
+            "1700000020\nhttps://retroachievements.org/dorequest.php\nr=awardachievement&u=Benni&a=5002&h=0\n",
+        )
+        .unwrap();
+
+        let catalog = read_trophy_catalog(&dir, Some("Benni"));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(catalog.len(), 1);
+        let game = &catalog[0];
+        assert_eq!(game.console_id, 3);
+        assert_eq!(game.title, "Super Metroid");
+        assert_eq!(game.trophies.len(), 2);
+        assert_eq!(game.trophies[0].unlocked_at, Some(1700000010));
+        assert!(game.trophies[0].hardcore);
+        assert_eq!(game.trophies[1].unlocked_at, Some(1700000020));
+        assert!(!game.trophies[1].hardcore);
     }
 }

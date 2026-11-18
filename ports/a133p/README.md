@@ -5,7 +5,7 @@
 > an uncropped menu layout, working Wi-Fi and Bluetooth; the Smart Pro and Brick have not been tried. If you try it,
 > [open an issue](https://github.com/cloudwithax/unslot/issues) with the files in `Logs`.
 
-The port lives on the `a133p` branch. It runs unslot on TrimUI's stock firmware, in place of
+It runs unslot on TrimUI's stock firmware, in place of
 TrimUI's frontend, with no BaseOS under it.
 
 ## Devices
@@ -104,6 +104,11 @@ The last four are recorded when an empty `System/trace-radio.on` is present on t
 `wpa_supplicant.log`, `radio-trace.log` and `dmesg.txt` keep the boot before as `.1`.
 
 ## Building
+
+Each release carries a TrimUI card, `unslot-<version>-a133p.zip`, and its signed update,
+`unslot-<version>-a133p.pak`, built by the release workflow from the H700 tree and the cores,
+mGBA and DraStic in the `a133p-cores` prerelease; run the `a133p-cores` workflow when a recipe in
+`tools/a133p` changes. To build one by hand:
 
 Builds use [Task](https://taskfile.dev), and cross-compile against glibc 2.23 through zig.
 

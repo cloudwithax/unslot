@@ -59,19 +59,21 @@ fn the_backlight_steps_span_whatever_range_the_kernel_reports() {
     assert_eq!(brightness(&d), 255);
     p.set_backlight(5);
     let mid = brightness(&d);
-    assert!((40..=90).contains(&mid), "step 5 of 9 wrote {mid} of 255");
+    assert!((150..=200).contains(&mid), "step 5 of 9 wrote {mid} of 255");
 }
 
 #[test]
 fn step_one_is_the_dimmest_value_the_rg34xx_lights() {
+    // A panel that lit step one at 8 of 255, as it used to, is past dark: the dimmest step
+    // lights 35% and the picture's own dim goes under it.
     let d = sysfs("255", "87");
     let mut p = platform(&d);
     p.set_backlight(1);
-    assert_eq!(brightness(&d), 8);
+    assert_eq!(brightness(&d), 89);
 }
 
 #[test]
-fn the_steps_follow_the_curve_from_the_floor_to_full() {
+fn the_steps_go_from_the_floor_to_full() {
     let d = sysfs("255", "87");
     let mut p = platform(&d);
     let wrote: Vec<u32> = (0..=9)
@@ -80,7 +82,7 @@ fn the_steps_follow_the_curve_from_the_floor_to_full() {
             brightness(&d)
         })
         .collect();
-    assert_eq!(wrote, [0, 8, 14, 30, 52, 81, 117, 157, 204, 255]);
+    assert_eq!(wrote, [0, 89, 110, 131, 151, 172, 193, 214, 234, 255]);
 }
 
 #[test]
@@ -101,7 +103,7 @@ fn a_small_range_still_lights_step_one() {
     let d = sysfs("10", "87");
     let mut p = platform(&d);
     p.set_backlight(1);
-    assert_eq!(brightness(&d), 1);
+    assert_eq!(brightness(&d), 4);
     p.set_backlight(9);
     assert_eq!(brightness(&d), 10);
 }

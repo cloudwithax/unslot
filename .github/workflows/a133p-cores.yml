@@ -1,0 +1,94 @@
+name: a133p-cores
+
+# The TrimUI A133P's own builds of what an H700 card takes from libretro's buildbot: every core
+# rebuilt by tools/a133p/cores.sh against glibc 2.23, mGBA, and DraStic with the A133P's SDL, from
+# tools/a133p/drastic.sh. They go in the prerelease tagged `a133p-cores`, which a release's A133P
+# card is built from, as an H700 card takes libretro's from the `cores` release. Run by hand when
+# a recipe in tools/a133p changes. The release is never the latest, so the updater, which asks
+# GitHub for the latest, does not take it for unslot's.
+on:
+  workflow_dispatch:
+  # A workflow GitHub has not seen on the default branch cannot be dispatched, so this dry-run
+  # branch runs it on push. Not for main.
+  push:
+    branches: [a133p-ci]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      JOBS: 4
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the tools the recipes build with
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config make \
+            autoconf automake libtool python3-pip libgles-dev libegl-dev binutils-aarch64-linux-gnu \
+            zip unzip xxd
+          # The zig the recipes were tried with.
+          pip3 install --break-system-packages ziglang==0.17.1
+          curl -fsSL https://taskfile.dev/install.sh | sudo sh -s -- -b /usr/local/bin
+
+      # The GPU cores link against libGLESv2 and libEGL, which the firmware has and a card does not
+      # carry. Debian's libglvnd has both under the same names, so the cores need the firmware's.
+      - name: Link libraries for the GPU cores
+        run: |
+          set -eu
+          mkdir -p target-a133p/gpu "$RUNNER_TEMP/glvnd"
+          while read -r sha deb; do
+            curl -fsSL -o "$RUNNER_TEMP/$deb" "https://deb.debian.org/debian/pool/main/libg/libglvnd/$deb"
+            echo "$sha  $RUNNER_TEMP/$deb" | sha256sum -c -
+            dpkg-deb -x "$RUNNER_TEMP/$deb" "$RUNNER_TEMP/glvnd"
+          done <<'EOF'
+          ae3fda1556b677519ff13d43295d7df678d3a9c39a21042e87d9255de1bc78b6 libgles2_1.3.2-1_arm64.deb
+          4b531a79399010d3377ce9b6094c8f5f3508bd18ea5b32008a6a1ec16e019a81 libegl1_1.3.2-1_arm64.deb
+          5d7a05a966d1df43ca440245dfc7e18a51fc974f665441fc87180a605a0481d9 libglvnd0_1.3.2-1_arm64.deb
+          EOF
+          lib="$RUNNER_TEMP/glvnd/usr/lib/aarch64-linux-gnu"
+          cp -L "$lib/libGLESv2.so.2" target-a133p/gpu/libGLESv2.so
+          cp -L "$lib/libEGL.so.1" target-a133p/gpu/libEGL.so
+          cp -L "$lib/libGLdispatch.so.0" target-a133p/gpu/
+
+      - name: Build the cores
+        run: sh tools/a133p/cores.sh
+
+      - name: Build mGBA and stage DraStic
+        run: |
+          set -eu
+          task core:a133p
+          sh tools/a133p/drastic.sh
+
+      - name: Check them
+        run: |
+          set -eu
+          n=0
+          for f in target-a133p/cores/*_libretro.so; do
+            sh tools/a133p/check-glibc.sh "$f"
+            test -s "$f.meta"
+            n=$((n + 1))
+          done
+          # Every recipe in tools/a133p/cores.sh, and mGBA.
+          test "$n" -ge 47
+          test -s target-a133p/drastic/drastic.meta
+          file target-a133p/drastic/libs/libSDL2-2.0.so.0 | grep -q aarch64
+
+      - name: Publish them
+        run: |
+          set -eu
+          tar -C target-a133p -czf a133p-cores.tar.gz cores drastic
+          sha256sum a133p-cores.tar.gz > a133p-cores.tar.gz.sha256
+          repo="$GITHUB_REPOSITORY"
+          if ! gh release view a133p-cores --repo "$repo" > /dev/null 2>&1; then
+            gh release create a133p-cores --repo "$repo" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "A133P cores" \
+              --notes "The cores, mGBA and DraStic an unslot card for TrimUI's A133P handhelds carries, built by tools/a133p from the sources each one's .meta names."
+          fi
+          gh release upload a133p-cores --repo "$repo" --clobber a133p-cores.tar.gz a133p-cores.tar.gz.sha256

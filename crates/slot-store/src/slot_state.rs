@@ -4,6 +4,8 @@ use crate::atomic::atomic_write;
 use crate::gb_palette::GbPalette;
 use crate::platform::Platform;
 
+/// The backlight's lowest step that is lit: step 0 is the screen off, which only a closed lid asks for.
+pub const BRIGHTNESS_MIN: u8 = 1;
 pub const BRIGHTNESS_MAX: u8 = 9;
 pub const BLUE_LIGHT_MAX: u8 = 9;
 /// Software dim steps below the backlight's lowest level.
@@ -291,8 +293,10 @@ impl WallpaperPick {
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub enum BezelPick {
     None,
-    Default,
+    /// Nothing picked: the platform's own built-in frame where a 4:3 panel has one for it, else none.
     #[default]
+    Auto,
+    Default,
     Ags102,
     File(String),
 }
@@ -301,8 +305,9 @@ impl BezelPick {
     pub fn key(&self) -> String {
         match self {
             BezelPick::None => "none".to_string(),
+            BezelPick::Auto => "auto".to_string(),
             BezelPick::Default => "default".to_string(),
-            BezelPick::Ags102 => "ags-102".to_string(),
+            BezelPick::Ags102 => "sp-frame".to_string(),
             BezelPick::File(name) => name.clone(),
         }
     }
@@ -310,13 +315,17 @@ impl BezelPick {
     pub fn label(&self) -> String {
         match self {
             BezelPick::None => "None".to_string(),
-            BezelPick::Default => "Default".to_string(),
+            BezelPick::Auto | BezelPick::Default => "Default".to_string(),
             BezelPick::Ags102 => "AGS-102".to_string(),
-            BezelPick::File(name) => name
-                .rsplit_once('.')
-                .map(|(stem, _)| stem)
-                .unwrap_or(name)
-                .to_string(),
+            BezelPick::File(name) => {
+                let stem = name
+                    .rsplit_once('.')
+                    .map_or(name.as_str(), |(stem, _)| stem);
+                match bezel_scale(name) {
+                    Some(scale) => stem[..stem.len() - scale.bezel_suffix().len()].to_string(),
+                    None => stem.to_string(),
+                }
+            }
         }
     }
 
@@ -324,8 +333,105 @@ impl BezelPick {
         match value {
             "none" => BezelPick::None,
             "default" => BezelPick::Default,
-            "" | "ags-102" => BezelPick::Ags102,
+            // `ags-102` is what every card saved while the frame was the default for all of
+            // them, so it says nothing about a choice: the frame is off until it is picked again.
+            "" | "auto" | "ags-102" => BezelPick::Auto,
+            "sp-frame" => BezelPick::Ags102,
             other => BezelPick::File(other.to_string()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Scale {
+    #[default]
+    SpFrame,
+    Integer,
+    Fit,
+    FullScreen,
+}
+
+pub fn bezel_scale(name: &str) -> Option<Scale> {
+    let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+    let stem = stem.to_ascii_lowercase();
+    [Scale::SpFrame, Scale::Integer, Scale::Fit]
+        .into_iter()
+        .find(|scale| stem.ends_with(scale.bezel_suffix()))
+}
+
+pub fn bezel_for_scale(name: &str, scale: Scale) -> Option<String> {
+    let from = bezel_scale(name)?;
+    let (stem, ext) = name.rsplit_once('.')?;
+    let base = &stem[..stem.len() - from.bezel_suffix().len()];
+    Some(format!("{base}{}.{ext}", scale.bezel_suffix()))
+}
+
+impl Scale {
+    pub fn bezel_suffix(self) -> &'static str {
+        match self {
+            Scale::SpFrame => "_spscreen",
+            Scale::Integer => "_integer",
+            Scale::Fit => "_fit",
+            Scale::FullScreen => "_fullscreen",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Scale::SpFrame => "sp-frame",
+            Scale::Integer => "integer",
+            Scale::Fit => "fit",
+            Scale::FullScreen => "full-screen",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Scale::SpFrame => "SP Screen",
+            Scale::Integer => "Integer",
+            Scale::Fit => "Fit",
+            Scale::FullScreen => "Full Screen",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Scale> {
+        match name {
+            "sp-frame" => Some(Scale::SpFrame),
+            "integer" => Some(Scale::Integer),
+            "fit" => Some(Scale::Fit),
+            "full-screen" => Some(Scale::FullScreen),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Stretch {
+    #[default]
+    Classic,
+    FullScreen,
+}
+
+impl Stretch {
+    pub fn name(self) -> &'static str {
+        match self {
+            Stretch::Classic => "classic",
+            Stretch::FullScreen => "full-screen",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Stretch::Classic => "Classic",
+            Stretch::FullScreen => "Full Screen",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Stretch> {
+        match name {
+            "classic" => Some(Stretch::Classic),
+            "full-screen" => Some(Stretch::FullScreen),
+            _ => None,
         }
     }
 }
@@ -408,6 +514,12 @@ pub struct SlotState {
     pub favorites: Vec<Recent>,
     pub shelf: Option<String>,
     pub shelf_cart: Option<Recent>,
+    pub scale_gba: Scale,
+    pub scale_gb: Scale,
+    pub scale_gbc: Scale,
+    /// Each system's Stretch: the Game Boy family's in the Game Boy canvas, the others' whether
+    /// the picture keeps its own shape or fills the screen.
+    pub stretches: [Stretch; Platform::COUNT],
 }
 
 /// How each frame is blended with the ones before it, as the handhelds' slow LCDs did.
@@ -464,7 +576,7 @@ impl Screen {
             shader: platform.spec().shader,
             colour_correction: false,
             blending: Blending::Off,
-            bezel: BezelPick::Ags102,
+            bezel: BezelPick::Auto,
             custom_shader: None,
         }
     }
@@ -608,6 +720,10 @@ impl Default for SlotState {
             favorites: Vec::new(),
             shelf: None,
             shelf_cart: None,
+            scale_gba: Scale::default(),
+            scale_gb: Scale::default(),
+            scale_gbc: Scale::default(),
+            stretches: [Stretch::default(); Platform::COUNT],
         }
     }
 }
@@ -696,6 +812,10 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         text.push_str(&format!("shader_{key}={}\n", screen.shader.name()));
         text.push_str(&format!("bezel_{key}={}\n", screen.bezel.key()));
         text.push_str(&format!("blending_{key}={}\n", screen.blending.key()));
+        text.push_str(&format!(
+            "stretch_{key}={}\n",
+            s.stretches[p.index()].name()
+        ));
         if let Some(file) = &screen.custom_shader {
             text.push_str(&format!("shader_file_{key}={file}\n"));
         }
@@ -735,6 +855,12 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
             r.platform.key(),
             r.stem
         ))
+    ));
+    text.push_str(&format!(
+        "scale_gba={}\nscale_gb={}\nscale_gbc={}\n",
+        s.scale_gba.name(),
+        s.scale_gb.name(),
+        s.scale_gbc.name(),
     ));
     atomic_write(&state_path(root), text.as_bytes())?;
     write_list(root, RECENTS_FILE, &s.recents)?;
@@ -798,6 +924,10 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut password = None;
     let mut shelf = None;
     let mut shelf_cart = None;
+    let mut scale_gba = None;
+    let mut scale_gb = None;
+    let mut scale_gbc = None;
+    let mut stretches: [Option<Stretch>; Platform::COUNT] = [None; Platform::COUNT];
     for line in text.lines().filter(|l| !l.is_empty()) {
         let (key, value) = match line.split_once('=') {
             Some(kv) => kv,
@@ -814,6 +944,7 @@ fn parse(text: &str) -> Option<SlotState> {
                 "shader_file" => {
                     custom_shaders[p.index()] = Some(value.to_string()).filter(|v| !v.is_empty())
                 }
+                "stretch" => stretches[p.index()] = Stretch::parse(value),
                 _ => bezels[p.index()] = Some(BezelPick::parse(value)),
             }
             continue;
@@ -836,7 +967,7 @@ fn parse(text: &str) -> Option<SlotState> {
             "boot_logo" => boot_logo = value.to_string(),
             "cart" => cart = Some(value.to_string()),
             "cart_platform" => cart_platform = Platform::from_key(value),
-            "brightness" => brightness = Some(level(value, BRIGHTNESS_MAX)?),
+            "brightness" => brightness = Some(level(value, BRIGHTNESS_MAX)?.max(BRIGHTNESS_MIN)),
             "blue_light" => blue_light = Some(level(value, BLUE_LIGHT_MAX)?),
             "volume" => volume = Some(level(value, VOLUME_MAX)?),
             "volume_hp" => volume_hp = Some(level(value, VOLUME_MAX)?),
@@ -882,6 +1013,9 @@ fn parse(text: &str) -> Option<SlotState> {
             "password" => password = Some(value.to_string()).filter(|v| !v.is_empty()),
             "shelf" => shelf = Some(value.to_string()).filter(|v| !v.is_empty()),
             "shelf_cart" => shelf_cart = recent_value(value),
+            "scale_gba" => scale_gba = Scale::parse(value),
+            "scale_gb" => scale_gb = Scale::parse(value),
+            "scale_gbc" => scale_gbc = Scale::parse(value),
             _ => {}
         }
     }
@@ -959,6 +1093,10 @@ fn parse(text: &str) -> Option<SlotState> {
         favorites: Vec::new(),
         shelf,
         shelf_cart,
+        scale_gba: scale_gba.unwrap_or(fallback.scale_gba),
+        scale_gb: scale_gb.unwrap_or(fallback.scale_gb),
+        scale_gbc: scale_gbc.unwrap_or(fallback.scale_gbc),
+        stretches: std::array::from_fn(|i| stretches[i].unwrap_or(fallback.stretches[i])),
     })
 }
 
@@ -970,6 +1108,7 @@ fn per_platform(key: &str) -> Option<(&str, Platform)> {
         "shader",
         "bezel",
         "blending",
+        "stretch",
     ]
     .into_iter()
     .find_map(|setting| {

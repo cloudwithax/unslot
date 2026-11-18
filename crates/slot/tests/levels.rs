@@ -19,7 +19,7 @@ fn levels_clamp_and_persist() {
         a.apply(Action::BrightnessDown);
     }
     a.flush_state();
-    assert_eq!(read_slot_state(d.path()).brightness, 0);
+    assert_eq!(read_slot_state(d.path()).brightness, 1);
 }
 
 #[test]
@@ -31,18 +31,33 @@ fn brightness_down_past_the_bottom_dims_and_up_undims_first() {
     }
     a.flush_state();
     let s = read_slot_state(d.path());
-    assert_eq!((s.brightness, s.dim), (0, 6));
+    assert_eq!((s.brightness, s.dim), (1, 6));
     assert_eq!(a.brightness_level(), 0);
     a.apply(Action::BrightnessUp);
-    assert_eq!((a.brightness(), a.dim()), (0, 5));
+    assert_eq!((a.brightness(), a.dim()), (1, 5));
     assert_eq!(a.brightness_level(), 1);
     for _ in 0..5 {
         a.apply(Action::BrightnessUp);
     }
-    assert_eq!((a.brightness(), a.dim()), (0, 0));
-    a.apply(Action::BrightnessUp);
     assert_eq!((a.brightness(), a.dim()), (1, 0));
+    a.apply(Action::BrightnessUp);
+    assert_eq!((a.brightness(), a.dim()), (2, 0));
     assert_eq!(a.brightness_level(), 7);
+}
+
+#[test]
+fn no_brightness_press_switches_the_backlight_off() {
+    let d = tmp_root_with_carts(&["Emerald"]);
+    let mut a = boot(d.path());
+    let (power, backlight) = common::panel(d.path(), std::time::Duration::from_secs(180));
+    a.set_power(power);
+    for _ in 0..30 {
+        a.apply(Action::BrightnessDown);
+        assert!(
+            backlight.load(std::sync::atomic::Ordering::Relaxed) > 0,
+            "step 0 is the screen off, and the keys reached it"
+        );
+    }
 }
 
 #[test]

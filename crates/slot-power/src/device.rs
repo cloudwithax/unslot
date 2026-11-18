@@ -12,9 +12,11 @@ use crate::{Battery, Charge, LedState, Platform};
 
 const TOP_STEP: u32 = 9;
 
-const BACKLIGHT_FLOOR: f64 = 8.0 / 255.0;
+/// What the dimmest step lights: low enough to play at night, high enough that no panel calls it
+/// dark. The steps below it are the picture's own dim, which goes on down to a quarter.
+const BACKLIGHT_FLOOR: f64 = 0.35;
 
-const BACKLIGHT_CURVE: f64 = 1.75;
+const BACKLIGHT_CURVE: f64 = 1.0;
 
 const DEV_INPUT: &str = "/dev/input";
 

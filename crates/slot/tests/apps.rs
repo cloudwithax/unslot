@@ -131,6 +131,29 @@ fn a_ds_game_is_left_for_drastic_and_slot_quits_for_it() {
 }
 
 #[test]
+fn a_psp_game_is_left_for_ppsspp_and_slot_quits_for_it() {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    std::fs::create_dir_all(d.path().join("Games/PSP")).unwrap();
+    let rom = d.path().join("Games/PSP/Lumines.iso");
+    std::fs::write(&rom, "psp").unwrap();
+    let launcher = d.path().join("System/ppsspp/launch.sh");
+    std::fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+    std::fs::write(&launcher, "#!/bin/sh\n").unwrap();
+    let mut a = boot(d.path());
+    for _ in 0..Platform::COUNT {
+        if a.shelf_platform_name() == Some("PlayStation Portable") {
+            break;
+        }
+        press(&mut a, Btn::R1);
+    }
+    assert_eq!(a.shelf_platform_name(), Some("PlayStation Portable"));
+    press(&mut a, Btn::A);
+    let queued = std::fs::read_to_string(d.path().join(".unslot-port")).unwrap();
+    assert_eq!(queued, format!("{}\n{}", launcher.display(), rom.display()));
+    until(&mut a, App::ready_to_reload);
+}
+
+#[test]
 fn files_walks_the_card_and_a_picture_steps_through_its_folder() {
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
     let shots = d.path().join("Pictures/Trip");

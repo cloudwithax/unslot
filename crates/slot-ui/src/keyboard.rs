@@ -1,549 +1,973 @@
-//! A d-pad keyboard for typing a Wi-Fi password or a network's name.
-//!
-//! Ten keys a row, with the digits always on top, the way muOS and NextUI lay theirs out. A types
-//! the key under the cursor, B deletes, Y is space, X is shift, L1 and R1 swap letters and
-//! symbols, Start is done, Select shows or hides a password, and Menu gives up. B never throws
-//! the text away: the projects that made it cancel moved it off for that reason.
+use slot_input::Btn;
 
 use crate::bitmaps::ButtonLegend;
-use crate::page::{label_into, legends_into, over, rounded, Legend, DIM, INK, LIT, LIT_INK};
-use crate::plate::UndoFace;
+use crate::draw::{Canvas, Draw, TexId};
+use crate::hud::{footer_ink, PLATE, PLATE_H};
+use crate::icon::{icon_coverage, Icon};
+use crate::plate::{
+    blit, hint_face, hint_quad, hint_width, title_face, word_ink, UndoFace, CAP_GAP, HINT_EDGE,
+    HINT_H, TITLE_H, TITLE_W,
+};
+use crate::power_menu::{heading_face, MENU_INK, MENU_PAD};
+use crate::quick_menu::{button_face, button_pair, draw_menu_ground, quick_text_face, DIM_INK};
+use crate::slot_chrome::MOUTH_H;
 use crate::text;
 
-pub const COLS: usize = 10;
-const ROWS: usize = 5;
-
-const LETTERS: [&str; 4] = ["1234567890", "qwertyuiop", "asdfghjkl-", "zxcvbnm_.@"];
-const SYMBOLS: [&str; 4] = ["1234567890", "!#$%^&*(),", "=+[]{}\\|;:", "'\"<>?/`~-@"];
-
-/// The bottom row's keys and the columns each spans: where it starts and how wide it is.
-const BOTTOM: [(Special, usize, usize); 5] = [
-    (Special::Shift, 0, 2),
-    (Special::Page, 2, 1),
-    (Special::Space, 3, 4),
-    (Special::Delete, 7, 1),
-    (Special::Done, 8, 2),
-];
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum Special {
-    Shift,
-    Page,
-    Space,
-    Delete,
-    Done,
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum KeyLayout {
+    General,
+    Host,
+    Numeric,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum Key {
-    Char(char),
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Special {
+    Delete,
+    Done,
+    Shift,
+    Symbols,
+    Space,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Cap {
+    Char(usize),
     Special(Special),
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-enum Page {
-    Lower,
-    /// Upper case for the next letter only.
-    Shifted,
-    /// Upper case until shift is pressed again.
-    Caps,
-    Symbols,
-}
-
-/// What the player asked the keyboard to do.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum KeyInput {
-    Up,
-    Down,
-    Left,
-    Right,
-    /// A: whatever key the cursor is on.
-    Pick,
-    Delete,
-    Space,
-    Shift,
-    Page,
-    Done,
-    Reveal,
-    Cancel,
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum KeyOutcome {
-    Typing,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Typed {
+    Nothing,
+    Changed,
+    Help,
     Done(String),
     Cancelled,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Keyboard {
+    layout: KeyLayout,
     title: String,
-    text: String,
+    subtitle: Option<String>,
+    alert: bool,
+    masked: bool,
+    text: Vec<char>,
+    cursor: usize,
     row: usize,
     col: usize,
-    page: Page,
-    masked: bool,
-    /// Whether the text is a secret at all, so Select has something to show or hide.
-    secret: bool,
-    min: usize,
-    max: usize,
+    shift: bool,
+    symbols: bool,
+    help: bool,
+    aim: Option<f32>,
+}
+
+use Cap::{Char as C, Special as S};
+use Special::*;
+
+const GENERAL: &[&[Cap]] = &[
+    &[
+        C(0),
+        C(1),
+        C(2),
+        C(3),
+        C(4),
+        C(5),
+        C(6),
+        C(7),
+        C(8),
+        C(9),
+        S(Delete),
+    ],
+    &[
+        C(10),
+        C(11),
+        C(12),
+        C(13),
+        C(14),
+        C(15),
+        C(16),
+        C(17),
+        C(18),
+        C(19),
+    ],
+    &[
+        C(20),
+        C(21),
+        C(22),
+        C(23),
+        C(24),
+        C(25),
+        C(26),
+        C(27),
+        C(28),
+        S(Done),
+    ],
+    &[
+        S(Shift),
+        C(29),
+        C(30),
+        C(31),
+        C(32),
+        C(33),
+        C(34),
+        C(35),
+        S(Symbols),
+    ],
+    &[S(Space)],
+];
+
+const NUMERIC: &[&[Cap]] = &[
+    &[C(6), C(7), C(8), S(Delete)],
+    &[C(3), C(4), C(5), S(Done)],
+    &[C(0), C(1), C(2)],
+    &[C(9)],
+];
+
+const LOWER: &str = "1234567890qwertyuiopasdfghjklzxcvbnm";
+const UPPER: &str = "1234567890QWERTYUIOPASDFGHJKLZXCVBNM";
+const HOST_SHIFT: &str = ".-_:/~@+=,";
+const SYMBOL: &str = "!@#$%^&*()`~[]\\|{};:'\"<>?/+=_,.-\u{20ac}\u{a3}\u{a5}\u{a2}";
+
+fn layout_rows(layout: KeyLayout) -> &'static [&'static [Cap]] {
+    match layout {
+        KeyLayout::General | KeyLayout::Host => GENERAL,
+        KeyLayout::Numeric => NUMERIC,
+    }
+}
+
+fn nth(s: &str, i: usize) -> char {
+    s.chars().nth(i).unwrap_or(' ')
 }
 
 impl Keyboard {
-    /// A keyboard asking for `title`, starting from `text`. A `secret` is shown as stars until
-    /// Select reveals it. Done does nothing until there are `min` characters, and nothing past
-    /// `max` is taken.
-    pub fn new(title: &str, text: &str, secret: bool, min: usize, max: usize) -> Keyboard {
+    pub fn new(layout: KeyLayout, title: &str, subtitle: Option<&str>, text: &str) -> Keyboard {
+        let text: Vec<char> = text.chars().collect();
+        let row = if layout == KeyLayout::Numeric { 0 } else { 1 };
         Keyboard {
+            layout,
             title: title.to_string(),
-            text: text.chars().take(max).collect(),
-            row: 1,
+            subtitle: subtitle.map(str::to_string),
+            alert: false,
+            masked: false,
+            cursor: text.len(),
+            text,
+            row,
             col: 0,
-            page: Page::Lower,
-            masked: secret,
-            secret,
-            min,
-            max,
+            shift: false,
+            symbols: false,
+            help: false,
+            aim: None,
         }
     }
 
-    pub fn text(&self) -> &str {
-        &self.text
+    pub fn masked(mut self) -> Self {
+        self.masked = true;
+        self
     }
 
-    /// The text as the field shows it: stars for a hidden secret.
-    pub fn shown(&self) -> String {
-        match self.masked {
-            true => "*".repeat(self.text.chars().count()),
-            false => self.text.clone(),
+    pub fn is_masked(&self) -> bool {
+        self.masked
+    }
+
+    pub fn layout(&self) -> KeyLayout {
+        self.layout
+    }
+
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub fn subtitle(&self) -> Option<&str> {
+        self.subtitle.as_deref()
+    }
+
+    pub fn alerted(self) -> Keyboard {
+        Keyboard {
+            alert: true,
+            ..self
         }
     }
 
-    pub fn ready(&self) -> bool {
-        self.text.chars().count() >= self.min
+    pub fn refuse(&mut self, why: &str) {
+        self.subtitle = Some(why.to_string());
+        self.alert = true;
     }
 
-    pub fn cursor(&self) -> (usize, usize) {
-        (self.row, self.col)
+    pub fn alert(&self) -> bool {
+        self.alert
     }
 
-    pub fn key(&self) -> Key {
-        self.key_at(self.row, self.col)
+    pub fn text(&self) -> String {
+        self.text.iter().collect()
     }
 
-    fn key_at(&self, row: usize, col: usize) -> Key {
-        if row == ROWS - 1 {
-            let (special, ..) = BOTTOM
-                .iter()
-                .copied()
-                .find(|(_, at, w)| (*at..at + w).contains(&col))
-                .unwrap_or(BOTTOM[0]);
-            return Key::Special(special);
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    pub fn row(&self) -> usize {
+        self.row
+    }
+
+    pub fn col(&self) -> usize {
+        self.col
+    }
+
+    pub fn shift(&self) -> bool {
+        self.shift
+    }
+
+    pub fn symbols(&self) -> bool {
+        self.symbols
+    }
+
+    pub fn help(&self) -> bool {
+        self.help
+    }
+
+    pub fn rows(&self) -> &'static [&'static [Cap]] {
+        layout_rows(self.layout)
+    }
+
+    fn value(&self, i: usize) -> char {
+        if self.layout == KeyLayout::Numeric {
+            nth(LOWER, i)
+        } else if self.layout == KeyLayout::Host && !self.symbols && self.shift && i < 10 {
+            nth(HOST_SHIFT, i)
+        } else if self.symbols || (self.shift && i < 10) {
+            nth(SYMBOL, i)
+        } else if self.shift {
+            nth(UPPER, i)
+        } else {
+            nth(LOWER, i)
         }
-        let rows = match self.page {
-            Page::Symbols => SYMBOLS,
-            _ => LETTERS,
-        };
-        let ch = rows[row].chars().nth(col).unwrap_or(' ');
-        Key::Char(match self.page {
-            Page::Shifted | Page::Caps => ch.to_ascii_uppercase(),
-            _ => ch,
-        })
     }
 
-    pub fn press(&mut self, input: KeyInput) -> KeyOutcome {
-        match input {
-            KeyInput::Up => self.row = (self.row + ROWS - 1) % ROWS,
-            KeyInput::Down => self.row = (self.row + 1) % ROWS,
-            KeyInput::Left => self.step(false),
-            KeyInput::Right => self.step(true),
-            KeyInput::Pick => return self.activate(self.key()),
-            KeyInput::Delete => {
-                self.text.pop();
+    pub fn label(&self, cap: Cap) -> String {
+        match cap {
+            Cap::Char(i) => self.value(i).to_string(),
+            Cap::Special(s) => match s {
+                Delete => "Delete",
+                Done => "Done",
+                Shift => "Shift",
+                Symbols if self.symbols => "abc",
+                Symbols => "#+=",
+                Space => "Space",
             }
-            KeyInput::Space => self.type_char(' '),
-            KeyInput::Shift => self.shift(),
-            KeyInput::Page => self.flip_page(),
-            KeyInput::Done => return self.finish(),
-            KeyInput::Reveal => self.masked = self.secret && !self.masked,
-            KeyInput::Cancel => return KeyOutcome::Cancelled,
+            .to_string(),
         }
-        KeyOutcome::Typing
     }
 
-    fn step(&mut self, right: bool) {
-        if self.row != ROWS - 1 {
-            self.col = (self.col + if right { 1 } else { COLS - 1 }) % COLS;
-            return;
-        }
-        let at = BOTTOM
-            .iter()
-            .position(|(_, start, w)| (*start..start + w).contains(&self.col))
-            .unwrap_or(0);
-        let to = (at + if right { 1 } else { BOTTOM.len() - 1 }) % BOTTOM.len();
-        self.col = BOTTOM[to].1;
+    fn insert(&mut self, c: char) -> Typed {
+        self.text.insert(self.cursor, c);
+        self.cursor += 1;
+        Typed::Changed
     }
 
-    fn activate(&mut self, key: Key) -> KeyOutcome {
-        match key {
-            Key::Char(ch) => self.type_char(ch),
-            Key::Special(Special::Shift) => self.shift(),
-            Key::Special(Special::Page) => self.flip_page(),
-            Key::Special(Special::Space) => self.type_char(' '),
-            Key::Special(Special::Delete) => {
-                self.text.pop();
+    fn backspace(&mut self) -> Typed {
+        if self.cursor == 0 {
+            return Typed::Nothing;
+        }
+        self.cursor -= 1;
+        self.text.remove(self.cursor);
+        Typed::Changed
+    }
+
+    fn done(&self) -> Typed {
+        Typed::Done(self.text.iter().collect())
+    }
+
+    fn centre(&self, row: usize, col: usize) -> f32 {
+        let [x, _, w, _] = key_rect(Canvas::FRAMED, self.layout, row, col);
+        x + w / 2.0
+    }
+
+    fn nearest(&self, row: usize, x: f32) -> usize {
+        (0..self.rows()[row].len())
+            .min_by(|a, b| {
+                let off = |c: usize| (self.centre(row, c) - x).abs();
+                off(*a).total_cmp(&off(*b))
+            })
+            .unwrap_or(0)
+    }
+
+    fn navigate(&mut self, b: Btn) {
+        let rows = self.rows();
+        let n = rows.len();
+        match b {
+            Btn::Up | Btn::Down => {
+                let x = self.aim.unwrap_or_else(|| self.centre(self.row, self.col));
+                self.row = match b {
+                    Btn::Up => (self.row + n - 1) % n,
+                    _ => (self.row + 1) % n,
+                };
+                self.col = self.nearest(self.row, x);
+                self.aim = Some(x);
             }
-            Key::Special(Special::Done) => return self.finish(),
-        }
-        KeyOutcome::Typing
-    }
-
-    fn type_char(&mut self, ch: char) {
-        if self.text.chars().count() >= self.max {
-            return;
-        }
-        self.text.push(ch);
-        if self.page == Page::Shifted {
-            self.page = Page::Lower;
-        }
-    }
-
-    fn shift(&mut self) {
-        self.page = match self.page {
-            Page::Lower => Page::Shifted,
-            Page::Shifted => Page::Caps,
-            Page::Caps => Page::Lower,
-            Page::Symbols => Page::Symbols,
-        };
-    }
-
-    fn flip_page(&mut self) {
-        self.page = match self.page {
-            Page::Symbols => Page::Lower,
-            _ => Page::Symbols,
-        };
-    }
-
-    fn finish(&self) -> KeyOutcome {
-        match self.ready() {
-            true => KeyOutcome::Done(self.text.clone()),
-            false => KeyOutcome::Typing,
-        }
-    }
-
-    fn special_label(&self, special: Special) -> &'static str {
-        match special {
-            Special::Shift => match self.page {
-                Page::Caps => "CAPS",
-                _ => "SHIFT",
-            },
-            Special::Page => match self.page {
-                Page::Symbols => "abc",
-                _ => "#+=",
-            },
-            Special::Space => "space",
-            Special::Delete => "del",
-            Special::Done => "OK",
-        }
-    }
-
-    /// The whole keyboard as one picture: the title, the field with its caret, the keys with the
-    /// cursor's lit, and a line of what the buttons do.
-    pub fn face(&self) -> UndoFace {
-        let mut rgba = vec![0u8; (FACE_W * FACE_H * 4) as usize];
-        label_into(
-            &mut rgba,
-            FACE_W,
-            (0, 0, FACE_W, TITLE_H),
-            &self.title,
-            DIM,
-            20.0,
-            true,
-        );
-        self.draw_field(&mut rgba);
-        for row in 0..ROWS {
-            let y = KEYS_Y + row as u32 * (KEY_H + GAP);
-            let keys: Vec<(Key, usize, usize)> = match row == ROWS - 1 {
-                true => BOTTOM
-                    .iter()
-                    .map(|(s, at, w)| (Key::Special(*s), *at, *w))
-                    .collect(),
-                false => (0..COLS).map(|c| (self.key_at(row, c), c, 1)).collect(),
-            };
-            for (key, at, span) in keys {
-                let lit = row == self.row && (at..at + span).contains(&self.col);
-                let x = at as u32 * (KEY_W + GAP);
-                let w = span as u32 * KEY_W + (span as u32 - 1) * GAP;
-                let lit_special = match key {
-                    Key::Special(Special::Shift) => matches!(self.page, Page::Shifted | Page::Caps),
-                    Key::Special(Special::Done) => self.ready(),
-                    _ => false,
-                };
-                let (fill, ink) = match (lit, lit_special) {
-                    (true, _) => (LIT, LIT_INK),
-                    (false, true) => (ARMED, INK),
-                    (false, false) => (KEY, INK),
-                };
-                rounded(&mut rgba, FACE_W, (x, y, w, KEY_H), RADIUS, fill);
-                let label = match key {
-                    Key::Char(ch) => ch.to_string(),
-                    Key::Special(s) => self.special_label(s).to_string(),
-                };
-                label_into(
-                    &mut rgba,
-                    FACE_W,
-                    (x, y, w, KEY_H),
-                    &label,
-                    ink,
-                    KEY_PX,
-                    false,
-                );
+            Btn::Left => {
+                let len = rows[self.row].len();
+                self.col = (self.col + len - 1) % len;
+                self.aim = None;
+            }
+            _ => {
+                self.col = (self.col + 1) % rows[self.row].len();
+                self.aim = None;
             }
         }
-        let mut legends = vec![
-            Legend::new(ButtonLegend::B, "Delete"),
-            Legend::new(ButtonLegend::Y, "Space"),
-            Legend::new(ButtonLegend::X, "Shift"),
-            Legend::pair(ButtonLegend::L1, ButtonLegend::R1, "Symbols"),
-        ];
-        if self.secret {
-            legends.push(Legend::new(ButtonLegend::Select, "Show"));
-        }
-        legends.push(Legend::new(ButtonLegend::Start, "Done"));
-        legends.push(Legend::new(ButtonLegend::Menu, "Cancel"));
-        legends_into(
-            &mut rgba,
-            FACE_W,
-            (0, FACE_H - HINTS_H, FACE_W, HINTS_H),
-            &legends,
-            INK,
-        );
-        UndoFace {
-            rgba,
-            w: FACE_W,
-            h: FACE_H,
-        }
     }
 
-    fn draw_field(&self, rgba: &mut [u8]) {
-        let (x, y, w, h) = (0, FIELD_Y, FACE_W, FIELD_H);
-        rounded(rgba, FACE_W, (x, y, w, h), RADIUS, FIELD);
-        let Some(font) = text::label_font() else {
-            return;
-        };
-        let room = (w - 2 * FIELD_PAD) as f32;
-        // Keep the end of a long line in view: that is where the typing is.
-        let mut shown = self.shown();
-        while shown.chars().count() > 1
-            && text::line_width(font, &shown, FIELD_PX, 0.0) > room - CARET_W as f32
-        {
-            shown.remove(0);
+    pub fn on_delete(&self) -> bool {
+        self.rows()[self.row][self.col] == Cap::Special(Delete)
+    }
+
+    pub fn press(&mut self, b: Btn) -> Typed {
+        if self.help {
+            if !matches!(b, Btn::B | Btn::Menu) {
+                return Typed::Nothing;
+            }
+            self.help = false;
+            return Typed::Changed;
         }
-        let layout = text::Layout {
-            lines: vec![format!("{shown}|")],
-            px: FIELD_PX,
-            tracking: 0.0,
-        };
-        let mut band = vec![0u8; ((w - 2 * FIELD_PAD) * h * 4) as usize];
-        let cov = text::coverage(w - 2 * FIELD_PAD, h, &layout);
-        let text_w = text::line_width(font, &layout.lines[0], FIELD_PX, 0.0);
-        // `coverage` centres the line; slide it to the left edge of the field.
-        let shift = ((room - text_w) / 2.0).max(0.0) as u32;
-        let bw = w - 2 * FIELD_PAD;
-        for row in 0..h {
-            for col in 0..bw {
-                let from = col + shift;
-                if from >= bw {
-                    continue;
+        let general = self.layout != KeyLayout::Numeric;
+        match b {
+            Btn::Up | Btn::Down | Btn::Left | Btn::Right => {
+                self.navigate(b);
+                Typed::Changed
+            }
+            Btn::A => match self.rows()[self.row][self.col] {
+                Cap::Char(i) => self.insert(self.value(i)),
+                Cap::Special(Delete) => self.backspace(),
+                Cap::Special(Done) => self.done(),
+                Cap::Special(Shift) => {
+                    self.shift = !self.shift;
+                    Typed::Changed
                 }
-                let a = cov[(row * bw + from) as usize];
-                let at = ((row * bw + col) * 4) as usize;
-                band[at..at + 4].copy_from_slice(&[INK[0], INK[1], INK[2], a]);
+                Cap::Special(Symbols) => {
+                    self.symbols = !self.symbols;
+                    Typed::Changed
+                }
+                Cap::Special(Space) => self.insert(' '),
+            },
+            Btn::B => self.backspace(),
+            Btn::X if general => self.insert(' '),
+            Btn::Select if general => {
+                self.shift = !self.shift;
+                Typed::Changed
             }
+            Btn::Y => Typed::Cancelled,
+            Btn::Start => self.done(),
+            Btn::L1 if self.cursor > 0 => {
+                self.cursor -= 1;
+                Typed::Changed
+            }
+            Btn::R1 if self.cursor < self.text.len() => {
+                self.cursor += 1;
+                Typed::Changed
+            }
+            Btn::Menu => {
+                self.help = true;
+                Typed::Help
+            }
+            _ => Typed::Nothing,
         }
-        over(rgba, FACE_W, &band, bw, h, x + FIELD_PAD, y);
     }
 }
 
-pub const FACE_W: u32 = 680;
-pub const FACE_H: u32 = 440;
-const TITLE_H: u32 = 32;
-const FIELD_Y: u32 = 40;
-const FIELD_H: u32 = 52;
-const FIELD_PAD: u32 = 16;
-const FIELD_PX: f32 = 26.0;
-const CARET_W: u32 = 10;
-const KEYS_Y: u32 = 108;
-const KEY_W: u32 = 62;
-const KEY_H: u32 = 52;
-const GAP: u32 = 7;
-const RADIUS: u32 = 8;
-const KEY_PX: f32 = 22.0;
-const HINTS_H: u32 = 40;
+pub type KeyTex = (TexId, u32, u32);
 
-const KEY: [u8; 4] = [0x2c, 0x2c, 0x32, 0xf0];
-const ARMED: [u8; 4] = [0x4a, 0x4a, 0x56, 0xf8];
-const FIELD: [u8; 4] = [0x22, 0x22, 0x28, 0xf0];
+pub struct KeyboardFaces {
+    pub title: UndoFace,
+    pub subtitle: Option<UndoFace>,
+    pub text: UndoFace,
+    pub stops: Vec<f32>,
+    pub caps: Vec<Vec<[UndoFace; 2]>>,
+    pub help: UndoFace,
+    pub help_title: UndoFace,
+    pub help_back: UndoFace,
+    pub legends: [UndoFace; 2],
+}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub struct KeyboardTex {
+    pub title: KeyTex,
+    pub subtitle: Option<KeyTex>,
+    pub text: KeyTex,
+    pub stops: Vec<f32>,
+    pub caps: Vec<Vec<[KeyTex; 2]>>,
+    pub help: KeyTex,
+    pub help_title: KeyTex,
+    pub help_back: KeyTex,
+    pub legends: [KeyTex; 2],
+}
 
-    fn typed(k: &mut Keyboard, keys: &[KeyInput]) -> KeyOutcome {
-        let mut last = KeyOutcome::Typing;
-        for key in keys {
-            last = k.press(*key);
-        }
-        last
-    }
-
-    #[test]
-    fn it_opens_on_the_first_letter_and_types_it() {
-        let mut k = Keyboard::new("Password", "", true, 0, 63);
-        assert_eq!(k.key(), Key::Char('q'));
-        k.press(KeyInput::Pick);
-        assert_eq!(k.text(), "q");
-    }
-
-    #[test]
-    fn the_cursor_wraps_round_every_edge() {
-        let mut k = Keyboard::new("", "", false, 0, 63);
-        k.press(KeyInput::Left);
-        assert_eq!(
-            k.key(),
-            Key::Char('p'),
-            "left off the first key did not wrap"
-        );
-        k.press(KeyInput::Up);
-        k.press(KeyInput::Up);
-        assert_eq!(
-            k.cursor().0,
-            4,
-            "up off the digits did not wrap to the bottom row"
-        );
-        k.press(KeyInput::Down);
-        assert_eq!(k.cursor().0, 0);
-    }
-
-    #[test]
-    fn the_bottom_row_steps_key_by_key_and_keeps_the_column_going_up() {
-        let mut k = Keyboard::new("", "", false, 0, 63);
-        for _ in 0..4 {
-            k.press(KeyInput::Right);
-        }
-        k.press(KeyInput::Down);
-        k.press(KeyInput::Down);
-        k.press(KeyInput::Down);
-        assert_eq!(
-            k.key(),
-            Key::Special(Special::Space),
-            "column 4 is not over space"
-        );
-        k.press(KeyInput::Right);
-        assert_eq!(k.key(), Key::Special(Special::Delete));
-        k.press(KeyInput::Right);
-        assert_eq!(k.key(), Key::Special(Special::Done));
-        k.press(KeyInput::Right);
-        assert_eq!(
-            k.key(),
-            Key::Special(Special::Shift),
-            "the bottom row did not wrap"
-        );
-        k.press(KeyInput::Up);
-        assert_eq!(k.key(), Key::Char('z'));
-    }
-
-    #[test]
-    fn shift_is_once_then_caps_then_off() {
-        let mut k = Keyboard::new("", "", false, 0, 63);
-        k.press(KeyInput::Shift);
-        assert_eq!(k.key(), Key::Char('Q'));
-        typed(&mut k, &[KeyInput::Pick, KeyInput::Pick]);
-        assert_eq!(k.text(), "Qq", "shift did not drop back after one letter");
-        typed(
-            &mut k,
-            &[
-                KeyInput::Shift,
-                KeyInput::Shift,
-                KeyInput::Pick,
-                KeyInput::Pick,
-            ],
-        );
-        assert_eq!(k.text(), "QqQQ", "caps lock did not hold");
-        k.press(KeyInput::Shift);
-        k.press(KeyInput::Pick);
-        assert_eq!(k.text(), "QqQQq");
-    }
-
-    #[test]
-    fn the_symbols_page_holds_every_printable_symbol_with_the_letters_page() {
-        let all: String = LETTERS.concat() + &SYMBOLS.concat();
-        for ch in (0x21u8..0x7f)
-            .map(char::from)
-            .filter(|c| !c.is_ascii_alphanumeric())
-        {
-            assert!(all.contains(ch), "{ch:?} cannot be typed");
-        }
-        for row in LETTERS.iter().chain(SYMBOLS.iter()) {
-            assert_eq!(row.chars().count(), COLS, "{row:?} is not a full row");
+impl KeyboardFaces {
+    pub fn upload(&self, mut create: impl FnMut(&UndoFace) -> TexId) -> KeyboardTex {
+        let mut tex = |f: &UndoFace| (create(f), f.w, f.h);
+        KeyboardTex {
+            title: tex(&self.title),
+            subtitle: self.subtitle.as_ref().map(&mut tex),
+            text: tex(&self.text),
+            stops: self.stops.clone(),
+            caps: self
+                .caps
+                .iter()
+                .map(|row| row.iter().map(|[a, b]| [tex(a), tex(b)]).collect())
+                .collect(),
+            help: tex(&self.help),
+            help_title: tex(&self.help_title),
+            help_back: tex(&self.help_back),
+            legends: [tex(&self.legends[0]), tex(&self.legends[1])],
         }
     }
+}
 
-    #[test]
-    fn b_deletes_and_never_cancels() {
-        let mut k = Keyboard::new("", "abc", true, 0, 63);
-        assert_eq!(k.press(KeyInput::Delete), KeyOutcome::Typing);
-        assert_eq!(k.text(), "ab");
-        typed(
-            &mut k,
-            &[KeyInput::Delete, KeyInput::Delete, KeyInput::Delete],
-        );
-        assert_eq!(k.text(), "", "delete past the start broke something");
-        assert_eq!(k.press(KeyInput::Cancel), KeyOutcome::Cancelled);
+const TITLE_Y: f32 = 20.0;
+const SUBTITLE_Y: f32 = 60.0;
+const SUBTITLE_PX: f32 = 16.0;
+const ALERT_PX: f32 = 18.0;
+const SUBTITLE_H: u32 = 24;
+const FIELD_X: f32 = 60.0;
+const FIELD_Y: f32 = 104.0;
+const FIELD_PX: f32 = 30.0;
+const FIELD_H: u32 = 40;
+const CARET_W: f32 = 2.0;
+const CARET_GAP: f32 = 2.0;
+const CARET_INSET: f32 = 6.0;
+const RULE_X: f32 = 52.0;
+const RULE_Y: f32 = 149.0;
+const RULE_H: f32 = 2.0;
+const GRID_Y: f32 = 170.0;
+const ROW_PITCH: f32 = 50.0;
+const KEY_H: u32 = 44;
+const KEY_W: u32 = 50;
+const KEY_GAP: u32 = 6;
+const KEY_MARGIN: f32 = 24.0;
+const HELP_COLUMN_GAP: u32 = 40;
+const HELP_ROW_GAP: u32 = 6;
+const HELP_LABEL_GAP: u32 = 18;
+const HELP_EDGE: f32 = 16.0;
+const HELP_BACK_HINT: (&str, &str) = ("B", "Back");
+const ROW_KEYS: u32 = 12;
+const SPACE_W: u32 = 300;
+const KEY_R: f32 = 7.0;
+const CAP_PX: f32 = 24.0;
+const WORD_PX: f32 = 16.0;
+const ICON_PX: f32 = 28.0;
+const TILE: [u8; 4] = [0x12, 0x12, 0x14, 0xb8];
+const CHOSEN: [u8; 4] = [0xf0, 0xf0, 0xee, 0xff];
+const CHOSEN_INK: [u8; 3] = [0x18, 0x18, 0x1a];
+
+fn key_w(canvas: Canvas) -> u32 {
+    let room = canvas.w - 2.0 * KEY_MARGIN - ((ROW_KEYS - 1) * KEY_GAP) as f32;
+    ((room / ROW_KEYS as f32).floor() as u32).min(KEY_W)
+}
+
+fn cap_width(cap: Cap, key_w: u32) -> u32 {
+    match cap {
+        Cap::Char(_) => key_w,
+        Cap::Special(Space) => SPACE_W,
+        Cap::Special(_) => 2 * key_w + KEY_GAP,
     }
+}
 
-    #[test]
-    fn done_waits_for_the_shortest_text_it_takes() {
-        let mut k = Keyboard::new("", "short", true, 8, 63);
-        assert_eq!(
-            k.press(KeyInput::Done),
-            KeyOutcome::Typing,
-            "a 5 letter WPA key went"
-        );
-        typed(&mut k, &[KeyInput::Pick, KeyInput::Pick, KeyInput::Pick]);
-        assert_eq!(k.press(KeyInput::Done), KeyOutcome::Done("shortqqq".into()));
+fn block_width(layout: KeyLayout, key_w: u32) -> f32 {
+    layout_rows(layout)
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|c| cap_width(*c, key_w) + KEY_GAP)
+                .sum::<u32>()
+                - KEY_GAP
+        })
+        .max()
+        .unwrap_or(0) as f32
+}
+
+fn indent(layout: KeyLayout, row: usize, key_w: u32) -> f32 {
+    let pitch = (key_w + KEY_GAP) as f32;
+    match (layout, row) {
+        (KeyLayout::General | KeyLayout::Host, 1) => pitch,
+        (KeyLayout::General | KeyLayout::Host, 2 | 3) => pitch / 2.0,
+        _ => 0.0,
     }
+}
 
-    #[test]
-    fn nothing_is_typed_past_the_longest_text_it_takes() {
-        let mut k = Keyboard::new("", "", false, 0, 3);
-        for _ in 0..5 {
-            k.press(KeyInput::Pick);
+pub fn key_rect(canvas: Canvas, layout: KeyLayout, row: usize, col: usize) -> [f32; 4] {
+    let caps = layout_rows(layout)[row];
+    let y = GRID_Y + canvas.inset_y() + row as f32 * ROW_PITCH;
+    let kw = key_w(canvas);
+    let w = cap_width(caps[col], kw) as f32;
+    if caps[col] == Cap::Special(Space) {
+        return [canvas.centred(w).round(), y, w, KEY_H as f32];
+    }
+    let left = canvas.centred(block_width(layout, kw)).round() + indent(layout, row, kw);
+    let before: u32 = caps[..col]
+        .iter()
+        .map(|c| cap_width(*c, kw) + KEY_GAP)
+        .sum();
+    [left + before as f32, y, w, KEY_H as f32]
+}
+
+fn blank() -> UndoFace {
+    UndoFace {
+        rgba: Vec::new(),
+        w: 0,
+        h: 0,
+    }
+}
+
+fn plain(line: &str, px: f32) -> text::Layout {
+    text::Layout {
+        lines: vec![line.to_string()],
+        px,
+        tracking: 0.0,
+    }
+}
+
+const LINE_LEAD: f32 = 1.0;
+
+fn line_face(line: &str, px: f32, h: u32, ink: [u8; 3]) -> (UndoFace, f32) {
+    let Some(font) = text::label_font() else {
+        return (blank(), 0.0);
+    };
+    let set = text::line_width(font, line, px, 0.0);
+    let w = set.ceil() as u32 + 2;
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    text::draw_left(&mut rgba, w, h, &plain(line, px), LINE_LEAD, ink);
+    (UndoFace { rgba, w, h }, LINE_LEAD)
+}
+
+pub fn keyboard_text_face(kb: &Keyboard) -> (UndoFace, Vec<f32>) {
+    let typed = kb.text();
+    let shown = match kb.is_masked() {
+        true => {
+            let glyph = text::label_font()
+                .filter(|f| f.lookup_glyph_index('\u{2022}') != 0)
+                .map_or('*', |_| '\u{2022}');
+            (0..typed.chars().count())
+                .map(|_| glyph)
+                .collect::<String>()
         }
-        k.press(KeyInput::Space);
-        assert_eq!(k.text(), "qqq");
+        false => typed,
+    };
+    let (face, lead) = line_face(&shown, FIELD_PX, FIELD_H, MENU_INK);
+    let Some(font) = text::label_font() else {
+        return (face, vec![0.0]);
+    };
+    let mut stops = vec![lead];
+    let mut pen = lead;
+    for ch in shown.chars() {
+        pen += font.metrics(ch, FIELD_PX).advance_width;
+        stops.push(pen);
+    }
+    (face, stops)
+}
+
+fn subtitle_face(label: &str, alert: bool, max_w: f32) -> UndoFace {
+    let Some(font) = text::label_font() else {
+        return blank();
+    };
+    let (px, ink) = match alert {
+        true => (ALERT_PX, MENU_INK),
+        false => (SUBTITLE_PX, DIM_INK),
+    };
+    let layout = text::fit(font, label, max_w, 1, px, 12.0);
+    let set = layout
+        .lines
+        .iter()
+        .map(|l| text::line_width(font, l, layout.px, layout.tracking))
+        .fold(0.0, f32::max);
+    let w = set.ceil() as u32 + 2;
+    let mut rgba = vec![0u8; (w * SUBTITLE_H * 4) as usize];
+    text::draw_centred(&mut rgba, w, SUBTITLE_H, &layout, ink);
+    UndoFace {
+        rgba,
+        w,
+        h: SUBTITLE_H,
+    }
+}
+
+fn tile(w: u32, h: u32, fill: [u8; 4]) -> Vec<u8> {
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    let (fw, fh) = (w as f32, h as f32);
+    for y in 0..h {
+        for x in 0..w {
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            let cx = px.clamp(KEY_R, fw - KEY_R);
+            let cy = py.clamp(KEY_R, fh - KEY_R);
+            let d = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
+            let cover = (KEY_R - d + 0.5).clamp(0.0, 1.0);
+            let at = ((y * w + x) * 4) as usize;
+            rgba[at..at + 3].copy_from_slice(&fill[..3]);
+            rgba[at + 3] = (fill[3] as f32 * cover).round() as u8;
+        }
+    }
+    rgba
+}
+
+fn ink_over(px: &mut [u8], a: u8, ink: [u8; 3]) {
+    let a = a as u32;
+    let under = px[3] as u32 * (255 - a) / 255;
+    let out = a + under;
+    if out == 0 {
+        return;
+    }
+    for c in 0..3 {
+        px[c] = ((ink[c] as u32 * a + px[c] as u32 * under + out / 2) / out) as u8;
+    }
+    px[3] = out as u8;
+}
+
+fn cap_icon(cap: Cap) -> Option<Icon> {
+    match cap {
+        Cap::Special(Delete) => Some(Icon::Backspace),
+        Cap::Special(Done) => Some(Icon::Return),
+        Cap::Special(Shift) => Some(Icon::Shift),
+        Cap::Special(Space) => Some(Icon::Space),
+        _ => None,
+    }
+}
+
+fn cap_face(kb: &Keyboard, cap: Cap, chosen: bool, key_w: u32) -> UndoFace {
+    let (w, h) = (cap_width(cap, key_w), KEY_H);
+    let (fill, ink) = match chosen {
+        true => (CHOSEN, CHOSEN_INK),
+        false => (TILE, MENU_INK),
+    };
+    let mut rgba = tile(w, h, fill);
+    match cap_icon(cap).and_then(|i| icon_coverage(i, ICON_PX)) {
+        Some((cov, iw, ih)) => {
+            let (x0, y0) = (w.saturating_sub(iw) / 2, h.saturating_sub(ih) / 2);
+            for gy in 0..ih.min(h) {
+                for gx in 0..iw.min(w) {
+                    let a = cov[(gy * iw + gx) as usize];
+                    if a > 0 {
+                        let at = (((y0 + gy) * w + x0 + gx) * 4) as usize;
+                        ink_over(&mut rgba[at..at + 4], a, ink);
+                    }
+                }
+            }
+        }
+        None => {
+            let label = kb.label(cap);
+            let px = match label.chars().count() {
+                1 => CAP_PX,
+                _ => WORD_PX,
+            };
+            text::draw_centred(&mut rgba, w, h, &plain(&label, px), ink);
+        }
+    }
+    UndoFace { rgba, w, h }
+}
+
+pub fn keyboard_cap_faces(kb: &Keyboard, canvas: Canvas) -> Vec<Vec<[UndoFace; 2]>> {
+    let kw = key_w(canvas);
+    kb.rows()
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|cap| [cap_face(kb, *cap, false, kw), cap_face(kb, *cap, true, kw)])
+                .collect()
+        })
+        .collect()
+}
+
+fn legend(button: UndoFace, word: &str, button_first: bool, light: bool) -> UndoFace {
+    let word = word_ink(word, footer_ink(light));
+    let w = button.w + CAP_GAP + word.w + HINT_EDGE;
+    let h = button.h;
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    let (button_x, word_x) = match button_first {
+        true => (0, button.w + CAP_GAP),
+        false => (word.w + CAP_GAP, 0),
+    };
+    blit(&mut rgba, w, &button.rgba, button.w, button.h, button_x, 0);
+    let word_y = h.saturating_sub(word.h) / 2;
+    blit(&mut rgba, w, &word.rgba, word.w, word.h, word_x, word_y);
+    UndoFace { rgba, w, h }
+}
+
+pub const KEYBOARD_HELP_TITLE: &str = "Keyboard Help";
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Shortcut {
+    Delete,
+    Space,
+    Shift,
+    Cursor,
+    Cancel,
+    Done,
+}
+
+impl Shortcut {
+    pub fn label(self) -> &'static str {
+        match self {
+            Shortcut::Delete => "Delete",
+            Shortcut::Space => "Space",
+            Shortcut::Shift => "Shift",
+            Shortcut::Cursor => "Cursor",
+            Shortcut::Cancel => "Cancel",
+            Shortcut::Done => "Done",
+        }
     }
 
-    #[test]
-    fn a_secret_is_starred_until_select_shows_it() {
-        let mut k = Keyboard::new("", "hunter22", true, 0, 63);
-        assert_eq!(k.shown(), "********");
-        k.press(KeyInput::Reveal);
-        assert_eq!(k.shown(), "hunter22");
-        let mut name = Keyboard::new("", "home", false, 0, 32);
-        name.press(KeyInput::Reveal);
-        assert_eq!(name.shown(), "home", "a name that is no secret was hidden");
+    fn art(self) -> UndoFace {
+        match self {
+            Shortcut::Delete => button_face(ButtonLegend::B),
+            Shortcut::Space => button_face(ButtonLegend::X),
+            Shortcut::Shift => button_face(ButtonLegend::Select),
+            Shortcut::Cursor => button_pair(ButtonLegend::L1, ButtonLegend::R1),
+            Shortcut::Cancel => button_face(ButtonLegend::Y),
+            Shortcut::Done => button_face(ButtonLegend::Start),
+        }
     }
+}
 
-    #[test]
-    fn the_face_is_drawn_with_its_cursor_lit() {
-        let k = Keyboard::new("Password for home", "abc", true, 8, 63);
-        let face = k.face();
-        assert_eq!((face.w, face.h), (FACE_W, FACE_H));
-        let at = |x: u32, y: u32| &face.rgba[((y * FACE_W + x) * 4) as usize..][..4];
-        // The cursor starts on q, row 1 column 0; its middle is lit.
-        let y = KEYS_Y + KEY_H + GAP + 4;
-        assert_eq!(at(4, y), &LIT, "the lit key is not lit");
-        assert_eq!(at(KEY_W + GAP + 4, y), &KEY, "the key beside it is lit too");
+pub fn keyboard_help_columns(layout: KeyLayout) -> [Vec<Shortcut>; 2] {
+    use Shortcut::*;
+    match layout {
+        KeyLayout::General | KeyLayout::Host => {
+            [vec![Delete, Space, Shift], vec![Cursor, Cancel, Done]]
+        }
+        KeyLayout::Numeric => [vec![Delete, Cursor], vec![Cancel, Done]],
+    }
+}
+
+fn help_rows_face(rows: Vec<(UndoFace, &str)>) -> UndoFace {
+    let rows: Vec<(UndoFace, UndoFace)> = rows
+        .into_iter()
+        .map(|(art, label)| (art, quick_text_face(label, MENU_INK)))
+        .collect();
+    let art_w = rows.iter().map(|(a, _)| a.w).max().unwrap_or(0);
+    let label_w = rows.iter().map(|(_, l)| l.w - MENU_PAD).max().unwrap_or(0);
+    let row_h = rows.iter().map(|(a, l)| a.h.max(l.h)).max().unwrap_or(0);
+    let w = art_w + HELP_LABEL_GAP + label_w;
+    let h = rows.len() as u32 * (row_h + HELP_ROW_GAP) - HELP_ROW_GAP;
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    for (i, (art, label)) in rows.iter().enumerate() {
+        let top = i as u32 * (row_h + HELP_ROW_GAP);
+        blit(
+            &mut rgba,
+            w,
+            &art.rgba,
+            art.w,
+            art.h,
+            art_w - art.w,
+            top + (row_h - art.h) / 2,
+        );
+        let lx = art_w + HELP_LABEL_GAP - MENU_PAD;
+        let cut = label.w.min(w - lx);
+        let mut trimmed = Vec::with_capacity((cut * label.h * 4) as usize);
+        for y in 0..label.h {
+            let from = (y * label.w * 4) as usize;
+            trimmed.extend_from_slice(&label.rgba[from..from + (cut * 4) as usize]);
+        }
+        blit(
+            &mut rgba,
+            w,
+            &trimmed,
+            cut,
+            label.h,
+            lx,
+            top + (row_h - label.h) / 2,
+        );
+    }
+    UndoFace { rgba, w, h }
+}
+
+pub fn keyboard_help_face(layout: KeyLayout) -> UndoFace {
+    let [left, right] = keyboard_help_columns(layout)
+        .map(|column| help_rows_face(column.into_iter().map(|s| (s.art(), s.label())).collect()));
+    let w = left.w + HELP_COLUMN_GAP + right.w;
+    let h = left.h.max(right.h);
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    blit(&mut rgba, w, &left.rgba, left.w, left.h, 0, 0);
+    let x = left.w + HELP_COLUMN_GAP;
+    blit(&mut rgba, w, &right.rgba, right.w, right.h, x, 0);
+    UndoFace { rgba, w, h }
+}
+
+pub fn keyboard_faces(kb: &Keyboard, canvas: Canvas, light: bool) -> KeyboardFaces {
+    let (text, stops) = keyboard_text_face(kb);
+    let max_sub_w = (canvas.w - 32.0).max(160.0);
+    KeyboardFaces {
+        title: heading_face(kb.title()),
+        subtitle: kb
+            .subtitle()
+            .map(|s| subtitle_face(s, kb.alert(), max_sub_w)),
+        text,
+        stops,
+        caps: keyboard_cap_faces(kb, canvas),
+        help: keyboard_help_face(kb.layout()),
+        help_title: title_face(KEYBOARD_HELP_TITLE),
+        help_back: hint_face(HELP_BACK_HINT.0, HELP_BACK_HINT.1),
+        legends: [
+            legend(button_face(ButtonLegend::Y), "Cancel", true, light),
+            legend(button_face(ButtonLegend::Menu), "Help", false, light),
+        ],
+    }
+}
+
+fn place(out: &mut Vec<Draw>, (tex, w, h): KeyTex, x: f32, y: f32) {
+    out.push(Draw::Tex {
+        x: x.round(),
+        y: y.round(),
+        w: w as f32,
+        h: h as f32,
+        tex,
+        alpha: 1.0,
+    });
+}
+
+fn colour(ink: [u8; 3]) -> [f32; 4] {
+    [
+        ink[0] as f32 / 255.0,
+        ink[1] as f32 / 255.0,
+        ink[2] as f32 / 255.0,
+        1.0,
+    ]
+}
+
+fn draw_field(canvas: Canvas, faces: &KeyboardTex, kb: &Keyboard, out: &mut Vec<Draw>) {
+    let room = canvas.w - 2.0 * FIELD_X;
+    let caret = faces
+        .stops
+        .get(kb.cursor())
+        .or(faces.stops.last())
+        .copied()
+        .unwrap_or(0.0);
+    let scroll = (caret + CARET_GAP + CARET_W - room).max(0.0).round();
+    let (tex, tw, th) = faces.text;
+    if tw > 0 {
+        let shown = (tw as f32 - scroll).min(room);
+        out.push(Draw::Part {
+            x: FIELD_X,
+            y: FIELD_Y + canvas.inset_y(),
+            w: shown,
+            h: th as f32,
+            tex,
+            alpha: 1.0,
+            uv: [scroll / tw as f32, 0.0, shown / tw as f32, 1.0],
+        });
+    }
+    out.push(Draw::Rect {
+        x: (FIELD_X + caret + CARET_GAP - scroll).round(),
+        y: FIELD_Y + canvas.inset_y() + CARET_INSET,
+        w: CARET_W,
+        h: FIELD_H as f32 - 2.0 * CARET_INSET,
+        colour: colour(MENU_INK),
+    });
+    out.push(Draw::Rect {
+        x: RULE_X,
+        y: RULE_Y + canvas.inset_y(),
+        w: canvas.w - 2.0 * RULE_X,
+        h: RULE_H,
+        colour: colour(DIM_INK),
+    });
+}
+
+fn draw_help_screen(canvas: Canvas, title: TexId, back: TexId, face: KeyTex, out: &mut Vec<Draw>) {
+    let plate = |y: f32| Draw::Rect {
+        x: 0.0,
+        y,
+        w: canvas.w,
+        h: PLATE_H,
+        colour: PLATE,
+    };
+    out.push(plate(0.0));
+    out.push(Draw::Tex {
+        x: canvas.centred(TITLE_W as f32),
+        y: (PLATE_H - TITLE_H as f32) / 2.0,
+        w: TITLE_W as f32,
+        h: TITLE_H as f32,
+        tex: title,
+        alpha: 1.0,
+    });
+    let top = canvas.h - PLATE_H;
+    out.push(plate(top));
+    let (key, label) = HELP_BACK_HINT;
+    out.push(hint_quad(
+        HELP_EDGE,
+        top + (PLATE_H - HINT_H as f32) / 2.0,
+        hint_width(key, label) as f32,
+        Some(back),
+    ));
+    let (tex, w, h) = face;
+    out.push(Draw::Tex {
+        x: canvas.centred(w as f32).floor(),
+        y: ((canvas.h - h as f32) / 2.0).floor(),
+        w: w as f32,
+        h: h as f32,
+        tex,
+        alpha: 1.0,
+    });
+}
+
+pub fn draw_keyboard(
+    canvas: Canvas,
+    ground: Option<TexId>,
+    faces: &KeyboardTex,
+    kb: &Keyboard,
+    out: &mut Vec<Draw>,
+) {
+    if kb.help() {
+        out.push(Draw::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: canvas.w,
+            h: canvas.h,
+            colour: [0.0, 0.0, 0.0, 1.0],
+        });
+        return draw_help_screen(
+            canvas,
+            faces.help_title.0,
+            faces.help_back.0,
+            faces.help,
+            out,
+        );
+    }
+    draw_menu_ground(canvas, ground, out);
+    place(
+        out,
+        faces.title,
+        canvas.centred(faces.title.1 as f32),
+        TITLE_Y + canvas.inset_y(),
+    );
+    if let Some(sub) = faces.subtitle {
+        place(
+            out,
+            sub,
+            canvas.centred(sub.1 as f32),
+            SUBTITLE_Y + canvas.inset_y(),
+        );
+    }
+    draw_field(canvas, faces, kb, out);
+    for (r, row) in faces.caps.iter().enumerate() {
+        for (c, pair) in row.iter().enumerate() {
+            let chosen = (r, c) == (kb.row(), kb.col());
+            let [x, y, _, _] = key_rect(canvas, kb.layout(), r, c);
+            place(out, pair[chosen as usize], x, y);
+        }
+    }
+}
+
+pub fn draw_keyboard_legends(canvas: Canvas, faces: &KeyboardTex, out: &mut Vec<Draw>) {
+    let y = canvas.h - MOUTH_H;
+    let [(cancel, cw, _), (done, dw, _)] = faces.legends;
+    for (tex, w, x) in [
+        (cancel, cw, 0.0),
+        (
+            done,
+            dw,
+            (canvas.w - dw.saturating_sub(HINT_EDGE) as f32).round(),
+        ),
+    ] {
+        out.push(Draw::Tex {
+            x,
+            y,
+            w: w as f32,
+            h: MOUTH_H,
+            tex,
+            alpha: 1.0,
+        });
     }
 }

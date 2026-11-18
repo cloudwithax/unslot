@@ -11,6 +11,8 @@ pub const DIR: &str = "Ports";
 pub const QUEUE: &str = ".unslot-port";
 /// The script that runs a DS game in DraStic, which slot quits for as it does for a port.
 pub const DRASTIC: &str = "System/drastic/launch.sh";
+/// The script that runs a PSP game in standalone PPSSPP-SDL, which slot quits for as it does for a port.
+pub const PPSSPP: &str = "System/ppsspp/launch.sh";
 
 /// The scripts in `Ports`, in name order.
 pub fn scripts(root: &Path) -> Vec<PathBuf> {

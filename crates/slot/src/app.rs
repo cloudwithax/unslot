@@ -1,26 +1,29 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use slot_gfx::{Canvas, Layout, OUT_H, OUT_W};
+use slot_gfx::{Canvas, GameLayout, Layout, ShaderParam, Sizing, OUT_H, OUT_W};
 use slot_input::{Action, Btn, MENU_DOUBLE_TAP_MS, MUTE_CHORD_MS};
 use slot_power::{Battery, Charge, LedState, LidPolicy, Power};
 use slot_retro::{CoreOption, LinkChannel};
 use slot_store::{
-    format_stamp, parse_stamp, read_slot_state, scan, write_slot_state, Appearance, BatteryDisplay,
-    BezelPick, Blending, Cart, Core, GbPalette, Platform, Recent, Shader, SlotState, StateEntry,
-    StateRing, WallpaperPick, WallpaperTint, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, CONTRAST_MAX, DIM_MAX,
+    format_stamp, parse_stamp, read_esrb_map, read_kiosk_config, read_manual_esrb_map,
+    read_slot_state, scan, write_kiosk_config, write_manual_esrb, write_slot_state, Appearance,
+    BatteryDisplay, BezelPick, Blending, Cart, Core, Esrb, GbPalette, KioskAuth, KioskConfig,
+    Platform, Recent, Scale, Shader, SlotState, StateEntry, StateRing, Stretch, WallpaperPick,
+    WallpaperTint, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, BRIGHTNESS_MIN, CONTRAST_MAX, DIM_MAX,
     FF_SPEEDS, RING_MAX, RUN_AHEAD_MAX, SATURATION_MAX, VOLUME_MAX,
 };
 use slot_ui::{
     board_from, board_zoom, centred_hints, draw_empty_slot, draw_footer, draw_ground,
-    draw_slot_name, draw_sticker, ease, footer_ink, grown, lid_at, lid_from, lift_of, on_board,
-    repeat_gap, shelf_cart_at, shift_down, ButtonLegend, ClockPicker, Draw, FfState, Hud, HudKind,
-    Icon, KeyInput, KeyOutcome, Keyboard, Legend, LinkBadge, ListIcon, ListPage, ListRow, Media,
-    Millis, Mould, PicturePage, Placed, Polaroids, PowerChoice, QrPage, QuickMenu, QuickMenuFaces,
-    QuickRow, QuickValue, Refusal, Shelf, SlotChrome, TexId, TextPage, Toast, CART_W, CHIP_H,
-    CHIP_U, CHIP_V, CHIP_W, HINT_EDGE, HOP_LIFT, MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W,
-    SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W, TURN_PAD,
+    draw_keyboard, draw_keyboard_legends, draw_slot_name, draw_slot_name_above, draw_sticker, ease,
+    footer_ink, grown, lid_at, lid_from, lift_of, on_board, repeat_gap, shelf_cart_at, shift_down,
+    BezelArt, ButtonLegend, ClockPicker, Draw, FfState, Hud, HudKind, Icon, KeyLayout, Keyboard,
+    KeyboardTex, Legend, LinkBadge, ListIcon, ListPage, ListRow, Media, Millis, Mould, PicturePage,
+    Placed, Polaroids, PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow, QuickValue,
+    Refusal, Shelf, SlotChrome, TexId, TextPage, Toast, Typed, CART_W, CHIP_H, CHIP_U, CHIP_V,
+    CHIP_W, HINT_EDGE, HOP_LIFT, MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U,
+    SOCKET_V, SOCKET_W, TURN_PAD,
 };
 
 use crate::apps::music::Music;
@@ -31,13 +34,14 @@ use crate::cast::{Cast, CastBusy, CastView};
 use crate::core_downloads::{CoreDownloads, CoresView};
 use crate::core_picker::{Chip, CorePicker, Outcome, Press};
 use crate::input::remap::{self, Remap, Scope};
+use crate::kiosk::{self, KioskMainRow, KioskPage};
 use crate::link_kind::{link_carried, link_kind, serial_option, LinkKind};
 use crate::link_radio::{radio_jobs, LinkRole, RadioJob, RadioJobs};
 use crate::link_screen::LinkSprites;
 use crate::link_start::{link_port, LinkFail, LinkProgress, LinkStarter, LinkStep};
 use crate::loading_mark::LoadingMark;
 use crate::persist::{self, Snapshot};
-use crate::scrape::{ScrapeView, Scraper, SsState};
+use crate::scrape::{EsrbScraper, EsrbView, ScrapeView, Scraper, SsState};
 use crate::services::{Services, ServicesView, SyncProgress, Tailnet, Wanted};
 use crate::update::{Part, Stage, Track, Updates, UpdatesView};
 use crate::upload::{Landed, Upload};
@@ -296,6 +300,17 @@ struct Controls {
     own: bool,
 }
 
+/// Adjustable `#pragma parameter` list for a platform's active custom shader.
+struct ShaderParamsModal {
+    platform: Platform,
+    shader: String,
+    params: Vec<ShaderParam>,
+    values: Vec<f32>,
+    cursor: usize,
+}
+
+type ShaderParamCache = Mutex<HashMap<String, (Option<std::time::SystemTime>, Vec<ShaderParam>)>>;
+
 impl Controls {
     /// The scope, a row for each of the game's buttons, and Reset.
     const ROWS: usize = remap::BUTTONS.len() + 2;
@@ -393,6 +408,12 @@ pub enum Phase {
     Search {
         cursor: usize,
     },
+    /// Kiosk settings and manual ESRB editor.
+    Kiosk {
+        page: KioskPage,
+    },
+    /// RetroAchievements 3D Trophy Room and Game Set selector.
+    Trophies(crate::trophies::TrophyState),
     /// Typing for the network or services page, which it goes back to at `cursor`.
     Keyboard {
         keys: Keyboard,
@@ -423,6 +444,12 @@ pub enum Typing {
     Search {
         again: bool,
     },
+    /// PIN or password prompt to unlock Kiosk Mode.
+    KioskUnlock,
+    /// Setting Kiosk PIN or password; `activate` immediately locks when confirmed.
+    KioskSetSecret {
+        activate: bool,
+    },
 }
 
 /// A row on the services page.
@@ -451,7 +478,6 @@ impl ServiceRow {
 #[derive(Clone, PartialEq, Debug)]
 pub enum PageModel {
     List(ListPage),
-    Keys(Keyboard),
     Qr(QrPage),
     Text(TextPage),
     Picture(PicturePage),
@@ -628,6 +654,10 @@ pub struct App {
     game_cast: Option<usize>,
     /// The Controls page, from the Gameplay page or over a game.
     controls: Option<Controls>,
+    /// The Shader Parameters page, from a system's Screen page or in-game Play Screen.
+    shader_params: Option<ShaderParamsModal>,
+    shader_params_cache: ShaderParamCache,
+    shader_params_rev: u64,
     /// The map for the game in the slot and the game it is for, until a map changes.
     remap: Option<(Option<Scope>, Remap)>,
     /// 0 while the pause footer is off the bottom, 1 when it sits in the carousel's place.
@@ -648,6 +678,7 @@ pub struct App {
     slot_faces: Option<(TexId, TexId)>,
     shelf_platform: slot_ui::Printed,
     shelf_title: slot_ui::Printed,
+    shelf_note: slot_ui::Printed,
     slot_name: SlotName,
     slot_letter: Option<char>,
     shelf_clock: slot_ui::Printed,
@@ -712,6 +743,12 @@ pub struct App {
     cores_view: CoresView,
     scraper: Option<Scraper>,
     scrape_view: ScrapeView,
+    all_carts: Vec<Cart>,
+    kiosk: KioskConfig,
+    esrb: HashMap<(Platform, String), Esrb>,
+    esrb_manual: HashMap<(Platform, String), Esrb>,
+    esrb_scraper: Option<EsrbScraper>,
+    esrb_view: EsrbView,
     /// The last search: what was typed, and the games it found by system and file name.
     search: Option<Search>,
     /// Each found game's picture for the results page, made as its row comes into view.
@@ -724,6 +761,10 @@ pub struct App {
     /// Whether Game Art can ask ScreenScraper, read at boot and after a sign in.
     ss_state: SsState,
     page_face: Option<(TexId, u32, u32)>,
+    keyboard_tex: Option<KeyboardTex>,
+    trophy_textures: Option<slot_ui::TrophyTextures>,
+    /// The trophy room's carousel of the scope's games, which the face builder fills.
+    trophy_shelf: slot_ui::Shelf,
     /// How many files Syncthing had in step when the card's games were last looked through.
     synced_seen: u64,
     /// A look through the card's games under way, whether another is wanted when it is done,
@@ -774,6 +815,9 @@ struct Feel {
 const FACE_AHEAD: i32 = 8;
 const FACE_KEEP: i32 = 12;
 
+/// The face builder's name for the trophy room's carousel, which is not one of `shelves`.
+pub const TROPHY_SHELF: usize = usize::MAX;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct FaceWant {
     pub shelf: usize,
@@ -817,6 +861,7 @@ pub fn sync_line(p: SyncProgress) -> String {
 
 impl App {
     pub fn new(carts: Vec<Cart>) -> Self {
+        let all_carts = carts.clone();
         let shelves = shelves_of(carts);
         // The apps are no game to come up on.
         let shelf_at = shelves
@@ -911,6 +956,9 @@ impl App {
             core_option_pending: None,
             game_cast: None,
             controls: None,
+            shader_params: None,
+            shader_params_cache: Mutex::new(HashMap::new()),
+            shader_params_rev: 0,
             remap: None,
             footer: 0.0,
             footer_row: None,
@@ -928,6 +976,7 @@ impl App {
             slot_faces: None,
             shelf_platform: slot_ui::Printed::default(),
             shelf_title: slot_ui::Printed::default(),
+            shelf_note: slot_ui::Printed::default(),
             slot_name: SlotName::Idle,
             slot_letter: None,
             shelf_clock: slot_ui::Printed::default(),
@@ -977,12 +1026,21 @@ impl App {
             cores_view: CoresView::default(),
             scraper: None,
             scrape_view: ScrapeView::default(),
+            all_carts,
+            kiosk: KioskConfig::default(),
+            esrb: HashMap::new(),
+            esrb_manual: HashMap::new(),
+            esrb_scraper: None,
+            esrb_view: EsrbView::default(),
             search: None,
             search_icons: HashMap::new(),
             labelled: 0,
             relabelled: Vec::new(),
             ss_state: SsState::Off,
             page_face: None,
+            keyboard_tex: None,
+            trophy_textures: None,
+            trophy_shelf: slot_ui::Shelf::new(Vec::new()),
             synced_seen: 0,
             rescan: Rescan::Idle,
             rescanned: None,
@@ -1033,6 +1091,13 @@ impl App {
         app.core_downloads = Some(CoreDownloads::for_card(root));
         app.scraper = Some(Scraper::for_card(root));
         app.ss_state = crate::scrape::ss_state(root);
+        app.kiosk = read_kiosk_config(root);
+        app.esrb = read_esrb_map(root);
+        app.esrb_manual = read_manual_esrb_map(root);
+        app.esrb_scraper = Some(EsrbScraper::for_card(root));
+        if app.kiosk.active {
+            app.apply_kiosk_filter();
+        }
         app.restock_recents();
         app.restock_favorites();
         if let Some((at, i)) = app.remembered_seat() {
@@ -1067,13 +1132,14 @@ impl App {
                     .or_else(|| self.seat_of(&stem, platform))
             })
         };
-        // A DS game is left on the shelf, or slot would quit for DraStic again each time it ends.
+        // Standalone DS/PSP games are left on the shelf, or slot would quit for DraStic/PPSSPP
+        // again each time the game ends.
         let seated = seated.filter(|&(at, i)| {
             self.shelves[at]
                 .1
                 .carts
                 .get(i)
-                .is_none_or(|c| c.platform != Platform::Nds)
+                .is_none_or(|c| !matches!(c.platform, Platform::Nds | Platform::Psp))
         });
         self.phase = Phase::Shelf;
         match seated {
@@ -1177,6 +1243,13 @@ impl App {
                     self.held_dir = Some((b, self.now() + REPEAT_DELAY_MS, 0));
                 }
             }
+            Action::GbaDown(b @ (Btn::A | Btn::B | Btn::L1 | Btn::R1))
+                if matches!(self.phase, Phase::Keyboard { .. }) =>
+            {
+                if self.held_dir.map(|(held, ..)| held) != Some(b) {
+                    self.held_dir = Some((b, self.now() + REPEAT_DELAY_MS, 0));
+                }
+            }
             Action::GbaUp(b) if self.held_dir.is_some_and(|(held, ..)| held == b) => {
                 self.held_dir = None;
             }
@@ -1201,11 +1274,21 @@ impl App {
 
     fn repeats(&self, btn: Btn) -> bool {
         let vertical = matches!(btn, Btn::Up | Btn::Down);
+        let direction = vertical || matches!(btn, Btn::Left | Btn::Right);
         if self.game_menu.is_some() {
             return false;
         }
+        if self.shader_params.is_some() {
+            return direction;
+        }
+        if let Phase::Keyboard { keys, .. } = &self.phase {
+            return !keys.help() && (btn != Btn::A || keys.on_delete());
+        }
+        if !direction {
+            return false;
+        }
         match self.phase {
-            Phase::SetClock { .. } | Phase::Keyboard { .. } => true,
+            Phase::SetClock { .. } => true,
             Phase::QuickMenu { .. }
             | Phase::Networks { .. }
             | Phase::Devices { .. }
@@ -1215,7 +1298,15 @@ impl App {
             | Phase::CoreDownloads { .. }
             | Phase::GameArt { .. }
             | Phase::Cores { .. }
-            | Phase::Search { .. } => vertical,
+            | Phase::Search { .. }
+            | Phase::Kiosk { .. } => vertical,
+            Phase::Trophies(ref t) => {
+                if t.picker.is_some() {
+                    vertical
+                } else {
+                    direction
+                }
+            }
             Phase::Shelf => vertical && self.core_picker.is_none(),
             Phase::Polaroids { .. } => !vertical,
             Phase::Playing { .. } => vertical && self.in_game_menu.is_some(),
@@ -1405,13 +1496,24 @@ impl App {
     }
 
     pub fn in_game_hidden(&self) -> Vec<QuickRow> {
-        let no_bezel = self.bezel_choices(self.playing_platform()).len() < 2;
+        let platform = self.playing_platform();
+        let no_bezel = self.bezel_choices(platform).len() < 2;
         let mut hidden = Vec::new();
+        if !self.shader_has_params(platform) {
+            hidden.push(QuickRow::ShaderParams);
+        }
         if !self.palette_live {
             hidden.push(QuickRow::Palette);
         }
-        if no_bezel {
+        // Over the whole screen there is no room left for a bezel.
+        if no_bezel || self.fills_screen(platform) {
             hidden.push(QuickRow::Bezel);
+        }
+        if platform.spec().native || !self.offers_scale(platform) {
+            hidden.push(QuickRow::Scale);
+        }
+        if self.stretch_choices(platform).len() < 2 {
+            hidden.push(QuickRow::Stretch);
         }
         if self.single_cart() {
             hidden.push(QuickRow::ExitGame);
@@ -1448,8 +1550,11 @@ impl App {
         let platform = self.playing_platform();
         match row {
             QuickRow::Shader => QuickRow::ShaderOf(platform),
+            QuickRow::ShaderParams => QuickRow::ShaderParamsOf(platform),
             QuickRow::ColourCorrection => QuickRow::ColourCorrectionOf(platform),
             QuickRow::Bezel => QuickRow::BezelOf(platform),
+            QuickRow::Scale => QuickRow::ScaleOf(platform),
+            QuickRow::Stretch => QuickRow::StretchOf(platform),
             QuickRow::Blending => QuickRow::BlendingOf(platform),
             QuickRow::PlaySaturation => QuickRow::Saturation,
             QuickRow::PlayContrast => QuickRow::Contrast,
@@ -1478,9 +1583,14 @@ impl App {
             QuickRow::BootLogo | QuickRow::Hostname => None,
             QuickRow::Shader
             | QuickRow::ColourCorrection
+            | QuickRow::Scale
+            | QuickRow::Stretch
             | QuickRow::PlaySaturation
             | QuickRow::PlayContrast
             | QuickRow::Blending => self.quick_value(self.playing_row(row)),
+            QuickRow::ShaderParams | QuickRow::ShaderParamsOf(_) => None,
+            QuickRow::ScaleOf(p) => Some(QuickValue::scale(self.drawn_scale(p))),
+            QuickRow::StretchOf(p) => Some(QuickValue::stretch(self.resolved_stretch(p))),
             QuickRow::Saturation => QuickValue::level(self.state.saturation),
             QuickRow::Contrast => QuickValue::level(self.state.contrast),
             QuickRow::FastForward => QuickValue::speed(self.state.ff_speed),
@@ -1566,6 +1676,8 @@ impl App {
             | QuickRow::Cores
             | QuickRow::GameArt
             | QuickRow::Achievements
+            | QuickRow::TrophyRoom
+            | QuickRow::Kiosk
             | QuickRow::Power
             | QuickRow::Restart
             | QuickRow::ShutDown
@@ -1640,6 +1752,186 @@ impl App {
                 screen.shader = builtins[to];
             }
         }
+        self.shader_params_rev = self.shader_params_rev.wrapping_add(1);
+    }
+
+    pub fn shader_params_rev(&self) -> u64 {
+        self.shader_params_rev
+    }
+
+    pub fn shader_param_specs(&self, platform: Platform) -> Vec<ShaderParam> {
+        let Some(name) = self.custom_shader(platform) else {
+            return Vec::new();
+        };
+        let Some(root) = self.root() else {
+            return Vec::new();
+        };
+        let mtime = root
+            .join(crate::shader::DIR)
+            .join(name)
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok());
+        let mut cache = self
+            .shader_params_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((cached_mtime, params)) = cache.get(name) {
+            if *cached_mtime == mtime {
+                return params.clone();
+            }
+        }
+        let params = crate::shader::load(root, name)
+            .map(|l| l.parameters)
+            .unwrap_or_default();
+        cache.insert(name.to_owned(), (mtime, params.clone()));
+        params
+    }
+
+    pub fn shader_has_params(&self, platform: Platform) -> bool {
+        !self.shader_param_specs(platform).is_empty()
+    }
+
+    pub fn shader_param_overrides(&self, platform: Platform) -> Vec<(String, f32)> {
+        let Some(name) = self.custom_shader(platform) else {
+            return Vec::new();
+        };
+        let Some(root) = self.root() else {
+            return Vec::new();
+        };
+        let params = self.shader_param_specs(platform);
+        if params.is_empty() {
+            return Vec::new();
+        }
+        crate::shader::read_values(root, name, &params)
+    }
+
+    fn open_shader_params(&mut self, platform: Platform, over_game: bool) {
+        let Some(name) = self.custom_shader(platform).map(str::to_owned) else {
+            return;
+        };
+        let Some(root) = self.root() else {
+            return;
+        };
+        let params = self.shader_param_specs(platform);
+        if params.is_empty() {
+            return;
+        }
+        let values = crate::shader::read_values(root, &name, &params)
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect();
+        if over_game {
+            self.in_game_menu = None;
+        }
+        self.shader_params = Some(ShaderParamsModal {
+            platform,
+            shader: name,
+            params,
+            values,
+            cursor: 0,
+        });
+    }
+
+    fn shader_params_input(&mut self, action: Action) {
+        let (Some(modal), Some(root)) = (&mut self.shader_params, self.root.clone()) else {
+            return;
+        };
+        let n = modal.params.len();
+        if n == 0 {
+            self.shader_params = None;
+            return;
+        }
+        let mut changed = false;
+        match action {
+            Action::GbaDown(Btn::Up) => {
+                modal.cursor = (modal.cursor + n - 1) % n;
+            }
+            Action::GbaDown(Btn::Down) => {
+                modal.cursor = (modal.cursor + 1) % n;
+            }
+            Action::GbaDown(Btn::Left) | Action::ShelfLeft => {
+                let p = &modal.params[modal.cursor];
+                let v = crate::shader::step_value(p, modal.values[modal.cursor], -1);
+                modal.values[modal.cursor] = v;
+                if let Err(e) = crate::shader::write_value(&root, &modal.shader, p, v) {
+                    eprintln!("slot: shader param: {e}");
+                }
+                changed = true;
+            }
+            Action::GbaDown(Btn::Right) | Action::ShelfRight | Action::GbaDown(Btn::A) => {
+                let p = &modal.params[modal.cursor];
+                let v = crate::shader::step_value(p, modal.values[modal.cursor], 1);
+                modal.values[modal.cursor] = v;
+                if let Err(e) = crate::shader::write_value(&root, &modal.shader, p, v) {
+                    eprintln!("slot: shader param: {e}");
+                }
+                changed = true;
+            }
+            Action::GbaDown(Btn::X) => {
+                let p = &modal.params[modal.cursor];
+                modal.values[modal.cursor] = p.default;
+                if let Err(e) = crate::shader::write_value(&root, &modal.shader, p, p.default) {
+                    eprintln!("slot: shader param: {e}");
+                }
+                changed = true;
+            }
+            Action::GbaDown(Btn::Y) => {
+                for (p, v) in modal.params.iter().zip(modal.values.iter_mut()) {
+                    *v = p.default;
+                }
+                if let Err(e) = crate::shader::reset_all(&root, &modal.shader) {
+                    eprintln!("slot: shader reset: {e}");
+                }
+                changed = true;
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                let platform = modal.platform;
+                self.shader_params = None;
+                if matches!(self.phase, Phase::Playing { .. }) {
+                    self.in_game_menu = Some(QuickRow::ShaderParams);
+                } else {
+                    self.phase = Phase::QuickMenu {
+                        row: QuickRow::ShaderParamsOf(platform),
+                    };
+                }
+                return;
+            }
+            _ => {}
+        }
+        if changed {
+            self.shader_params_rev = self.shader_params_rev.wrapping_add(1);
+        }
+    }
+
+    fn shader_params_page(&self, modal: &ShaderParamsModal) -> ListPage {
+        let title = Path::new(&modal.shader)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&modal.shader)
+            .to_owned();
+        ListPage {
+            title,
+            status: "Shader Parameters".into(),
+            cursor: modal.cursor.min(modal.params.len().saturating_sub(1)),
+            rows: modal
+                .params
+                .iter()
+                .zip(modal.values.iter())
+                .map(|(p, &v)| ListRow {
+                    label: p.label.clone(),
+                    detail: crate::shader::format_param(v, p.step),
+                    bars: None,
+                    icon: None,
+                })
+                .collect(),
+            legends: vec![
+                back_legend(),
+                Legend::new(ButtonLegend::Right, "Adjust"),
+                Legend::new(ButtonLegend::X, "Reset"),
+                Legend::new(ButtonLegend::Y, "Reset All"),
+            ],
+        }
     }
 
     pub fn bezel_files(&self, platform: Platform) -> Vec<String> {
@@ -1650,13 +1942,20 @@ impl App {
 
     fn bezel_choices(&self, platform: Platform) -> Vec<BezelPick> {
         let mut choices = vec![BezelPick::None];
-        if platform.spec().bezels {
+        let blocked_square = slot_gfx::square(self.panel) && self.game_layout_of(platform).panel;
+        if platform.spec().bezels && !blocked_square {
             choices.push(BezelPick::Default);
         }
-        if self.framed_panel() {
+        if self.framed_panel() && !self.game_layout_of(platform).panel {
             choices.push(BezelPick::Ags102);
         }
-        choices.extend(self.bezel_files(platform).into_iter().map(BezelPick::File));
+        let scale = self.resolved_scale(platform);
+        choices.extend(
+            self.bezel_files(platform)
+                .into_iter()
+                .filter(|name| slot_store::bezel_scale(name).is_none_or(|s| s == scale))
+                .map(BezelPick::File),
+        );
         choices
     }
 
@@ -1666,19 +1965,49 @@ impl App {
 
     pub fn resolved_bezel(&self, platform: Platform) -> BezelPick {
         let pick = &self.state.screen(platform).bezel;
+        let blocked_square = slot_gfx::square(self.panel) && self.game_layout_of(platform).panel;
+        // Nothing picked: the system's own frame where a 4:3 panel has one for it. The AGS-102
+        // frame is only ever what was picked.
+        if *pick == BezelPick::Auto {
+            return match self.framed_panel() && platform.spec().bezels && !blocked_square {
+                true => BezelPick::Default,
+                false => BezelPick::None,
+            };
+        }
         // As bezel_choices would have it, without listing the folders every frame.
         let offered = match pick {
-            BezelPick::None => true,
-            BezelPick::Default => platform.spec().bezels,
-            BezelPick::Ags102 => self.framed_panel(),
-            BezelPick::File(name) => self
-                .root()
-                .is_some_and(|root| crate::bezel::find(root, platform, name, self.panel).is_some()),
+            BezelPick::None | BezelPick::Auto => true,
+            BezelPick::Default => platform.spec().bezels && !blocked_square,
+            BezelPick::Ags102 => self.framed_panel() && !self.game_layout_of(platform).panel,
+            BezelPick::File(name) => {
+                let scale = self.resolved_scale(platform);
+                slot_store::bezel_scale(name).is_none_or(|s| s == scale)
+                    && self.root().is_some_and(|root| {
+                        crate::bezel::find(root, platform, name, self.panel).is_some()
+                    })
+            }
         };
-        match offered {
-            true => pick.clone(),
-            false => BezelPick::None,
+        if offered {
+            return pick.clone();
         }
+        if *pick == BezelPick::Ags102
+            && self.framed_panel()
+            && platform.spec().bezels
+            && !blocked_square
+        {
+            return BezelPick::Default;
+        }
+        if let BezelPick::File(name) = pick {
+            let scale = self.resolved_scale(platform);
+            if let (Some(swapped), Some(root)) =
+                (slot_store::bezel_for_scale(name, scale), self.root())
+            {
+                if crate::bezel::find(root, platform, &swapped, self.panel).is_some() {
+                    return BezelPick::File(swapped);
+                }
+            }
+        }
+        BezelPick::None
     }
 
     fn cycle_bezel(&mut self, platform: Platform, right: bool) {
@@ -1696,6 +2025,7 @@ impl App {
 
     pub fn sp_frame(&self) -> bool {
         self.resolved_bezel(self.playing_platform()) == BezelPick::Ags102
+            && !self.game_layout().panel
     }
 
     pub fn set_game_bezel(&mut self, tex: Option<TexId>) {
@@ -1707,18 +2037,47 @@ impl App {
     }
 
     /// Whether the game is drawn in its bezel's window, the bezel over the whole screen: while
-    /// it is played, and not stretched.
+    /// it is played, and the picture does not stretch or fill the panel.
     pub fn overlay_shown(&self) -> bool {
-        self.game_overlay
-            && self.video_mode != VideoMode::Stretch
-            && matches!(self.phase, Phase::Playing { .. })
+        self.game_overlay && !self.picture_fills() && matches!(self.phase, Phase::Playing { .. })
     }
 
     pub fn shown_game_bezel(&self) -> Option<TexId> {
-        if self.video_mode == VideoMode::Stretch {
+        if !self.playing_platform().spec().bezels || self.picture_fills() {
+            return None;
+        }
+        if self.resolved_bezel(self.playing_platform()) == BezelPick::Default
+            && self.bezel_art().is_none()
+        {
             return None;
         }
         self.game_bezel
+    }
+
+    pub fn bezel_art(&self) -> Option<BezelArt> {
+        if !self.playing_platform().spec().bezels || self.picture_fills() {
+            return None;
+        }
+        if slot_gfx::square(self.panel) && self.game_layout().panel {
+            return None;
+        }
+        let gba = self.playing_platform() == Platform::Gba;
+        match (self.picture().0, self.framed_panel()) {
+            (Sizing::Band, _) => Some(BezelArt::Default),
+            _ if gba => None,
+            (Sizing::Integer, false) => Some(BezelArt::Default),
+            (Sizing::Integer, true) => Some(BezelArt::Integer4x3),
+            (Sizing::Fit, false) => Some(BezelArt::Fit3x2),
+            (Sizing::Fit, true) => Some(BezelArt::Fit4x3),
+            (Sizing::Panel, _) => None,
+        }
+    }
+
+    pub fn game_bezel_size(&self) -> (u32, u32) {
+        match self.game_layout().panel && self.framed_panel() {
+            true => self.panel,
+            false => (OUT_W, OUT_H),
+        }
     }
 
     pub fn wallpaper_files(&self) -> Vec<String> {
@@ -1789,6 +2148,14 @@ impl App {
         }
     }
 
+    /// The room's lines under what is in hand, in the shelf's own place and type.
+    fn draw_trophy_labels(&self, alpha: f32, out: &mut Vec<Draw>) {
+        let canvas = self.canvas();
+        draw_slot_name_above(canvas, self.shelf_note, 2, alpha, out);
+        draw_slot_name_above(canvas, self.shelf_platform, 1, alpha, out);
+        slot_ui::draw_slot_title(canvas, self.shelf_title, alpha, out);
+    }
+
     fn draw_background(&self, out: &mut Vec<Draw>) {
         let face = match &self.state.wallpaper {
             WallpaperPick::None => None,
@@ -1852,13 +2219,23 @@ impl App {
         );
         // A platform with nothing past None to pick has no Bezel row. One whose page is hidden
         // is not asked, which keeps the folders from being listed for every system.
-        let bare: Vec<QuickRow> = Platform::ALL
-            .into_iter()
-            .filter(|p| !hidden.contains(&QuickRow::ScreenOf(*p)))
-            .filter(|p| self.bezel_choices(*p).len() < 2)
-            .map(QuickRow::BezelOf)
-            .collect();
-        hidden.extend(bare);
+        for platform in Platform::ALL {
+            if hidden.contains(&QuickRow::ScreenOf(platform)) {
+                continue;
+            }
+            if !self.shader_has_params(platform) {
+                hidden.push(QuickRow::ShaderParamsOf(platform));
+            }
+            if self.bezel_choices(platform).len() < 2 || self.fills_screen(platform) {
+                hidden.push(QuickRow::BezelOf(platform));
+            }
+            if platform.spec().native || !self.offers_scale(platform) {
+                hidden.push(QuickRow::ScaleOf(platform));
+            }
+            if self.stretch_choices(platform).len() < 2 {
+                hidden.push(QuickRow::StretchOf(platform));
+            }
+        }
         hidden
     }
 
@@ -1970,13 +2347,32 @@ impl App {
     }
 
     pub fn slot_text(&self) -> Option<String> {
+        if let Some(labels) = self.trophy_labels() {
+            return Some(labels.detail);
+        }
         match self.slot_letter {
             Some(letter) => Some(letter.to_string()),
             None => self.shelf_platform_name().map(str::to_string),
         }
     }
 
+    /// The line above the shelf's system name, where a screen has a third.
+    pub fn note_text(&self) -> Option<String> {
+        self.trophy_labels().and_then(|labels| labels.note)
+    }
+
+    pub fn set_shelf_note_face(&mut self, face: TexId, w: u32) {
+        self.shelf_note = slot_ui::Printed::new(face, w);
+    }
+
+    pub fn clear_shelf_note(&mut self) {
+        self.shelf_note = slot_ui::Printed::default();
+    }
+
     pub fn title_text(&self) -> Option<String> {
+        if let Some(labels) = self.trophy_labels() {
+            return Some(labels.title);
+        }
         if !self.state.show_titles {
             return None;
         }
@@ -2046,10 +2442,12 @@ impl App {
 
     /// One game on the card; the apps beside it are not games.
     pub fn single_cart(&self) -> bool {
-        self.carts()
-            .filter(|c| c.platform != Platform::Apps)
-            .count()
-            == 1
+        !self.kiosk.active
+            && self
+                .carts()
+                .filter(|c| c.platform != Platform::Apps)
+                .count()
+                == 1
     }
 
     pub fn set_faces(&mut self, faces: Vec<TexId>) {
@@ -2073,7 +2471,7 @@ impl App {
                 .filter(|i| !screen.contains(i))
                 .map(|i| (self.shelf_at, i)),
         );
-        wants
+        let mut out: Vec<FaceWant> = wants
             .into_iter()
             .filter(|(at, i)| self.shelves[*at].1.face(*i).is_none())
             .map(|(shelf, index)| FaceWant {
@@ -2081,19 +2479,50 @@ impl App {
                 index,
                 on_screen: shelf == self.shelf_at && screen.contains(&index),
             })
-            .collect()
+            .collect();
+        // The carousel's carts are wanted as soon as the room is opened, so its carts do not
+        // come up as blanks.
+        if self.on_trophy_carousel() {
+            let shown = self.trophy_shelf.on_screen();
+            out.extend(
+                shown
+                    .iter()
+                    .chain(
+                        self.trophy_shelf
+                            .around(FACE_AHEAD)
+                            .iter()
+                            .filter(|i| !shown.contains(i)),
+                    )
+                    .filter(|i| self.trophy_shelf.face(**i).is_none())
+                    .map(|i| FaceWant {
+                        shelf: TROPHY_SHELF,
+                        index: *i,
+                        on_screen: shown.contains(i),
+                    }),
+            );
+        }
+        out
     }
 
     pub fn face_cart(&self, shelf: usize, index: usize) -> Option<&Cart> {
-        self.shelves.get(shelf)?.1.carts.get(index)
+        match shelf {
+            TROPHY_SHELF => self.trophy_shelf.carts.get(index),
+            _ => self.shelves.get(shelf)?.1.carts.get(index),
+        }
     }
 
     pub fn set_cart_face(&mut self, shelf: usize, index: usize, tex: TexId) -> Option<TexId> {
-        self.shelves.get_mut(shelf)?.1.set_face(index, tex)
+        match shelf {
+            TROPHY_SHELF => self.trophy_shelf.set_face(index, tex),
+            _ => self.shelves.get_mut(shelf)?.1.set_face(index, tex),
+        }
     }
 
     pub fn set_cart_interior(&mut self, shelf: usize, index: usize, tex: TexId) -> Option<TexId> {
-        self.shelves.get_mut(shelf)?.1.set_interior(index, tex)
+        match shelf {
+            TROPHY_SHELF => self.trophy_shelf.set_interior(index, tex),
+            _ => self.shelves.get_mut(shelf)?.1.set_interior(index, tex),
+        }
     }
 
     /// The carts whose faces want building again, now they have a label.
@@ -2177,6 +2606,17 @@ impl App {
                 }
             }
         }
+        // The carousel keeps what it shows while it is on screen, and nothing once it is not.
+        let keep = match self.on_trophy_carousel() {
+            true => self.trophy_shelf.around(FACE_KEEP),
+            false => Vec::new(),
+        };
+        for i in 0..self.trophy_shelf.carts.len() {
+            if !keep.contains(&i) {
+                shed.extend(self.trophy_shelf.take_face(i));
+                shed.extend(self.trophy_shelf.take_interior(i));
+            }
+        }
         shed
     }
 
@@ -2231,7 +2671,234 @@ impl App {
             let [x0, y0, x1, y1] = self.picture_rect();
             return [x0, y0, x1 - x0, y1 - y0];
         }
-        video_mode::source_rect(self.platform, self.video_mode)
+        self.picture().1
+    }
+
+    pub fn picture(&self) -> (Sizing, [f32; 4]) {
+        self.picture_of(self.playing_platform(), self.video_mode)
+    }
+
+    fn picture_of(&self, platform: Platform, mode: VideoMode) -> (Sizing, [f32; 4]) {
+        video_mode::picture_for(
+            platform,
+            mode,
+            self.resolved_scale(platform),
+            self.resolved_stretch(platform),
+        )
+    }
+
+    pub fn game_layout(&self) -> GameLayout {
+        if self.game_menu.is_some() {
+            return GameLayout::BAND;
+        }
+        self.game_layout_of_mode(self.playing_platform(), self.video_mode)
+    }
+
+    pub fn game_layout_of(&self, platform: Platform) -> GameLayout {
+        self.game_layout_of_mode(platform, VideoMode::Actual)
+    }
+
+    fn game_layout_of_mode(&self, platform: Platform, mode: VideoMode) -> GameLayout {
+        if self.fills_screen(platform) {
+            return GameLayout {
+                panel: true,
+                ..GameLayout::BAND
+            };
+        }
+        if platform.spec().native {
+            return GameLayout::BAND;
+        }
+        let sizing = self.picture_of(platform, mode).0;
+        slot_gfx::game_layout(self.panel, platform.picture(), sizing)
+    }
+
+    /// Whether a system drawn at its own shape is stretched over the whole screen instead.
+    fn fills_screen(&self, platform: Platform) -> bool {
+        platform.spec().native && self.resolved_stretch(platform) == Stretch::FullScreen
+    }
+
+    /// Whether the playing game's picture is stretched past its own shape, so its aspect is not
+    /// kept: stretched in the band, or over the whole screen.
+    pub fn picture_stretched(&self) -> bool {
+        self.video_mode == VideoMode::Stretch || self.fills_screen(self.playing_platform())
+    }
+
+    pub fn picture_fills(&self) -> bool {
+        self.video_mode == VideoMode::Stretch || self.picture().0 == Sizing::Panel
+    }
+
+    fn shown_as(
+        &self,
+        platform: Platform,
+        mode: VideoMode,
+        scale: Scale,
+        stretch: Stretch,
+    ) -> (bool, [i32; 4]) {
+        let (sizing, source) = video_mode::picture_for(platform, mode, scale, stretch);
+        let layout = slot_gfx::game_layout(self.panel, platform.picture(), sizing);
+        let (w, h) = platform.picture();
+        let (sw, sh) = (slot_gfx::SRC_W as f32, slot_gfx::SRC_H as f32);
+        let crop = [
+            (sw - w as f32) / 2.0 / sw,
+            (sh - h as f32) / 2.0 / sh,
+            w as f32 / sw,
+            h as f32 / sh,
+        ];
+        let [rx, ry, rw, rh] = layout.rect;
+        let at = |from: f32, len: f32, off: f32, src: f32, size: f32| {
+            ((from + (off - src) / len * size) * 100.0).round() as i32
+        };
+        (
+            layout.panel,
+            [
+                at(rx, source[2], crop[0], source[0], rw),
+                at(ry, source[3], crop[1], source[1], rh),
+                (crop[2] / source[2] * rw * 100.0).round() as i32,
+                (crop[3] / source[3] * rh * 100.0).round() as i32,
+            ],
+        )
+    }
+
+    fn scale_candidates(platform: Platform) -> &'static [Scale] {
+        if platform.spec().native {
+            return &[];
+        }
+        match platform {
+            Platform::Gba => &[Scale::Fit, Scale::Integer, Scale::FullScreen],
+            _ => &[Scale::SpFrame, Scale::Integer, Scale::Fit],
+        }
+    }
+
+    fn state_scale(&self, platform: Platform) -> Scale {
+        match platform {
+            Platform::Gba => self.state.scale_gba,
+            Platform::Gbc => self.state.scale_gbc,
+            _ => self.state.scale_gb,
+        }
+    }
+
+    fn state_scale_mut(&mut self, platform: Platform) -> &mut Scale {
+        match platform {
+            Platform::Gba => &mut self.state.scale_gba,
+            Platform::Gbc => &mut self.state.scale_gbc,
+            _ => &mut self.state.scale_gb,
+        }
+    }
+
+    fn state_stretch(&self, platform: Platform) -> Stretch {
+        self.state.stretches[platform.index()]
+    }
+
+    fn state_stretch_mut(&mut self, platform: Platform) -> &mut Stretch {
+        &mut self.state.stretches[platform.index()]
+    }
+
+    /// Whether the Scale row would change anything: there are two ways to draw the game, and no
+    /// overlay bezel places it in a window of its own, as one with no `_fit`/`_integer` name does.
+    fn offers_scale(&self, platform: Platform) -> bool {
+        let overlay_places = matches!(
+            self.resolved_bezel(platform),
+            BezelPick::File(name) if slot_store::bezel_scale(&name).is_none()
+        );
+        !overlay_places && self.scale_choices(platform).len() >= 2
+    }
+
+    pub fn scale_choices(&self, platform: Platform) -> Vec<Scale> {
+        let mut seen = Vec::new();
+        let mut choices = Vec::new();
+        for &scale in Self::scale_candidates(platform) {
+            let shown = self.shown_as(platform, VideoMode::Actual, scale, Stretch::Classic);
+            match seen.iter().position(|s| *s == shown) {
+                Some(at) if choices[at] == Scale::SpFrame => choices[at] = scale,
+                Some(_) => {}
+                None => {
+                    seen.push(shown);
+                    choices.push(scale);
+                }
+            }
+        }
+        choices
+    }
+
+    pub fn stretch_choices(&self, platform: Platform) -> Vec<Stretch> {
+        if platform == Platform::Gba {
+            return Vec::new();
+        }
+        // A system drawn at its own shape keeps it, or fills the whole screen.
+        if platform.spec().native {
+            return vec![Stretch::Classic, Stretch::FullScreen];
+        }
+        let scale = self.resolved_scale(platform);
+        let mut seen = Vec::new();
+        let mut choices = Vec::new();
+        for stretch in [Stretch::Classic, Stretch::FullScreen] {
+            let shown = self.shown_as(platform, VideoMode::Stretch, scale, stretch);
+            if !seen.contains(&shown) {
+                seen.push(shown);
+                choices.push(stretch);
+            }
+        }
+        choices
+    }
+
+    pub fn resolved_scale(&self, platform: Platform) -> Scale {
+        let pick = match (platform, self.state_scale(platform)) {
+            // GBA offers no SP Screen of its own: the default is its band, which is Fit.
+            (Platform::Gba, Scale::SpFrame) => Scale::Fit,
+            (_, pick) => pick,
+        };
+        let choices = self.scale_choices(platform);
+        if choices.contains(&pick) {
+            return pick;
+        }
+        if pick == Scale::SpFrame && choices.contains(&Scale::Integer) {
+            return Scale::Integer;
+        }
+        choices.first().copied().unwrap_or(pick)
+    }
+
+    pub fn drawn_scale(&self, platform: Platform) -> Scale {
+        self.resolved_scale(platform)
+    }
+
+    pub fn resolved_stretch(&self, platform: Platform) -> Stretch {
+        let pick = self.state_stretch(platform);
+        let choices = self.stretch_choices(platform);
+        if choices.contains(&pick) {
+            pick
+        } else {
+            choices.first().copied().unwrap_or(pick)
+        }
+    }
+
+    fn cycle_scale(&mut self, platform: Platform, right: bool) {
+        let choices = self.scale_choices(platform);
+        if choices.is_empty() {
+            return;
+        }
+        let current = self.resolved_scale(platform);
+        let at = choices.iter().position(|s| *s == current).unwrap_or(0);
+        let n = choices.len();
+        *self.state_scale_mut(platform) = choices[if right {
+            (at + 1) % n
+        } else {
+            (at + n - 1) % n
+        }];
+    }
+
+    fn cycle_stretch(&mut self, platform: Platform, right: bool) {
+        let choices = self.stretch_choices(platform);
+        if choices.is_empty() {
+            return;
+        }
+        let current = self.resolved_stretch(platform);
+        let at = choices.iter().position(|s| *s == current).unwrap_or(0);
+        let n = choices.len();
+        *self.state_stretch_mut(platform) = choices[if right {
+            (at + 1) % n
+        } else {
+            (at + n - 1) % n
+        }];
     }
 
     fn slot_owns_the_shoulders(&self) -> bool {
@@ -2707,13 +3374,20 @@ impl App {
     }
 
     /// Whether a page is over the game in place of its menu: the core's options, the TVs to
-    /// cast to, or the controls.
+    /// cast to, the controls, or custom shader parameters.
     pub fn game_page_open(&self) -> bool {
-        self.core_options.is_some() || self.game_cast.is_some() || self.controls_over_game()
+        self.core_options.is_some()
+            || self.game_cast.is_some()
+            || self.controls_over_game()
+            || self.shader_params_over_game()
     }
 
     fn controls_over_game(&self) -> bool {
         self.controls.is_some() && matches!(self.phase, Phase::Playing { .. })
+    }
+
+    fn shader_params_over_game(&self) -> bool {
+        self.shader_params.is_some() && matches!(self.phase, Phase::Playing { .. })
     }
 
     /// The map the game in the slot is played with, read again once a map has changed.
@@ -3039,7 +3713,15 @@ impl App {
             | Phase::CoreDownloads { cursor }
             | Phase::GameArt { cursor, .. } => (3, cursor.to_string()),
             Phase::Cores { cursor } | Phase::Search { cursor } => (1, cursor.to_string()),
-            Phase::Keyboard { keys, .. } => (4, format!("{keys:?}")),
+            Phase::Kiosk { page } => (3, format!("{page:?}")),
+            Phase::Trophies(t) => (
+                3 + usize::from(
+                    matches!(t.mode, crate::trophies::TrophyViewMode::Game(_))
+                        || t.picker.is_some(),
+                ),
+                format!("{:?}:{:?}:{}:{:?}", t.scope, t.mode, t.cursor, t.picker),
+            ),
+            Phase::Keyboard { keys, .. } => (4 + usize::from(keys.help()), format!("{keys:?}")),
             Phase::TailscaleLogin | Phase::SyncthingId => (4, String::new()),
             Phase::Upload { note } => (4, format!("{note:?}")),
             Phase::Apps => (4, String::new()),
@@ -3093,6 +3775,7 @@ impl App {
                 | Phase::GameArt { .. }
                 | Phase::Cores { .. }
                 | Phase::Search { .. }
+                | Phase::Kiosk { .. }
         );
         let sfx = match () {
             _ if after.depth > before.depth => Sfx::Open,
@@ -3190,6 +3873,12 @@ impl App {
             }
             self.controls = None;
         }
+        if self.shader_params.is_some() {
+            if action != Action::Eject {
+                return self.shader_params_input(action);
+            }
+            self.shader_params = None;
+        }
         if self.core_options.is_some() && matches!(self.phase, Phase::Playing { .. }) {
             if action != Action::Eject {
                 return self.core_options_input(action);
@@ -3210,7 +3899,7 @@ impl App {
         let now = self.now();
         match self.phase {
             Phase::Shelf => match action {
-                Action::GbaDown(Btn::Start) if self.core_picker.is_none() => {
+                Action::GbaDown(Btn::Start) if !self.kiosk.active && self.core_picker.is_none() => {
                     self.open_core_picker()
                 }
                 _ if self.core_picker.is_some() => self.core_picker_input(action),
@@ -3220,6 +3909,7 @@ impl App {
                 Action::ShelfRight | Action::GbaDown(Btn::Right) => {
                     self.shelf_mut().hold_right(now)
                 }
+                Action::QuickMenu if self.kiosk.active => self.open_kiosk_unlock(),
                 Action::QuickMenu => self.open_quick_menu(),
                 Action::GbaDown(Btn::A) => self.play_held = Some(now),
                 Action::GbaUp(Btn::A) => {
@@ -3230,9 +3920,11 @@ impl App {
                 Action::Insert => self.insert(!self.state.eject_save),
                 Action::GbaDown(Btn::L1) => self.switch_shelf(-1),
                 Action::GbaDown(Btn::R1) => self.switch_shelf(1),
-                Action::GbaDown(Btn::Y) => self.toggle_favorite(),
+                Action::GbaDown(Btn::Y) if !self.kiosk.active => self.toggle_favorite(),
                 Action::GbaDown(Btn::X) => self.open_search(false),
-                Action::GbaDown(Btn::Select) if self.update_offer().is_some() => {
+                Action::GbaDown(Btn::Select)
+                    if !self.kiosk.active && self.update_offer().is_some() =>
+                {
                     self.update_seen = true;
                     self.phase = Phase::Updates { cursor: 0 };
                 }
@@ -3247,6 +3939,9 @@ impl App {
                     self.set_picture(VideoMode::Actual)
                 }
                 Action::Eject => self.eject(),
+                Action::QuickMenu if self.kiosk.active => self.eject(),
+                Action::GameMenu | Action::CoreOptions | Action::Polaroids if self.kiosk.active => {
+                }
                 Action::GameMenu => self.game_menu_shortcut(),
                 Action::CoreOptions => self.core_options_wanted = true,
                 Action::QuickMenu | Action::Polaroids if !self.may_pause() => {}
@@ -3287,6 +3982,8 @@ impl App {
             Phase::GameArt { cursor, .. } => self.game_art_input(cursor, action),
             Phase::Cores { cursor } => self.cores_input(cursor, action),
             Phase::Search { cursor } => self.search_input(cursor, action),
+            Phase::Kiosk { page } => self.kiosk_input(page, action),
+            Phase::Trophies(_) => self.trophies_input(action),
             Phase::Keyboard { .. } => self.keyboard_input(action),
             _ => {}
         }
@@ -3354,7 +4051,12 @@ impl App {
     /// show, if any.
     fn change_service(&mut self, row: ServiceRow, cursor: usize) -> Option<Option<String>> {
         let password = |then: Option<ServiceRow>| Phase::Keyboard {
-            keys: Keyboard::new("New password for root", "", true, 4, 63),
+            keys: Keyboard::new(
+                KeyLayout::General,
+                "Root Password",
+                Some("For SSH, file sharing and Syncthing"),
+                "",
+            ),
             typing: Typing::RootPassword { then },
             cursor,
         };
@@ -3565,11 +4267,10 @@ impl App {
                 };
                 self.phase = Phase::Keyboard {
                     keys: Keyboard::new(
-                        "ScreenScraper username, or none to sign out",
+                        KeyLayout::General,
+                        "ScreenScraper",
+                        Some("Username, or leave empty to sign out"),
                         &user,
-                        false,
-                        0,
-                        64,
                     ),
                     typing: Typing::SsUser,
                     cursor,
@@ -3949,29 +4650,33 @@ impl App {
         self.apps_done(done);
     }
 
-    /// Leaves the DS game at `at` for DraStic, which runs it with slot gone, as a port is run.
-    fn hand_to_drastic(&mut self, at: usize) {
+    /// Leaves the DS/PSP game at `at` for DraStic or PPSSPP-SDL, which runs it with slot gone.
+    fn hand_to_standalone(&mut self, at: usize, relative_script: &str, name: &str) {
         let Some(root) = self.root.clone() else {
             return;
         };
         let Some(rom) = self.shelf().carts.get(at).map(|c| c.rom.clone()) else {
             return;
         };
-        let script = root.join(crate::apps::ports::DRASTIC);
+        let script = root.join(relative_script);
         if !script.is_file() {
             eprintln!("slot: launch: {} is not on the card", script.display());
             return self.refuse();
         }
         if let Err(e) = crate::apps::ports::queue(&root, &script, Some(&rom)) {
-            eprintln!("slot: launch: drastic: {e}");
+            eprintln!("slot: launch: {name}: {e}");
             return self.refuse();
         }
-        eprintln!("slot: launch: drastic {}", rom.display());
+        eprintln!("slot: launch: {name} {}", rom.display());
         self.music = None;
         self.begin_reload();
     }
 
     fn apps_input(&mut self, action: Action) {
+        if self.kiosk.active && action == Action::QuickMenu {
+            self.apps = None;
+            return self.open_kiosk_unlock();
+        }
         let volume = self.output_volume();
         let Some(apps) = &mut self.apps else {
             return;
@@ -4348,7 +5053,7 @@ impl App {
             Action::GbaDown(Btn::A) => match rows.get(cursor) {
                 Some(NetRow::Other) => {
                     self.phase = Phase::Keyboard {
-                        keys: Keyboard::new("Network name", "", false, 1, 32),
+                        keys: Keyboard::new(KeyLayout::General, "Network Name", None, ""),
                         typing: Typing::HiddenName,
                         cursor,
                     };
@@ -4386,7 +5091,7 @@ impl App {
             }
             (Security::Personal, false) => {
                 self.phase = Phase::Keyboard {
-                    keys: Keyboard::new(&format!("Password for {}", net.ssid), "", true, 8, 63),
+                    keys: Keyboard::new(KeyLayout::General, "Password", Some(&net.ssid), ""),
                     typing: Typing::Password(net.ssid.clone()),
                     cursor,
                 };
@@ -4395,20 +5100,16 @@ impl App {
         }
     }
 
+    fn refuse_keyboard(&mut self, why: &str) {
+        if let Phase::Keyboard { keys, .. } = &mut self.phase {
+            keys.refuse(why);
+        }
+    }
+
     fn keyboard_input(&mut self, action: Action) {
-        let input = match action {
-            Action::GbaDown(Btn::Up) => KeyInput::Up,
-            Action::GbaDown(Btn::Down) => KeyInput::Down,
-            Action::GbaDown(Btn::Left) => KeyInput::Left,
-            Action::GbaDown(Btn::Right) => KeyInput::Right,
-            Action::GbaDown(Btn::A) => KeyInput::Pick,
-            Action::GbaDown(Btn::B) => KeyInput::Delete,
-            Action::GbaDown(Btn::Y) => KeyInput::Space,
-            Action::GbaDown(Btn::X) => KeyInput::Shift,
-            Action::GbaDown(Btn::L1 | Btn::R1) => KeyInput::Page,
-            Action::GbaDown(Btn::Start) => KeyInput::Done,
-            Action::GbaDown(Btn::Select) => KeyInput::Reveal,
-            Action::QuickMenu => KeyInput::Cancel,
+        let btn = match action {
+            Action::GbaDown(b) => b,
+            Action::QuickMenu => Btn::Menu,
             _ => return,
         };
         let Phase::Keyboard {
@@ -4419,10 +5120,18 @@ impl App {
         else {
             return;
         };
+        if keys.help() {
+            self.held_dir = None;
+        }
+        let outcome = keys.press(btn);
+        if keys.help() {
+            self.held_dir = None;
+        }
         let (typing, cursor) = (typing.clone(), *cursor);
-        match keys.press(input) {
-            KeyOutcome::Typing => {}
-            KeyOutcome::Cancelled => {
+        match outcome {
+            Typed::Nothing | Typed::Changed | Typed::Help => {}
+            Typed::Cancelled => {
+                self.held_dir = None;
                 self.phase = match typing {
                     Typing::Hostname => Phase::QuickMenu {
                         row: QuickRow::Hostname,
@@ -4434,13 +5143,17 @@ impl App {
                     Typing::RaUser | Typing::RaPassword(_) => Phase::QuickMenu {
                         row: QuickRow::Achievements,
                     },
+                    Typing::KioskUnlock => Phase::Shelf,
+                    Typing::KioskSetSecret { .. } => Phase::Kiosk {
+                        page: KioskPage::Main { cursor },
+                    },
                     _ => Phase::Networks { cursor, note: None },
                 };
             }
-            KeyOutcome::Done(text) => match typing {
+            Typed::Done(text) => match typing {
                 Typing::Hostname => {
                     if !crate::baseos::valid_hostname(&text) {
-                        self.cheevo_line(crate::baseos::HOSTNAME_HINT.into());
+                        self.refuse_keyboard(crate::baseos::HOSTNAME_HINT);
                         return;
                     }
                     let result = self
@@ -4450,38 +5163,87 @@ impl App {
                         .and_then(|root| crate::baseos::set_hostname(root, &text));
                     match result {
                         Ok(()) => {
+                            self.held_dir = None;
                             self.cheevo_line("Restart to use the new name".into());
                             self.hostname = text;
                             self.phase = Phase::QuickMenu {
                                 row: QuickRow::Hostname,
                             };
                         }
-                        Err(e) => self.cheevo_line(format!("Could not save the name: {e}")),
+                        Err(e) => self.refuse_keyboard(&format!("Could not save the name: {e}")),
                     }
                 }
-                Typing::Search { .. } => self.search_for(&text),
+                Typing::Search { .. } => {
+                    if text.trim().is_empty() {
+                        return;
+                    }
+                    self.held_dir = None;
+                    self.search_for(&text);
+                }
+                Typing::KioskUnlock => {
+                    if text != self.kiosk.secret {
+                        let msg = match self.kiosk.auth {
+                            KioskAuth::Pin => "Incorrect PIN",
+                            KioskAuth::Password => "Incorrect password",
+                        };
+                        self.refuse_keyboard(msg);
+                        return;
+                    }
+                    self.held_dir = None;
+                    self.kiosk.active = false;
+                    self.save_kiosk();
+                    self.apply_kiosk_filter();
+                    self.phase = Phase::QuickMenu {
+                        row: QuickRow::Kiosk,
+                    };
+                }
+                Typing::KioskSetSecret { activate } => {
+                    if let Err(msg) = kiosk::valid_secret(self.kiosk.auth, &text) {
+                        self.refuse_keyboard(msg);
+                        return;
+                    }
+                    self.held_dir = None;
+                    self.kiosk.secret = text;
+                    if activate {
+                        self.kiosk.active = true;
+                        self.save_kiosk();
+                        self.apply_kiosk_filter();
+                        self.phase = Phase::Shelf;
+                    } else {
+                        self.save_kiosk();
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::Main { cursor },
+                        };
+                    }
+                }
                 Typing::SsUser if text.is_empty() => {
+                    self.held_dir = None;
                     let note = self.save_ss_login("", "");
                     self.phase = Phase::GameArt { cursor, note };
                 }
                 Typing::SsUser => {
+                    if text.chars().count() > 64 {
+                        self.refuse_keyboard("Use up to 64 characters");
+                        return;
+                    }
+                    self.held_dir = None;
                     self.phase = Phase::Keyboard {
-                        keys: Keyboard::new(
-                            &format!("ScreenScraper password for {text}"),
-                            "",
-                            true,
-                            1,
-                            64,
-                        ),
+                        keys: Keyboard::new(KeyLayout::General, "Password", Some(&text), ""),
                         typing: Typing::SsPassword(text),
                         cursor,
                     };
                 }
                 Typing::SsPassword(user) => {
+                    if !(1..=64).contains(&text.chars().count()) {
+                        self.refuse_keyboard("Use 1–64 characters");
+                        return;
+                    }
+                    self.held_dir = None;
                     let note = self.save_ss_login(&user, &text);
                     self.phase = Phase::GameArt { cursor, note };
                 }
                 Typing::RaUser if text.is_empty() => {
+                    self.held_dir = None;
                     let line = match self.root.as_deref().map(crate::cheevos::sign_out) {
                         Some(Ok(())) => "Signed out of RetroAchievements".to_string(),
                         Some(Err(e)) => format!("Could not sign out: {e}"),
@@ -4493,19 +5255,23 @@ impl App {
                     };
                 }
                 Typing::RaUser => {
+                    if text.chars().count() > 64 {
+                        self.refuse_keyboard("Use up to 64 characters");
+                        return;
+                    }
+                    self.held_dir = None;
                     self.phase = Phase::Keyboard {
-                        keys: Keyboard::new(
-                            &format!("RetroAchievements password for {text}"),
-                            "",
-                            true,
-                            1,
-                            64,
-                        ),
+                        keys: Keyboard::new(KeyLayout::General, "Password", Some(&text), ""),
                         typing: Typing::RaPassword(text),
                         cursor,
                     };
                 }
                 Typing::RaPassword(user) => {
+                    if !(1..=64).contains(&text.chars().count()) {
+                        self.refuse_keyboard("Use 1–64 characters");
+                        return;
+                    }
+                    self.held_dir = None;
                     let (tx, rx) = std::sync::mpsc::channel();
                     let spawned = std::thread::Builder::new()
                         .name("slot-ra-sign-in".into())
@@ -4521,6 +5287,11 @@ impl App {
                     };
                 }
                 Typing::RootPassword { then } => {
+                    if !(4..=63).contains(&text.chars().count()) {
+                        self.refuse_keyboard("Use 4–63 characters");
+                        return;
+                    }
+                    self.held_dir = None;
                     self.state.password = Some(text);
                     match then {
                         Some(ServiceRow::Sharing) => self.state.samba = true,
@@ -4531,23 +5302,40 @@ impl App {
                     self.phase = Phase::Services { cursor, note: None };
                 }
                 Typing::Password(ssid) => {
+                    if !(8..=63).contains(&text.chars().count()) {
+                        self.refuse_keyboard("Use 8–63 characters");
+                        return;
+                    }
+                    self.held_dir = None;
                     self.with_wifi(|w| w.join(&ssid, Some(&text)));
                     self.phase = Phase::Networks { cursor, note: None };
                 }
                 Typing::HiddenName => {
+                    if text.is_empty() {
+                        return;
+                    }
+                    if text.chars().count() > 32 {
+                        self.refuse_keyboard("Use 1–32 characters");
+                        return;
+                    }
+                    self.held_dir = None;
                     self.phase = Phase::Keyboard {
                         keys: Keyboard::new(
-                            &format!("Password for {text}, or none if it is open"),
+                            KeyLayout::General,
+                            "Password",
+                            Some("Leave it empty for an open network"),
                             "",
-                            true,
-                            0,
-                            63,
                         ),
                         typing: Typing::HiddenPassword(text),
                         cursor,
                     };
                 }
                 Typing::HiddenPassword(ssid) => {
+                    if !text.is_empty() && !(8..=63).contains(&text.chars().count()) {
+                        self.refuse_keyboard("Use 8–63 characters, or leave it empty");
+                        return;
+                    }
+                    self.held_dir = None;
                     let psk = Some(text.as_str()).filter(|p| !p.is_empty());
                     self.with_wifi(|w| w.join(&ssid, psk));
                     self.phase = Phase::Networks { cursor, note: None };
@@ -4561,6 +5349,9 @@ impl App {
         if let Some(c) = &self.controls {
             return Some(PageModel::List(self.controls_page(c)));
         }
+        if let Some(m) = &self.shader_params {
+            return Some(PageModel::List(self.shader_params_page(m)));
+        }
         if let (Some((options, cursor)), Phase::Playing { .. }) = (&self.core_options, &self.phase)
         {
             return Some(PageModel::List(self.core_options_page(options, *cursor)));
@@ -4572,7 +5363,6 @@ impl App {
             Phase::Networks { cursor, note } => Some(PageModel::List(
                 self.networks_page(*cursor, note.as_deref()),
             )),
-            Phase::Keyboard { keys, .. } => Some(PageModel::Keys(keys.clone())),
             Phase::Devices { cursor } => Some(PageModel::List(self.devices_page(*cursor))),
             Phase::Casting { cursor } => Some(PageModel::List(self.cast_page(*cursor))),
             Phase::Services { cursor, note } => Some(PageModel::List(
@@ -4584,6 +5374,8 @@ impl App {
             }
             Phase::Cores { cursor } => self.cores_page(*cursor).map(PageModel::List),
             Phase::Search { cursor } => Some(PageModel::List(self.search_page(*cursor))),
+            Phase::Kiosk { page } => Some(PageModel::List(self.kiosk_list_page(*page))),
+            Phase::Trophies(t) if t.picker.is_some() => Some(PageModel::List(t.picker_page())),
             Phase::GameArt { cursor, note } => Some(PageModel::List(
                 self.game_art_page(*cursor, note.as_deref()),
             )),
@@ -4624,6 +5416,21 @@ impl App {
 
     pub fn set_page_face(&mut self, tex: TexId, w: u32, h: u32) {
         self.page_face = Some((tex, w, h));
+    }
+
+    pub fn keyboard(&self) -> Option<&Keyboard> {
+        match &self.phase {
+            Phase::Keyboard { keys, .. } => Some(keys),
+            _ => None,
+        }
+    }
+
+    pub fn take_keyboard_tex(&mut self) -> Option<KeyboardTex> {
+        self.keyboard_tex.take()
+    }
+
+    pub fn set_keyboard_tex(&mut self, tex: Option<KeyboardTex>) {
+        self.keyboard_tex = tex;
     }
 
     fn networks_page(&self, cursor: usize, note: Option<&str>) -> ListPage {
@@ -4738,6 +5545,7 @@ impl App {
             }
             QuickRow::ExitGame => self.eject(),
             QuickRow::Controls => self.open_controls(),
+            QuickRow::ShaderParams => self.open_shader_params(self.playing_platform(), true),
             _ => {
                 if let Some(child) = row.child() {
                     // The page's first row may be hidden, as the disc is for a one-disc game.
@@ -4751,6 +5559,19 @@ impl App {
     fn tap_in_game_menu(&mut self, to: Option<QuickRow>) {
         self.menu_tap = Some((self.now(), self.in_game_menu));
         self.in_game_menu = to;
+    }
+
+    /// The panel the game's screen shows: the menu in hand, or the one on its way out while its
+    /// strip slides away. Keeping it up until the strip is gone makes the close one motion rather
+    /// than the panel vanishing and the strip jumping after it.
+    /// How far the game's strip has slid up over the picture, 0 to 1.
+    pub fn menu_strip(&self) -> f32 {
+        self.footer
+    }
+
+    pub fn in_game_menu_panel(&self) -> Option<QuickRow> {
+        self.in_game_menu_shown()
+            .or_else(|| self.footer_row.filter(|_| self.footer > 0.0))
     }
 
     fn in_game_menu_shown(&self) -> Option<QuickRow> {
@@ -4786,7 +5607,7 @@ impl App {
             QuickRow::Hostname => {
                 let name = self.hostname.clone();
                 self.phase = Phase::Keyboard {
-                    keys: Keyboard::new("Name for this handheld", &name, false, 1, 63),
+                    keys: Keyboard::new(KeyLayout::Host, "Hostname", None, &name),
                     typing: Typing::Hostname,
                     cursor: 0,
                 };
@@ -4822,11 +5643,10 @@ impl App {
                 }
                 self.phase = Phase::Keyboard {
                     keys: Keyboard::new(
-                        "RetroAchievements username, or none to sign out",
+                        KeyLayout::General,
+                        "RetroAchievements",
+                        Some("Username, or leave empty to sign out"),
                         &user,
-                        false,
-                        0,
-                        64,
                     ),
                     typing: Typing::RaUser,
                     cursor: 0,
@@ -4886,7 +5706,19 @@ impl App {
                     self.phase = Phase::QuickMenu { row };
                 }
             }
-            QuickRow::EjectSave
+            QuickRow::ShaderParamsOf(platform) => self.open_shader_params(platform, false),
+            QuickRow::Kiosk => {
+                self.phase = Phase::Kiosk {
+                    page: KioskPage::Main { cursor: 0 },
+                };
+            }
+            QuickRow::TrophyRoom => self.open_trophy_room(),
+            QuickRow::ShaderParams
+            | QuickRow::Scale
+            | QuickRow::ScaleOf(_)
+            | QuickRow::Stretch
+            | QuickRow::StretchOf(_)
+            | QuickRow::EjectSave
             | QuickRow::Turbo
             | QuickRow::Rewind
             | QuickRow::FastForward
@@ -4995,6 +5827,16 @@ impl App {
         }
         if let QuickRow::BezelOf(platform) = row {
             self.cycle_bezel(platform, right);
+            self.persist();
+            return;
+        }
+        if let QuickRow::ScaleOf(platform) = row {
+            self.cycle_scale(platform, right);
+            self.persist();
+            return;
+        }
+        if let QuickRow::StretchOf(platform) = row {
+            self.cycle_stretch(platform, right);
             self.persist();
             return;
         }
@@ -5118,6 +5960,12 @@ impl App {
             | QuickRow::Disc
             | QuickRow::ScreenOf(_)
             | QuickRow::ShaderOf(_)
+            | QuickRow::ShaderParams
+            | QuickRow::ShaderParamsOf(_)
+            | QuickRow::Scale
+            | QuickRow::ScaleOf(_)
+            | QuickRow::Stretch
+            | QuickRow::StretchOf(_)
             | QuickRow::BezelOf(_)
             | QuickRow::Network
             | QuickRow::Online
@@ -5133,6 +5981,8 @@ impl App {
             | QuickRow::Cores
             | QuickRow::GameArt
             | QuickRow::Achievements
+            | QuickRow::TrophyRoom
+            | QuickRow::Kiosk
             | QuickRow::Power
             | QuickRow::Restart
             | QuickRow::ShutDown
@@ -5312,7 +6162,7 @@ impl App {
         let s = &self.state;
         let dim = match brighter {
             true => s.dim.saturating_sub(1),
-            false if s.brightness == 0 => up(s.dim, 1, DIM_MAX),
+            false if s.brightness <= BRIGHTNESS_MIN => up(s.dim, 1, DIM_MAX),
             false => s.dim,
         };
         if dim != s.dim {
@@ -5322,7 +6172,7 @@ impl App {
         }
         let to = match brighter {
             true => up(s.brightness, 1, BRIGHTNESS_MAX),
-            false => s.brightness.saturating_sub(1),
+            false => s.brightness.saturating_sub(1).max(BRIGHTNESS_MIN),
         };
         if to == self.state.brightness {
             return;
@@ -5366,7 +6216,7 @@ impl App {
 
     /// Brightness as the HUD shows it: the dim steps under the backlight's.
     pub fn brightness_level(&self) -> u8 {
-        DIM_MAX - self.state.dim.min(DIM_MAX) + self.state.brightness
+        DIM_MAX - self.state.dim.min(DIM_MAX) + self.state.brightness.saturating_sub(BRIGHTNESS_MIN)
     }
 
     pub fn blue_light(&self) -> u8 {
@@ -5436,6 +6286,12 @@ impl App {
     }
 
     pub fn update(&mut self, dt: f32) {
+        if let Phase::Trophies(t) = &mut self.phase {
+            t.tick(dt);
+            if matches!(t.mode, crate::trophies::TrophyViewMode::Games) && t.picker.is_none() {
+                self.trophy_shelf.update(dt);
+            }
+        }
         self.clock += dt as f64 * 1000.0;
         if matches!(self.slot_name, SlotName::Waiting) && self.shelf_platform.face.is_some() {
             self.slot_name = SlotName::Named(self.now());
@@ -5621,7 +6477,9 @@ impl App {
     }
 
     pub fn layout(&self) -> Layout {
-        if matches!(self.phase, Phase::Playing { .. }) && self.in_game_menu_shown().is_some() {
+        // The menu's own canvas stays until its strip has slid away: the strip is placed on the
+        // canvas, so on the game's it would jump up into the picture as the menu closed.
+        if matches!(self.phase, Phase::Playing { .. }) && self.in_game_menu_panel().is_some() {
             return IN_GAME_MENU;
         }
         match &self.phase {
@@ -5738,6 +6596,18 @@ impl App {
         if let Some(scraper) = &self.scraper {
             self.scrape_view = scraper.view();
             self.show_scraped();
+        }
+        if let Some(scraper) = &self.esrb_scraper {
+            let next = scraper.view();
+            if next.rated != self.esrb_view.rated || (self.esrb_view.running && !next.running) {
+                if let Some(root) = &self.root {
+                    self.esrb = read_esrb_map(root);
+                    if self.kiosk.active {
+                        self.apply_kiosk_filter();
+                    }
+                }
+            }
+            self.esrb_view = next;
         }
         if let Some(services) = &self.services {
             self.services_view = services.view();
@@ -5881,12 +6751,544 @@ impl App {
         }
     }
 
+    fn cart_allowed(&self, platform: Platform, stem: &str) -> bool {
+        if !self.kiosk.active {
+            return true;
+        }
+        if platform == Platform::Apps && crate::apps::built_in(stem) {
+            // Files walks the whole card and runs any script on it as a port, so a kiosk has none.
+            return stem != crate::apps::FILES
+                && self.kiosk.allows_platform(Platform::Apps)
+                && !self
+                    .kiosk
+                    .blocked_games
+                    .contains(&(Platform::Apps, stem.to_string()));
+        }
+        // A port is held to the same rules as a game, as an unrated one.
+        let rating = self.esrb.get(&(platform, stem.to_string())).copied();
+        self.kiosk.allows_game(platform, stem, rating)
+    }
+
+    fn save_kiosk(&self) {
+        let Some(root) = &self.root else {
+            return;
+        };
+        if let Err(e) = write_kiosk_config(root, &self.kiosk) {
+            eprintln!("slot: kiosk.conf: {e}");
+        }
+    }
+
+    fn apply_kiosk_filter(&mut self) {
+        let shelf_at = self.shelf_at;
+        let visible: Vec<Cart> = self
+            .all_carts
+            .iter()
+            .filter(|c| self.cart_allowed(c.platform, &c.stem))
+            .cloned()
+            .collect();
+        for (at, (rack, fresh)) in shelves_of(visible).into_iter().enumerate() {
+            if rack.platform().is_none() {
+                continue;
+            }
+            let shelf = &self.shelves[at].1;
+            let (was, picked) = (
+                shelf.index,
+                shelf.carts.get(shelf.index).map(|c| c.rom.clone()),
+            );
+            if !self.restock(at, fresh.carts) {
+                continue;
+            }
+            let shelf = &mut self.shelves[at].1;
+            let i = picked
+                .and_then(|rom| shelf.carts.iter().position(|c| c.rom == rom))
+                .unwrap_or_else(|| was.min(shelf.carts.len().saturating_sub(1)));
+            shelf.select(i);
+        }
+        self.restock_recents();
+        self.restock_favorites();
+        if self.shelf().carts.is_empty() {
+            if let Some(at) = self.next_shelf(1) {
+                self.shelf_at = at;
+            }
+        }
+        if self.shelf_at != shelf_at {
+            self.shelf_platform = slot_ui::Printed::default();
+            self.slot_letter = None;
+            self.slot_name = SlotName::Waiting;
+        }
+    }
+
+    fn open_kiosk_unlock(&mut self) {
+        let (layout, title) = match self.kiosk.auth {
+            KioskAuth::Pin => (KeyLayout::Numeric, "Enter Kiosk PIN"),
+            KioskAuth::Password => (KeyLayout::General, "Enter Kiosk Password"),
+        };
+        self.phase = Phase::Keyboard {
+            keys: Keyboard::new(layout, title, None, "").masked(),
+            typing: Typing::KioskUnlock,
+            cursor: 0,
+        };
+        self.shelf_mut().release_hold();
+        self.play_held = None;
+    }
+
+    fn open_kiosk_secret(&mut self, activate: bool, cursor: usize) {
+        let (layout, title, sub) = match self.kiosk.auth {
+            KioskAuth::Pin => (KeyLayout::Numeric, "Set Kiosk PIN", "4-12 digits"),
+            KioskAuth::Password => (KeyLayout::General, "Set Kiosk Password", "1-64 characters"),
+        };
+        self.phase = Phase::Keyboard {
+            keys: Keyboard::new(layout, title, Some(sub), "").masked(),
+            typing: Typing::KioskSetSecret { activate },
+            cursor,
+        };
+    }
+
+    fn kiosk_list_page(&self, page: KioskPage) -> ListPage {
+        match page {
+            KioskPage::Main { cursor } => kiosk::main_page(&self.kiosk, &self.esrb_view, cursor),
+            KioskPage::Systems { cursor } => kiosk::systems_page(&self.kiosk, cursor),
+            KioskPage::GameSystems { cursor } => {
+                kiosk::game_systems_page(&self.all_carts, &self.kiosk, cursor)
+            }
+            KioskPage::Games { platform, cursor } => kiosk::games_page(
+                &self.all_carts,
+                &self.kiosk,
+                &self.esrb,
+                &self.esrb_manual,
+                platform,
+                cursor,
+            ),
+        }
+    }
+
+    fn kiosk_input(&mut self, page: KioskPage, action: Action) {
+        match page {
+            KioskPage::Main { cursor } => {
+                let n = KioskMainRow::ALL.len();
+                let cursor = cursor.min(n - 1);
+                match action {
+                    Action::GbaDown(Btn::Up) => {
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::Main {
+                                cursor: (cursor + n - 1) % n,
+                            },
+                        };
+                    }
+                    Action::GbaDown(Btn::Down) => {
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::Main {
+                                cursor: (cursor + 1) % n,
+                            },
+                        };
+                    }
+                    Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                        self.phase = Phase::QuickMenu {
+                            row: QuickRow::Kiosk,
+                        };
+                    }
+                    Action::GbaDown(Btn::Left)
+                    | Action::ShelfLeft
+                    | Action::GbaDown(Btn::Right)
+                    | Action::ShelfRight
+                    | Action::GbaDown(Btn::A) => {
+                        let right =
+                            !matches!(action, Action::GbaDown(Btn::Left) | Action::ShelfLeft);
+                        let activate = action == Action::GbaDown(Btn::A);
+                        match KioskMainRow::ALL[cursor] {
+                            KioskMainRow::Toggle if activate => {
+                                if self.kiosk.secret.is_empty() {
+                                    self.open_kiosk_secret(true, cursor);
+                                } else {
+                                    self.kiosk.active = true;
+                                    self.save_kiosk();
+                                    self.apply_kiosk_filter();
+                                    self.phase = Phase::Shelf;
+                                }
+                            }
+                            KioskMainRow::Auth => {
+                                self.kiosk.auth = self.kiosk.auth.toggle();
+                                if self.kiosk.auth == KioskAuth::Pin
+                                    && kiosk::valid_secret(KioskAuth::Pin, &self.kiosk.secret)
+                                        .is_err()
+                                {
+                                    self.kiosk.secret.clear();
+                                }
+                                self.save_kiosk();
+                            }
+                            KioskMainRow::Secret if activate => {
+                                self.open_kiosk_secret(false, cursor);
+                            }
+                            KioskMainRow::EsrbCap => {
+                                self.kiosk.esrb_cap = self.kiosk.esrb_cap.step(right);
+                                self.save_kiosk();
+                            }
+                            KioskMainRow::Systems if activate => {
+                                self.phase = Phase::Kiosk {
+                                    page: KioskPage::Systems { cursor: 0 },
+                                };
+                            }
+                            KioskMainRow::Systems => {
+                                self.kiosk.restrict_systems = !self.kiosk.restrict_systems;
+                                self.save_kiosk();
+                            }
+                            KioskMainRow::Games if activate => {
+                                self.phase = Phase::Kiosk {
+                                    page: KioskPage::GameSystems { cursor: 0 },
+                                };
+                            }
+                            KioskMainRow::ScrapeEsrb if activate => {
+                                if let Some(scraper) = &self.esrb_scraper {
+                                    scraper.fetch(self.all_carts.clone(), self.esrb.clone());
+                                    self.esrb_view = scraper.view();
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            KioskPage::Systems { cursor } => {
+                let n = Platform::ALL.len();
+                let cursor = cursor.min(n - 1);
+                match action {
+                    Action::GbaDown(Btn::Up) => {
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::Systems {
+                                cursor: (cursor + n - 1) % n,
+                            },
+                        };
+                    }
+                    Action::GbaDown(Btn::Down) => {
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::Systems {
+                                cursor: (cursor + 1) % n,
+                            },
+                        };
+                    }
+                    Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::Main {
+                                cursor: KioskMainRow::Systems as usize,
+                            },
+                        };
+                    }
+                    Action::GbaDown(Btn::A) => {
+                        let p = Platform::ALL[cursor];
+                        if !self.kiosk.allowed_systems.remove(&p) {
+                            self.kiosk.allowed_systems.insert(p);
+                        }
+                        self.kiosk.restrict_systems = true;
+                        self.save_kiosk();
+                    }
+                    Action::GbaDown(Btn::Y) => {
+                        if self.kiosk.allowed_systems.len() == Platform::ALL.len() {
+                            self.kiosk.allowed_systems.clear();
+                        } else {
+                            self.kiosk.allowed_systems.extend(Platform::ALL);
+                        }
+                        self.kiosk.restrict_systems = true;
+                        self.save_kiosk();
+                    }
+                    _ => {}
+                }
+            }
+            KioskPage::GameSystems { cursor } => {
+                let systems = kiosk::systems_with_games(&self.all_carts);
+                if systems.is_empty() {
+                    if matches!(action, Action::GbaDown(Btn::B) | Action::QuickMenu) {
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::Main {
+                                cursor: KioskMainRow::Games as usize,
+                            },
+                        };
+                    }
+                    return;
+                }
+                let n = systems.len();
+                let cursor = cursor.min(n - 1);
+                match action {
+                    Action::GbaDown(Btn::Up) => {
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::GameSystems {
+                                cursor: (cursor + n - 1) % n,
+                            },
+                        };
+                    }
+                    Action::GbaDown(Btn::Down) => {
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::GameSystems {
+                                cursor: (cursor + 1) % n,
+                            },
+                        };
+                    }
+                    Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::Main {
+                                cursor: KioskMainRow::Games as usize,
+                            },
+                        };
+                    }
+                    Action::GbaDown(Btn::X) => {
+                        self.kiosk.whitelist_games = !self.kiosk.whitelist_games;
+                        self.save_kiosk();
+                    }
+                    Action::GbaDown(Btn::A) => {
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::Games {
+                                platform: systems[cursor],
+                                cursor: 0,
+                            },
+                        };
+                    }
+                    _ => {}
+                }
+            }
+            KioskPage::Games { platform, cursor } => {
+                let stems: Vec<String> = kiosk::carts_on(&self.all_carts, platform)
+                    .into_iter()
+                    .map(|c| c.stem.clone())
+                    .collect();
+                if stems.is_empty() {
+                    if matches!(action, Action::GbaDown(Btn::B) | Action::QuickMenu) {
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::GameSystems { cursor: 0 },
+                        };
+                    }
+                    return;
+                }
+                let n = stems.len();
+                let cursor = cursor.min(n - 1);
+                match action {
+                    Action::GbaDown(Btn::Up) => {
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::Games {
+                                platform,
+                                cursor: (cursor + n - 1) % n,
+                            },
+                        };
+                    }
+                    Action::GbaDown(Btn::Down) => {
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::Games {
+                                platform,
+                                cursor: (cursor + 1) % n,
+                            },
+                        };
+                    }
+                    Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                        let back = kiosk::systems_with_games(&self.all_carts)
+                            .iter()
+                            .position(|p| *p == platform)
+                            .unwrap_or(0);
+                        self.phase = Phase::Kiosk {
+                            page: KioskPage::GameSystems { cursor: back },
+                        };
+                    }
+                    Action::GbaDown(Btn::X) => {
+                        self.kiosk.whitelist_games = !self.kiosk.whitelist_games;
+                        self.save_kiosk();
+                    }
+                    Action::GbaDown(Btn::A) => {
+                        let stem = &stems[cursor];
+                        let next = self.kiosk.game_rule(platform, stem).next();
+                        self.kiosk.set_game_rule(platform, stem, next);
+                        self.save_kiosk();
+                    }
+                    Action::GbaDown(Btn::Left)
+                    | Action::ShelfLeft
+                    | Action::GbaDown(Btn::Right)
+                    | Action::ShelfRight => {
+                        let right =
+                            matches!(action, Action::GbaDown(Btn::Right) | Action::ShelfRight);
+                        let stem = &stems[cursor];
+                        let key = (platform, stem.clone());
+                        let current = self.esrb.get(&key).copied();
+                        let next = Esrb::next_manual(current, right);
+                        if let Some(root) = &self.root {
+                            if let Err(e) = write_manual_esrb(root, platform, stem, next) {
+                                eprintln!("slot: esrb_manual.txt: {e}");
+                            } else {
+                                self.esrb_manual = read_manual_esrb_map(root);
+                                self.esrb = read_esrb_map(root);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn open_trophy_room(&mut self) {
+        let user = self
+            .root
+            .as_deref()
+            .and_then(crate::cheevos::account)
+            .map(|a| a.user);
+        let state = crate::trophies::TrophyState::load(
+            self.root.as_deref(),
+            user.as_deref(),
+            self.all_carts.clone(),
+        );
+        let carts = state.carousel_carts();
+        self.orphaned.extend(self.trophy_shelf.restock(carts));
+        self.phase = Phase::Trophies(state);
+    }
+
+    /// The carousel of the scope's games, rebuilt when the scope or the game set changes. The
+    /// cart in hand stays in hand while the new scope still holds it.
+    fn rebuild_trophy_carousel(&mut self) {
+        let Phase::Trophies(t) = &self.phase else {
+            return;
+        };
+        let at = self.trophy_shelf.index;
+        let held = self
+            .trophy_shelf
+            .carts
+            .get(at)
+            .map(|c| (c.platform, c.stem.clone()));
+        let carts = t.carousel_carts();
+        self.orphaned.extend(self.trophy_shelf.restock(carts));
+        let n = self.trophy_shelf.carts.len();
+        if n > 0 {
+            let pick = held
+                .and_then(|(platform, stem)| {
+                    self.trophy_shelf
+                        .carts
+                        .iter()
+                        .position(|c| c.platform == platform && c.stem == stem)
+                })
+                .unwrap_or(0);
+            self.trophy_shelf.select(pick);
+        }
+    }
+
+    /// What the room writes under what is in hand, once it is up: the carousel of games after it
+    /// has come up from behind the slot's front, a trophy carousel at once.
+    fn trophy_labels(&self) -> Option<crate::trophies::TrophyLabels> {
+        let Phase::Trophies(t) = &self.phase else {
+            return None;
+        };
+        if t.picker.is_some() || (self.on_trophy_carousel() && !t.rising()) {
+            return None;
+        }
+        Some(t.labels(self.trophy_shelf.index))
+    }
+
+    /// Whether the room's carousel of games is what the phase is, rather than a trophy carousel.
+    fn on_trophy_carousel(&self) -> bool {
+        matches!(&self.phase, Phase::Trophies(t) if matches!(t.mode, crate::trophies::TrophyViewMode::Games) && t.picker.is_none())
+    }
+
+    pub fn in_trophy_room(&self) -> bool {
+        matches!(&self.phase, Phase::Trophies(t) if t.picker.is_none())
+    }
+
+    pub fn set_trophy_textures(&mut self, tex: Option<slot_ui::TrophyTextures>) {
+        self.trophy_textures = tex;
+    }
+
+    fn trophies_input(&mut self, action: Action) {
+        let root = self.root.clone();
+        // The way in is watched, not acted on: a press settles it to the room it is going to,
+        // and Menu leaves as it would from the room.
+        if let Phase::Trophies(t) = &mut self.phase {
+            if t.intro != crate::trophies::TrophyIntro::Done
+                && t.picker.is_none()
+                && !matches!(action, Action::GbaUp(_))
+            {
+                t.settle();
+                if action == Action::QuickMenu {
+                    self.phase = Phase::QuickMenu {
+                        row: QuickRow::TrophyRoom,
+                    };
+                }
+                return;
+            }
+        }
+        if self.on_trophy_carousel() {
+            self.carousel_input(action);
+            self.sync_trophy_carousel();
+            return;
+        }
+        let Phase::Trophies(t) = &mut self.phase else {
+            return;
+        };
+        if !t.input(root.as_deref(), action) {
+            self.phase = Phase::QuickMenu {
+                row: QuickRow::TrophyRoom,
+            };
+        }
+        self.sync_trophy_carousel();
+    }
+
+    /// The room's carousel takes the shelf's own keys.
+    fn carousel_input(&mut self, action: Action) {
+        let Phase::Trophies(t) = &mut self.phase else {
+            return;
+        };
+        let n = self.trophy_shelf.carts.len();
+        match action {
+            Action::GbaDown(Btn::Left) | Action::ShelfLeft => self.trophy_shelf.left(),
+            Action::GbaDown(Btn::Right) | Action::ShelfRight => self.trophy_shelf.right(),
+            Action::GbaDown(Btn::L1) if n > 0 => {
+                let at = (self.trophy_shelf.index + n - 4) % n;
+                self.trophy_shelf.select(at);
+            }
+            Action::GbaDown(Btn::R1) if n > 0 => {
+                let at = (self.trophy_shelf.index + 4) % n;
+                self.trophy_shelf.select(at);
+            }
+            Action::GbaDown(Btn::A) if n > 0 => {
+                let picked = self.trophy_shelf.index;
+                t.drill(picked);
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::TrophyRoom,
+                };
+            }
+            Action::GbaDown(Btn::X) => {
+                t.cycle_scope();
+            }
+            Action::GbaDown(Btn::Y) => {
+                t.y_action();
+            }
+            Action::GbaDown(Btn::Start) => t.all_trophies(),
+            Action::GbaDown(Btn::Select) => t.open_set(),
+            _ => {}
+        }
+    }
+
+    /// Rebuilds the carousel when the scope or the game set has changed it.
+    fn sync_trophy_carousel(&mut self) {
+        if !self.on_trophy_carousel() {
+            return;
+        }
+        let Phase::Trophies(t) = &self.phase else {
+            return;
+        };
+        let carts = t.carousel_carts();
+        let same = carts.len() == self.trophy_shelf.carts.len()
+            && carts
+                .iter()
+                .zip(&self.trophy_shelf.carts)
+                .all(|(a, b)| a.platform == b.platform && a.stem == b.stem);
+        if same {
+            return;
+        }
+        self.rebuild_trophy_carousel();
+    }
+
     fn restock_recents(&mut self) {
         let carts: Vec<Cart> = match self.state.show_recents {
             true => self
                 .state
                 .recents
                 .iter()
+                .filter(|r| self.cart_allowed(r.platform, &r.stem))
                 .filter_map(|r| {
                     self.carts()
                         .find(|c| c.platform == r.platform && c.stem == r.stem)
@@ -5902,6 +7304,7 @@ impl App {
     fn restock_favorites(&mut self) {
         let mut carts: Vec<Cart> = self
             .carts()
+            .filter(|c| self.cart_allowed(c.platform, &c.stem))
             .filter(|c| self.state.is_favorite(c.platform, &c.stem))
             .cloned()
             .collect();
@@ -5992,37 +7395,9 @@ impl App {
 
     /// Gives each system's shelf the games now on the card, each staying on the cart it was on.
     fn restock_games(&mut self, carts: Vec<Cart>) {
-        let shelf_at = self.shelf_at;
-        for (at, (rack, fresh)) in shelves_of(carts).into_iter().enumerate() {
-            if rack.platform().is_none() {
-                continue;
-            }
-            let shelf = &self.shelves[at].1;
-            let (was, picked) = (
-                shelf.index,
-                shelf.carts.get(shelf.index).map(|c| c.rom.clone()),
-            );
-            if !self.restock(at, fresh.carts) {
-                continue;
-            }
-            let shelf = &mut self.shelves[at].1;
-            let i = picked
-                .and_then(|rom| shelf.carts.iter().position(|c| c.rom == rom))
-                .unwrap_or_else(|| was.min(shelf.carts.len().saturating_sub(1)));
-            shelf.select(i);
-        }
-        if self.shelf().carts.is_empty() {
-            if let Some(at) = self.next_shelf(1) {
-                self.shelf_at = at;
-            }
-        }
-        self.restock_recents();
-        self.restock_favorites();
-        if self.shelf_at != shelf_at {
-            self.shelf_platform = slot_ui::Printed::default();
-            self.slot_letter = None;
-            self.slot_name = SlotName::Waiting;
-        }
+        // A rescan returns the apps too.
+        self.all_carts = carts;
+        self.apply_kiosk_filter();
     }
 
     /// The line at the top of the shelf: how far Syncthing has got while it fetches, else a new
@@ -6426,7 +7801,7 @@ impl App {
                 picker.draw(self.canvas(), line, hint, back, out);
                 return;
             }
-            Phase::QuickMenu { .. } if self.controls.is_some() => {
+            Phase::QuickMenu { .. } if self.controls.is_some() || self.shader_params.is_some() => {
                 slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
                 if let Some((tex, w, h)) = self.page_face {
                     let canvas = self.canvas();
@@ -6536,27 +7911,128 @@ impl App {
             | Phase::GameArt { .. }
             | Phase::Cores { .. }
             | Phase::Search { .. }
-            | Phase::Keyboard { .. } => {
-                slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
-                if let Some((tex, w, h)) = self.page_face {
-                    let canvas = self.canvas();
-                    out.push(Draw::Tex {
-                        x: canvas.centred(w as f32).round(),
-                        y: ((canvas.h - h as f32) / 2.0).floor(),
-                        w: w as f32,
-                        h: h as f32,
-                        tex,
-                        alpha: 1.0,
-                    });
+            | Phase::Kiosk { .. } => {
+                self.draw_list_page_screen(out);
+                return;
+            }
+            Phase::Trophies(t) if t.picker.is_some() => {
+                self.draw_list_page_screen(out);
+                return;
+            }
+            Phase::Trophies(t) => {
+                let Some(tex) = self.trophy_textures else {
+                    slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
+                    return;
+                };
+                let canvas = self.canvas();
+                if !matches!(t.mode, crate::trophies::TrophyViewMode::Games) {
+                    let tiers = t.strip_tiers();
+                    let row = slot_ui::trophy_strip_row(canvas, tiers.len(), t.scroll(), t.enter());
+                    // The light stays where the trophy will stand, so they rise into it.
+                    let focus = slot_ui::trophy_strip_row(canvas, tiers.len(), t.scroll(), 1.0)
+                        .into_iter()
+                        .min_by(|a, b| {
+                            let (da, db) = (
+                                (a.index as f32 - t.scroll()).abs(),
+                                (b.index as f32 - t.scroll()).abs(),
+                            );
+                            da.total_cmp(&db)
+                        })
+                        .map(|p| (p.x, p.y, p.w, p.h));
+                    self.draw_background(out);
+                    slot_ui::draw_trophy_ground(canvas, self.menu_ground(), &tex, focus, 1.0, out);
+                    slot_ui::draw_trophy_strip(&tex, &tiers, &row, out);
+                    draw_empty_slot(canvas, self.slot_faces, out);
+                    self.draw_trophy_labels(1.0, out);
+                    draw_footer(
+                        canvas,
+                        self.gauge(),
+                        self.bolt,
+                        self.shelf_clock,
+                        &self.net_icons(),
+                        footer_ink(self.light()),
+                        out,
+                    );
+                    return;
                 }
-                if matches!(
-                    self.phase,
-                    Phase::Keyboard {
-                        typing: Typing::Hostname,
-                        ..
+                let canvas = self.canvas();
+                let (shelf, sink) = match t.rising() {
+                    true => (
+                        &self.trophy_shelf,
+                        t.sink(self.trophy_shelf.size(self.trophy_shelf.index).1 as f32),
+                    ),
+                    false => (
+                        self.shelf(),
+                        t.sink(self.shelf().size(self.shelf().index).1 as f32),
+                    ),
+                };
+                let focus = self
+                    .trophy_shelf
+                    .row(canvas, None, 0.0, 0.0)
+                    .into_iter()
+                    .find(|p| p.index == self.trophy_shelf.index)
+                    .map(|p| (p.x, p.y, p.w, p.h));
+                self.draw_background(out);
+                if t.rising() {
+                    slot_ui::draw_trophy_ground(
+                        canvas,
+                        self.menu_ground(),
+                        &tex,
+                        focus,
+                        t.brass(),
+                        out,
+                    );
+                }
+                shelf.draw_row_at(canvas, None, 0.0, 0.0, 1.0, sink, out);
+                draw_empty_slot(canvas, self.slot_faces, out);
+                if t.rising() {
+                    let games = t.carousel_games();
+                    let badges: Vec<slot_ui::TrophyBadge> = self
+                        .trophy_shelf
+                        .row(canvas, None, 0.0, 0.0)
+                        .into_iter()
+                        .filter_map(|p| {
+                            let game = games.get(p.index)?;
+                            let scale = p.w / self.trophy_shelf.size(p.index).0 as f32;
+                            Some(slot_ui::trophy_badge_over(
+                                (p.x, p.y, p.w, p.h),
+                                scale,
+                                game.tier(),
+                                p.index == self.trophy_shelf.index,
+                                p.alpha,
+                            ))
+                        })
+                        .collect();
+                    slot_ui::draw_trophy_carousel(&tex, t.brass(), &badges, out);
+                    self.draw_trophy_labels(t.brass(), out);
+                } else {
+                    draw_slot_name(canvas, self.shelf_platform, 1.0, out);
+                    slot_ui::draw_slot_title(canvas, self.shelf_title, self.title_alpha(), out);
+                }
+                draw_footer(
+                    canvas,
+                    self.gauge(),
+                    self.bolt,
+                    self.shelf_clock,
+                    &self.net_icons(),
+                    footer_ink(self.light()),
+                    out,
+                );
+                return;
+            }
+            Phase::Keyboard { keys, .. } => {
+                let canvas = self.canvas();
+                if let Some(tex) = &self.keyboard_tex {
+                    draw_keyboard(canvas, self.menu_ground(), tex, keys, out);
+                    if !keys.help() {
+                        draw_empty_slot(canvas, self.slot_faces, out);
+                        draw_keyboard_legends(canvas, tex, out);
                     }
-                ) {
-                    self.draw_cheevo(out);
+                } else {
+                    slot_ui::draw_menu_ground(canvas, self.menu_ground(), out);
+                    if !keys.help() {
+                        draw_empty_slot(canvas, self.slot_faces, out);
+                    }
                 }
                 return;
             }
@@ -6614,7 +8090,7 @@ impl App {
             }
         }
         if let (Some(row), Phase::Playing { .. }, true) =
-            (self.in_game_menu_shown(), &self.phase, self.screen >= 1.0)
+            (self.in_game_menu_panel(), &self.phase, self.screen >= 1.0)
         {
             QuickMenu {
                 row,
@@ -6707,6 +8183,21 @@ impl App {
             return 0.0;
         }
         self.refusal.map_or(0.0, |r| r.offset(now))
+    }
+
+    fn draw_list_page_screen(&self, out: &mut Vec<Draw>) {
+        slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
+        if let Some((tex, w, h)) = self.page_face {
+            let canvas = self.canvas();
+            out.push(Draw::Tex {
+                x: canvas.centred(w as f32).round(),
+                y: ((canvas.h - h as f32) / 2.0).floor(),
+                w: w as f32,
+                h: h as f32,
+                tex,
+                alpha: 1.0,
+            });
+        }
     }
 
     fn push_game(&self, out: &mut Vec<Draw>) {
@@ -7236,7 +8727,10 @@ impl App {
             return self.open_app(at);
         }
         if platform == Platform::Nds {
-            return self.hand_to_drastic(at);
+            return self.hand_to_standalone(at, crate::apps::ports::DRASTIC, "drastic");
+        }
+        if platform == Platform::Psp {
+            return self.hand_to_standalone(at, crate::apps::ports::PPSSPP, "ppsspp");
         }
         if let Some(missing) = self.missing_bios(platform) {
             eprintln!("slot: launch: {cart} needs BIOS/{missing}, which is not on the card");
@@ -7293,6 +8787,7 @@ impl App {
         self.in_game_menu = None;
         self.game_cast = None;
         self.controls = None;
+        self.shader_params = None;
         self.core_options = None;
     }
 
@@ -7574,7 +9069,7 @@ impl App {
     fn open_search(&mut self, again: bool) {
         let query = self.search.as_ref().map_or("", |s| s.query.as_str());
         self.phase = Phase::Keyboard {
-            keys: Keyboard::new("Search for a game", query, false, 1, 48),
+            keys: Keyboard::new(KeyLayout::General, "Search", None, query),
             typing: Typing::Search { again },
             cursor: 0,
         };

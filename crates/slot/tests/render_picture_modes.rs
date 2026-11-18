@@ -225,3 +225,127 @@ fn l_widens_the_picture_like_a_gba_and_r_gives_back_the_centred_picture() {
         "R left the panel dark"
     );
 }
+
+#[test]
+fn gb_fit_stretches_vertically_with_side_bezels_on_640x480_and_computes_cubexx_layout() {
+    use slot::app::App;
+    use slot_gfx::{game_layout, Sizing, SRC_H, SRC_W};
+    use slot_store::{write_slot_state, BezelPick, Scale, SlotState};
+
+    let cubexx_fit = game_layout((720, 720), (160, 144), Sizing::Fit);
+    assert!(cubexx_fit.panel);
+    assert_eq!(cubexx_fit.rect, [0.0, 24.0, 720.0, 432.0]);
+    let cubexx_int = game_layout((720, 720), (160, 144), Sizing::Integer);
+    assert!(cubexx_int.panel);
+    assert_eq!(cubexx_int.rect, [40.0, 48.0, 640.0, 384.0]);
+
+    let d = tmp_root_with_gb_carts(&["Zzz"]);
+    write_slot_state(
+        d.path(),
+        &SlotState {
+            clock_set: true,
+            scale_gb: Scale::Fit,
+            ..SlotState::default()
+        },
+    )
+    .unwrap();
+    let mut app = App::boot(d.path());
+    app.set_panel((640, 480));
+    assert_eq!(app.resolved_scale(Platform::Gb), Scale::Fit);
+    assert_eq!(app.resolved_bezel(Platform::Gb), BezelPick::Default);
+    assert_eq!(app.game_bezel_size(), (640, 480));
+
+    let Ok(surface) = HeadlessSurface::new() else {
+        return;
+    };
+    let Ok(mut c) = Compositor::new(&surface) else {
+        return;
+    };
+    let bezel_rgba =
+        slot_ui::default_game_bezel_face(false, slot_ui::BezelArt::Fit4x3, 640, 480).unwrap();
+    let bezel_tex = c.create_texture(640, 480, &bezel_rgba);
+    let mut frame = vec![0u8; (SRC_W * SRC_H * 4) as usize];
+    for px in frame.chunks_exact_mut(4) {
+        px.copy_from_slice(&[0xff, 0xff, 0xff, 0xff]);
+    }
+    let (sizing, src_rect) = slot::video_mode::picture_for(
+        Platform::Gb,
+        app.video_mode(),
+        Scale::Fit,
+        app.resolved_stretch(Platform::Gb),
+    );
+    c.fit((640, 480));
+    c.set_screen_power(1.0);
+    c.set_game_source_rect(src_rect);
+    c.set_game_layout(game_layout((640, 480), Platform::Gb.picture(), sizing));
+    c.set_game_bezel(Some(bezel_tex));
+    c.begin_frame(slot_gfx::Layout::Framed);
+    c.upload_game(&frame, (SRC_W, SRC_H));
+    c.draw_list(&[slot_gfx::Draw::Game]);
+    let px = c.read_window((640, 480));
+    let lit_640 = |xs: std::ops::Range<usize>, ys: std::ops::Range<usize>| -> usize {
+        ys.flat_map(|y| xs.clone().map(move |x| (x, y)))
+            .filter(|(x, y)| {
+                let o = (*y * 640 + *x) * 4;
+                px[o..o + 3].iter().any(|&v| v > 8)
+            })
+            .count()
+    };
+    assert!(
+        lit_640(100..540, 0..BAR_H) > 500,
+        "Fit on 640x480 did not reach the top rows"
+    );
+    assert!(
+        lit_640(100..540, 480 - BAR_H..480) > 500,
+        "Fit on 640x480 did not reach the bottom rows"
+    );
+    assert!(
+        lit_640(0..50, 0..480) > 1000,
+        "left 4:3 Fit bezel missing on 640x480"
+    );
+    assert!(
+        lit_640(590..640, 0..480) > 1000,
+        "right 4:3 Fit bezel missing on 640x480"
+    );
+
+    let _core = core_lock();
+    let core = Core::default_for(Platform::Gb);
+    let file = format!(
+        "{}_libretro.{}",
+        core.as_str(),
+        std::env::consts::DLL_EXTENSION
+    );
+    let dylib = repo_root().join("vendor").join(&file);
+    if !dylib.exists() {
+        eprintln!("no {} dylib, skipping", core.as_str());
+        return;
+    }
+    let Some(()) = put_card_cart(d.path()) else {
+        eprintln!("no Game Boy cart on this machine's card, skipping");
+        return;
+    };
+    std::fs::copy(&dylib, d.path().join("System").join(&file)).expect("plant the core");
+    clocked(d.path());
+
+    let mut f = Frontend::boot(Box::new(SimPlatform::at(d.path().to_path_buf())));
+    f.upload_faces(&mut c);
+    let mut input = Script(VecDeque::new());
+    input.0.push_back(vec![RawEvent::Down(Btn::A)]);
+    f.advance(&mut input);
+    input.0.push_back(vec![RawEvent::Up(Btn::A)]);
+    f.advance(&mut input);
+    run_for(&mut f, &mut input, 5.0);
+
+    f.render(&mut c, (640, 480));
+    let px = c.read_window((640, 480));
+    let lit_core = |xs: std::ops::Range<usize>, ys: std::ops::Range<usize>| -> usize {
+        ys.flat_map(|y| xs.clone().map(move |x| (x, y)))
+            .filter(|(x, y)| {
+                let o = (*y * 640 + *x) * 4;
+                px[o..o + 3].iter().any(|&v| v > 8)
+            })
+            .count()
+    };
+    assert!(lit_core(100..540, 0..BAR_H) > 500);
+    assert!(lit_core(100..540, 480 - BAR_H..480) > 500);
+}

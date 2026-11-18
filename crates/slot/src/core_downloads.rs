@@ -237,6 +237,14 @@ fn work(
                             set(&mut |v| v.downloading = Some((core, pct)));
                         },
                     )?;
+                    // libretro builds its cores for the H700's firmware; one that will not load
+                    // on this one is not kept, rather than failing each game it is picked for.
+                    if let Some(missing) = missing_here(&path(&root, core)) {
+                        let _ = std::fs::remove_file(path(&root, core));
+                        return Err(format!(
+                            "needs {missing}, which this handheld's firmware does not have"
+                        ));
+                    }
                     Ok(l.sha256)
                 });
                 if let Err(e) = &fetched {
@@ -265,6 +273,46 @@ fn work(
             }
         }
     }
+}
+
+/// What a core needs that this firmware does not have, by the loader's own check, or none.
+fn missing_here(lib: &Path) -> Option<String> {
+    #[cfg(feature = "device")]
+    let text = {
+        let out = std::process::Command::new("/lib/ld-linux-aarch64.so.1")
+            .arg("--list")
+            .arg(lib)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .ok()?;
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )
+    };
+    #[cfg(not(feature = "device"))]
+    let text = {
+        let _ = lib;
+        String::new()
+    };
+    missing_in(&text)
+}
+
+/// The first thing `ld.so --list` could not find: a symbol version, or a library.
+pub fn missing_in(list: &str) -> Option<String> {
+    let line = list.lines().find(|l| l.contains("not found"))?;
+    // "...: version `GLIBCXX_3.4.29' not found (required by ...)"
+    if let Some(version) = line.split('`').nth(1).and_then(|r| r.split('\'').next()) {
+        return Some(version.to_string());
+    }
+    // "\tlibfoo.so.1 => not found"
+    Some(
+        line.split_whitespace()
+            .next()
+            .unwrap_or("a library")
+            .to_string(),
+    )
 }
 
 /// A pretend release for the desktop and the tests: every downloaded core, each the bytes
@@ -452,6 +500,16 @@ mod tests {
         fn release_key(&self) -> [u8; 32] {
             test_key()
         }
+    }
+
+    #[test]
+    fn what_the_loader_could_not_find_is_named() {
+        let version = "./nestopia_libretro.so: /usr/lib/libstdc++.so.6: version `GLIBCXX_3.4.29' \
+                       not found (required by ./nestopia_libretro.so)\n\tlibc.so.6 => /lib/libc.so.6";
+        assert_eq!(missing_in(version).as_deref(), Some("GLIBCXX_3.4.29"));
+        let library = "\tlibGL.so.1 => not found\n\tlibc.so.6 => /lib/libc.so.6 (0x0000)";
+        assert_eq!(missing_in(library).as_deref(), Some("libGL.so.1"));
+        assert_eq!(missing_in("\tlibc.so.6 => /lib/libc.so.6 (0x0000)\n"), None);
     }
 
     #[test]

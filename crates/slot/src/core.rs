@@ -95,10 +95,8 @@ fn open_named(
     paths: &[PathBuf],
 ) -> Option<Box<dyn RetroCore>> {
     #[cfg(feature = "device")]
-    if matches!(
-        core,
-        Core::Nodosumi | Core::Flycast | Core::ParallelN64 | Core::Ppsspp
-    ) && palette.is_none()
+    if matches!(core, Core::Nodosumi | Core::Flycast | Core::ParallelN64)
+        && palette.is_none()
         && link.is_none()
     {
         match open_remote(root, core, platform, serial, colour, paths) {
@@ -204,7 +202,6 @@ fn open_here(
     paths: &[PathBuf],
 ) -> Option<Box<dyn RetroCore>> {
     crate::gpu::install();
-    root::seed_core_files(root, core);
     let bios = root::bios_dir(root);
     let saves = root::saves_dir(root);
     for path in paths {
@@ -353,13 +350,6 @@ pub const H700_OPTIONS: &[(Core, &str, &str)] = &[
     (Core::Flycast, "reicast_anisotropic_filtering", "off"),
     (Core::Flycast, "reicast_per_content_vmus", "All VMUs"),
     (Core::Flycast, "reicast_analog_stick_deadzone", "15%"),
-    (Core::Ppsspp, "ppsspp_internal_resolution", "480x272"),
-    (Core::Ppsspp, "ppsspp_cpu_core", "JIT"),
-    (Core::Ppsspp, "ppsspp_fast_memory", "enabled"),
-    (Core::Ppsspp, "ppsspp_auto_frameskip", "enabled"),
-    (Core::Ppsspp, "ppsspp_skip_gpu_readbacks", "enabled"),
-    (Core::Ppsspp, "ppsspp_texture_scaling_level", "disabled"),
-    (Core::Ppsspp, "ppsspp_io_timing_method", "Fast"),
     (Core::Fbneo, "fbneo-frameskip-type", "disabled"),
     (Core::Fbneo, "fbneo-diagnostic-input", "Start + L + R"),
     (Core::Fbneo, "fbneo-memcard-mode", "per-game"),

@@ -44,6 +44,10 @@ impl Canvas {
         self.h - OUT_H as f32
     }
 
+    pub fn inset_y(self) -> f32 {
+        self.extra() / 2.0
+    }
+
     pub fn centred(self, w: f32) -> f32 {
         (self.w - w) / 2.0
     }

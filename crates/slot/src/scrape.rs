@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use slot_store::{Cart, Platform};
+use slot_store::{write_scraped_esrb, Cart, Esrb, Platform};
 
 use crate::json;
 
@@ -143,6 +143,53 @@ fn dat_url(set: &str) -> String {
         _ => format!("metadat/no-intro/{set}"),
     };
     format!("{DATS}/{}.dat", encode(&path).replace("%2F", "/"))
+}
+
+pub fn esrb_dat_url(set: &str) -> String {
+    format!("{DATS}/metadat/esrb/{}.dat", encode(set))
+}
+
+fn quoted_field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let rest = line.strip_prefix(key)?.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.rfind('"')?;
+    Some(&rest[..end])
+}
+
+/// Parses a `libretro-database/metadat/esrb/*.dat` clrmamepro file, handling `esrb_rating` /
+/// `esrb` appearing in any order relative to `name` inside each `game (` block.
+pub fn parse_esrb_dat(text: &str) -> Vec<(String, Esrb)> {
+    let mut out = Vec::new();
+    let mut in_game = false;
+    let mut name: Option<String> = None;
+    let mut rating: Option<Esrb> = None;
+    let flush = |out: &mut Vec<(String, Esrb)>, n: &mut Option<String>, r: &mut Option<Esrb>| {
+        if let (Some(n), Some(r)) = (n.take(), r.take()) {
+            out.push((n, r));
+        } else {
+            *n = None;
+            *r = None;
+        }
+    };
+    for line in text.lines().map(str::trim) {
+        if line.starts_with("game (") {
+            flush(&mut out, &mut name, &mut rating);
+            in_game = true;
+        } else if in_game && line == ")" {
+            flush(&mut out, &mut name, &mut rating);
+            in_game = false;
+        } else if in_game {
+            if let Some(val) = quoted_field(line, "name") {
+                name = Some(val.to_string());
+            } else if let Some(val) =
+                quoted_field(line, "esrb_rating").or_else(|| quoted_field(line, "esrb"))
+            {
+                rating = Esrb::parse(val);
+            }
+        }
+    }
+    flush(&mut out, &mut name, &mut rating);
+    out
 }
 
 /// libretro-thumbnails names a picture after the game, with what its filesystem forbids made `_`.
@@ -441,6 +488,24 @@ pub fn ss_media(text: &str, kind: &str) -> Option<String> {
         .map(|(_, url)| url.clone())
 }
 
+/// Extracts an ESRB rating from ScreenScraper's `jeuInfos` `"classifications"` array.
+pub fn ss_esrb(text: &str) -> Option<Esrb> {
+    let at = text.find("\"classifications\"")?;
+    let after = &text[at..];
+    let start = after.find('[')?;
+    let rest = &after[start + 1..];
+    let end = rest.find(']')?;
+    for obj in rest[..end].split('}') {
+        if json::string(obj, "type").is_some_and(|t| t.eq_ignore_ascii_case("esrb")) {
+            let raw = json::string(obj, "texte").or_else(|| json::string(obj, "text"));
+            if let Some(rating) = raw.as_deref().and_then(Esrb::parse) {
+                return Some(rating);
+            }
+        }
+    }
+    None
+}
+
 /// Fetching, as the worker does it.
 pub trait Fetch: Send {
     /// What is at `url`: `Ok(None)` when there is nothing there, `Err` when the network failed.
@@ -654,6 +719,9 @@ fn label_for(
         let with_render = slot_ui::has_real_media(cart.platform);
         match ss_art(fetch, login, system, crc, size, file, with_render) {
             Ok(art) => {
+                if let Some(rating) = art.esrb {
+                    let _ = write_scraped_esrb(root, cart.platform, &cart.stem, rating);
+                }
                 logo = png(art.logo);
                 boxart = png(art.boxart);
                 texture = art.texture;
@@ -718,6 +786,7 @@ struct SsArt {
     boxart: Option<Vec<u8>>,
     texture: Option<Vec<u8>>,
     render: Option<Vec<u8>>,
+    esrb: Option<Esrb>,
 }
 
 /// ScreenScraper's logo and box art for one game, fetched from the `jeuInfos` answer. An error
@@ -736,6 +805,7 @@ fn ss_art(
         return Ok(art);
     };
     let answer = String::from_utf8_lossy(&answer);
+    art.esrb = ss_esrb(&answer);
     if let Some(url) = ss_media(&answer, "wheel") {
         art.logo = fetch.get(&url)?;
     }
@@ -842,6 +912,12 @@ fn sim_png(w: u32, h: u32, px: [u8; 4]) -> Vec<u8> {
 
 impl Fetch for SimFetch {
     fn get(&mut self, url: &str) -> Result<Option<Vec<u8>>, String> {
+        if url.contains("metadat/esrb/") && url.ends_with(".dat") {
+            return Ok(Some(
+                b"game (\n\tname \"Pretend Game (USA)\"\n\tesrb_rating \"E - Everyone\"\n)\n"
+                    .to_vec(),
+            ));
+        }
         if url.ends_with(".dat") {
             return Ok(Some(
                 format!(
@@ -858,6 +934,194 @@ impl Fetch for SimFetch {
             }));
         }
         Ok(None)
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct EsrbView {
+    pub running: bool,
+    pub done: usize,
+    pub total: usize,
+    pub rated: usize,
+    pub error: Option<String>,
+}
+
+type EsrbJob = (Vec<Cart>, HashMap<(Platform, String), Esrb>);
+
+pub struct EsrbScraper {
+    jobs: Sender<EsrbJob>,
+    view: Arc<Mutex<EsrbView>>,
+}
+
+impl EsrbScraper {
+    pub fn spawn(fetch: Box<dyn Fetch>, root: &Path) -> EsrbScraper {
+        let (jobs, rx) = channel();
+        let view = Arc::new(Mutex::new(EsrbView::default()));
+        let shared = view.clone();
+        let root = root.to_path_buf();
+        let spawned = std::thread::Builder::new()
+            .name("slot-esrb-scraper".into())
+            .spawn(move || work_esrb(fetch, root, rx, shared));
+        if let Err(e) = spawned {
+            eprintln!("slot: esrb scraper: {e}");
+        }
+        EsrbScraper { jobs, view }
+    }
+
+    pub fn for_card(root: &Path) -> EsrbScraper {
+        #[cfg(all(feature = "device", unix))]
+        let fetch: Box<dyn Fetch> = Box::new(Curl);
+        #[cfg(not(all(feature = "device", unix)))]
+        let fetch: Box<dyn Fetch> = Box::new(SimFetch);
+        EsrbScraper::spawn(fetch, root)
+    }
+
+    pub fn fetch(&self, carts: Vec<Cart>, existing: HashMap<(Platform, String), Esrb>) {
+        let mut view = self.view.lock().unwrap_or_else(|e| e.into_inner());
+        let missing: Vec<Cart> = carts
+            .into_iter()
+            .filter(|c| {
+                c.platform != Platform::Apps
+                    && !existing.contains_key(&(c.platform, c.stem.clone()))
+            })
+            .collect();
+        if view.running || missing.is_empty() {
+            return;
+        }
+        view.running = true;
+        view.total = missing.len();
+        view.done = 0;
+        view.rated = 0;
+        view.error = None;
+        if self.jobs.send((missing, existing)).is_err() {
+            view.running = false;
+        }
+    }
+
+    pub fn view(&self) -> EsrbView {
+        self.view.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+struct EsrbIndex {
+    exact: HashMap<String, Esrb>,
+    by_key: HashMap<String, Esrb>,
+}
+
+impl EsrbIndex {
+    fn from_entries(entries: Vec<(String, Esrb)>) -> Self {
+        let mut exact = HashMap::new();
+        let mut by_key = HashMap::new();
+        for (name, esrb) in entries {
+            exact.entry(name.to_ascii_lowercase()).or_insert(esrb);
+            by_key.entry(title_key(&name)).or_insert(esrb);
+        }
+        EsrbIndex { exact, by_key }
+    }
+
+    fn lookup(&self, cart: &Cart) -> Option<Esrb> {
+        let candidates = [cart.shelf_name(), cart.stem.as_str(), cart.title.as_str()];
+        for c in candidates {
+            if let Some(&r) = self.exact.get(&c.to_ascii_lowercase()) {
+                return Some(r);
+            }
+        }
+        for c in candidates {
+            let key = title_key(c);
+            if !key.is_empty() {
+                if let Some(&r) = self.by_key.get(&key) {
+                    return Some(r);
+                }
+            }
+        }
+        None
+    }
+}
+
+fn load_esrb_dat<'a>(
+    fetch: &mut dyn Fetch,
+    root: &Path,
+    cache: &'a mut HashMap<&'static str, EsrbIndex>,
+    set: &'static str,
+) -> Result<&'a EsrbIndex, String> {
+    if !cache.contains_key(set) {
+        let path = root.join(CACHE).join(format!("esrb-{set}.dat"));
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(_) => {
+                let bytes = fetch.get(&esrb_dat_url(set))?.unwrap_or_default();
+                if !bytes.is_empty() {
+                    let _ = std::fs::create_dir_all(root.join(CACHE));
+                    let _ = std::fs::write(&path, &bytes);
+                }
+                String::from_utf8_lossy(&bytes).into_owned()
+            }
+        };
+        cache.insert(set, EsrbIndex::from_entries(parse_esrb_dat(&text)));
+    }
+    Ok(&cache[set])
+}
+
+fn work_esrb(
+    mut fetch: Box<dyn Fetch>,
+    root: PathBuf,
+    jobs: Receiver<EsrbJob>,
+    view: Arc<Mutex<EsrbView>>,
+) {
+    let set =
+        |f: &mut dyn FnMut(&mut EsrbView)| f(&mut view.lock().unwrap_or_else(|e| e.into_inner()));
+    let mut cache: HashMap<&'static str, EsrbIndex> = HashMap::new();
+    while let Ok((carts, _existing)) = jobs.recv() {
+        let login = read_ss_conf(&root);
+        let total = carts.len();
+        set(&mut |v| {
+            v.running = true;
+            v.done = 0;
+            v.total = total;
+            v.rated = 0;
+            v.error = None;
+        });
+        for cart in carts {
+            let (sets, system) = source(cart.platform, &cart.rom);
+            let mut found = None;
+            for set_name in sets {
+                match load_esrb_dat(&mut *fetch, &root, &mut cache, set_name) {
+                    Ok(idx) => {
+                        if let Some(r) = idx.lookup(&cart) {
+                            found = Some(r);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        set(&mut |v| v.error = Some(e.clone()));
+                        found = None;
+                        break;
+                    }
+                }
+            }
+            if found.is_none() {
+                if let Some(login) = &login {
+                    let size = std::fs::metadata(&cart.rom).map(|m| m.len()).unwrap_or(0);
+                    let file = cart
+                        .rom
+                        .file_name()
+                        .and_then(|f| f.to_str())
+                        .unwrap_or(&cart.stem);
+                    let crc = crc_of(&cart.rom);
+                    if let Ok(Some(bytes)) = fetch.get(&ss_url(login, system, crc, size, file)) {
+                        let body = String::from_utf8_lossy(&bytes);
+                        found = ss_esrb(&body);
+                    }
+                }
+            }
+            if let Some(rating) = found {
+                if write_scraped_esrb(&root, cart.platform, &cart.stem, rating).is_ok() {
+                    set(&mut |v| v.rated += 1);
+                }
+            }
+            set(&mut |v| v.done += 1);
+        }
+        set(&mut |v| v.running = false);
     }
 }
 

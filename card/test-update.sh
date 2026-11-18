@@ -92,6 +92,15 @@ install || fail "the install with bundled wallpapers failed"
 	fail "a slot the old System shipped was lost"
 [ "$(cat "$CARD/Wallpapers/mine.png")" = "mine" ] || fail "your own wallpaper was touched"
 
+# The shelf's label cache goes into the new System rather than being drawn again from nothing.
+card
+mkdir -p "$CARD/System/Cache/Labels/GBA"
+echo "face" > "$CARD/System/Cache/Labels/GBA/Emerald.rgba"
+unpack
+install || fail "the install with a label cache failed"
+[ "$(cat "$CARD/System/Cache/Labels/GBA/Emerald.rgba" 2>/dev/null)" = "face" ] ||
+	fail "the label cache was thrown away by the update"
+
 # PortMaster runtimes downloaded into the old System go into the new one; one the new System
 # ships under the same name is the new one's.
 card

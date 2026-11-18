@@ -348,6 +348,28 @@ pub fn draw_slot_name(canvas: Canvas, name: Printed, alpha: f32, out: &mut Vec<D
     });
 }
 
+/// The system name `rows` lines above where the shelf puts it, for a screen with a title under it.
+pub fn draw_slot_name_above(
+    canvas: Canvas,
+    name: Printed,
+    rows: u32,
+    alpha: f32,
+    out: &mut Vec<Draw>,
+) {
+    let (Some(tex), true) = (name.face, alpha > 0.0) else {
+        return;
+    };
+    let (w, h) = (name.w as f32, HINT_H as f32);
+    out.push(Draw::Tex {
+        x: canvas.centred(w),
+        y: slot_name_y() + canvas.extra() - h * rows as f32,
+        w,
+        h,
+        tex,
+        alpha,
+    });
+}
+
 pub fn draw_slot_title(canvas: Canvas, title: Printed, alpha: f32, out: &mut Vec<Draw>) {
     let (Some(tex), true) = (title.face, alpha > 0.0) else {
         return;

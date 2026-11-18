@@ -10,11 +10,12 @@ use slot_power::{Platform, Power};
 use slot_store::{format_stamp, Appearance, BezelPick, Platform as Console};
 use slot_ui::{
     badge_face, bezel_face, chip_face, chip_shadow_face, core_button_legends, date_time,
-    default_game_bezel_face, footer_ink, hint_face, icon_face, link_button_legends, menu_face,
-    mould_shadow, photo_face, quick_caret_face, quick_label_face, quick_legend_faces,
-    quick_pointer_face, rebuild_count_face, rebuild_title_face, set_clock_hint_face, slot_back,
-    slot_back_light, slot_front, slot_front_light, socket_face, sticker_face, time_text,
-    title_face, toast_face, value_face, wallpaper_face, word_ink, CartFace, GbShell, Icon,
+    default_game_bezel_face, footer_ink, hint_face, icon_face, keyboard_cap_faces, keyboard_faces,
+    keyboard_text_face, link_button_legends, menu_face, mould_shadow, photo_face, quick_caret_face,
+    quick_label_face, quick_legend_faces, quick_pointer_face, rebuild_count_face,
+    rebuild_title_face, set_clock_hint_face, slot_back, slot_back_light, slot_front,
+    slot_front_light, socket_face, sticker_face, time_text, title_face, toast_face, value_face,
+    wallpaper_face, word_ink, BezelArt, CartFace, GbShell, Icon, KeyLayout, KeyTex, Keyboard,
     LinkBadge, Mould, PowerChoice, QuickMenuFaces, QuickRow, QuickValue, RebuildScreen,
     StickerFields, Toast, UndoFace, ALERT_PX, BOLT_PX, HUD_ICON_PX, HUD_INK, LEGEND,
 };
@@ -98,6 +99,8 @@ pub struct Frontend {
     quick_hostname: QuickTheme,
     wallpaper: WallpaperSync,
     page: PageSync,
+    keyboard: KeyboardSync,
+    trophies: TrophySync,
     game_bezel: BezelSync,
     shader: ShaderSync,
     look: Option<ShelfLook>,
@@ -141,9 +144,11 @@ struct QuickTheme {
     shown: String,
 }
 
+type BezelKey = (Console, BezelPick, Option<BezelArt>, (u32, u32));
+
 struct BezelSync {
     tex: Option<TexId>,
-    image: Option<(Console, BezelPick)>,
+    image: Option<BezelKey>,
     labels: [String; Console::COUNT],
     faces: [(Option<TexId>, Option<TexId>); Console::COUNT],
 }
@@ -163,6 +168,7 @@ impl Default for BezelSync {
 struct ShaderSync {
     /// The shader file the compositor draws the game with, for its platform.
     shown: Option<(Console, Option<String>)>,
+    params_rev: Option<(Console, Option<String>, u64)>,
     labels: [Option<String>; Console::COUNT],
     faces: [(Option<TexId>, Option<TexId>); Console::COUNT],
 }
@@ -171,6 +177,7 @@ impl Default for ShaderSync {
     fn default() -> Self {
         ShaderSync {
             shown: None,
+            params_rev: None,
             labels: std::array::from_fn(|_| None),
             faces: [(None, None); Console::COUNT],
         }
@@ -203,6 +210,8 @@ struct Clocks {
     battery_tex: Option<TexId>,
     platform: String,
     platform_tex: Option<TexId>,
+    note: String,
+    note_tex: Option<TexId>,
     title: String,
     title_tex: Option<TexId>,
     ink: [u8; 3],
@@ -350,6 +359,8 @@ impl Frontend {
             quick_hostname: QuickTheme::default(),
             wallpaper: WallpaperSync::default(),
             page: PageSync::default(),
+            keyboard: KeyboardSync::default(),
+            trophies: TrophySync::default(),
             game_bezel: BezelSync::default(),
             shader: ShaderSync::default(),
             look: None,
@@ -753,6 +764,7 @@ impl Frontend {
         compositor.set_screen_footer(self.session.app().screen_footer());
         compositor.set_overlay_slide(self.session.app().overlay_slide());
         compositor.set_game_source_rect(self.session.app().source_rect());
+        compositor.set_game_layout(self.session.app().game_layout());
         compositor.show_overlay(self.session.app().overlay_shown());
         self.grab_link_shot(compositor);
         let begun = ft::span(ev::GFX_BEGIN_FRAME, 0);
@@ -796,7 +808,7 @@ impl Frontend {
             compositor.set_picture(slot_gfx::WHOLE_TEXTURE);
             compositor.set_game_source_rect(slot_gfx::WHOLE_TEXTURE);
         }
-        let stretched = self.session.app().video_mode() == crate::video_mode::VideoMode::Stretch;
+        let stretched = self.session.app().picture_stretched();
         // A picture turned on its side shows the other way round.
         let turned = self.game_rotation % 2 == 1;
         let aspect = self.game_aspect.map(|a| if turned { 1.0 / a } else { a });
@@ -823,6 +835,8 @@ impl Frontend {
         );
         sync_wallpaper(self.session.app_mut(), compositor, &mut self.wallpaper);
         sync_page(self.session.app_mut(), compositor, &mut self.page);
+        sync_keyboard(self.session.app_mut(), compositor, &mut self.keyboard);
+        sync_trophies(self.session.app_mut(), compositor, &mut self.trophies);
         sync_game_bezel(self.session.app_mut(), compositor, &mut self.game_bezel);
         sync_shader(self.session.app_mut(), compositor, &mut self.shader);
         compositor.set_game_bezel(self.session.app().shown_game_bezel());
@@ -1276,6 +1290,18 @@ fn sync_clock(app: &mut App, compositor: &mut Compositor, clocks: &mut Clocks) {
             app.set_shelf_platform_face(id, w);
         }
     }
+    let note_shown = app.note_text().unwrap_or_default();
+    if note_shown != clocks.note {
+        clocks.note = note_shown.clone();
+        if note_shown.is_empty() {
+            app.clear_shelf_note();
+        } else {
+            let face = word_ink(&note_shown, [0xff, 0xff, 0xff]);
+            let w = face.w;
+            let id = upload(compositor, &mut clocks.note_tex, face);
+            app.set_shelf_note_face(id, w);
+        }
+    }
     let title_shown = app.title_text().unwrap_or_default();
     if title_shown != clocks.title {
         clocks.title = title_shown.clone();
@@ -1303,15 +1329,27 @@ fn sync_clock(app: &mut App, compositor: &mut Compositor, clocks: &mut Clocks) {
     }
 }
 
+fn bezel_key(pick: &BezelPick, art: Option<BezelArt>, last: Option<BezelArt>) -> Option<BezelArt> {
+    match pick {
+        BezelPick::Default => art.or(last),
+        _ => None,
+    }
+}
+
 fn sync_game_bezel(app: &mut App, compositor: &mut Compositor, state: &mut BezelSync) {
     let platform = app.playing_platform();
     let pick = app.resolved_bezel(platform);
-    let shown = (platform, pick);
+    let (w, h) = app.game_bezel_size();
+    let last = state.image.as_ref().and_then(|image| image.2);
+    let art = bezel_key(&pick, app.bezel_art(), last);
+    let shown = (platform, pick, art, (w, h));
     if state.image.as_ref() != Some(&shown) {
         let mut overlay = None;
         let rgba = match &shown.1 {
-            BezelPick::None | BezelPick::Ags102 => None,
-            BezelPick::Default => default_game_bezel_face(platform == Console::Gbc),
+            BezelPick::None | BezelPick::Auto | BezelPick::Ags102 => None,
+            BezelPick::Default => shown
+                .2
+                .and_then(|kind| default_game_bezel_face(platform == Console::Gbc, kind, w, h)),
             BezelPick::File(name) => {
                 overlay = app
                     .root()
@@ -1326,13 +1364,15 @@ fn sync_game_bezel(app: &mut App, compositor: &mut Compositor, state: &mut Bezel
                 .map(|o| (o.w, o.h, o.rgba.as_slice(), o.window)),
         );
         app.set_game_overlay(overlay.is_some());
+        // One texture, resized in place when the bezel's size changes, as the compositor has no
+        // way to free one.
         let tex = rgba.map(|rgba| match state.tex {
             Some(id) => {
-                compositor.update_texture(id, OUT_W, OUT_H, &rgba);
+                compositor.update_texture(id, w, h, &rgba);
                 id
             }
             None => {
-                let id = compositor.create_texture(OUT_W, OUT_H, &rgba);
+                let id = compositor.create_texture(w, h, &rgba);
                 state.tex = Some(id);
                 id
             }
@@ -1376,7 +1416,14 @@ fn sync_shader(app: &mut App, compositor: &mut Compositor, state: &mut ShaderSyn
         if let (Err(e), Some(name)) = (built, &shown.1) {
             eprintln!("slot: shader {name}: {e}");
         }
-        state.shown = Some(shown);
+        state.shown = Some(shown.clone());
+        state.params_rev = None;
+    }
+    let rev_key = (shown.0, shown.1, app.shader_params_rev());
+    if state.params_rev.as_ref() != Some(&rev_key) {
+        let overrides = app.shader_param_overrides(platform);
+        compositor.set_shader_parameters(&overrides);
+        state.params_rev = Some(rev_key);
     }
     if app.quick_menu().is_none() && app.in_game_menu().is_none() {
         return;
@@ -1596,12 +1643,40 @@ fn sync_core_picker(
 }
 
 #[derive(Default)]
+struct TrophySync {
+    textures: Option<slot_ui::TrophyTextures>,
+}
+
+fn sync_trophies(app: &mut App, compositor: &mut Compositor, state: &mut TrophySync) {
+    if !app.in_trophy_room() {
+        return;
+    }
+    if state.textures.is_none() {
+        let Some(assets) = slot_ui::trophy_assets() else {
+            return;
+        };
+        let tiers = [0, 1, 2, 3, 4].map(|i| {
+            let (rgba, w, h) = &assets.tiers[i];
+            compositor.create_texture(*w, *h, rgba)
+        });
+        let (glow, gw, gh) = slot_ui::spotlight_rgba();
+        let (shaft, sw, sh) = slot_ui::beam_rgba();
+        state.textures = Some(slot_ui::TrophyTextures {
+            tiers,
+            spot: compositor.create_texture(gw, gh, &glow),
+            beam: compositor.create_texture(sw, sh, &shaft),
+        });
+    }
+    app.set_trophy_textures(state.textures);
+}
+
+#[derive(Default)]
 struct PageSync {
     shown: Option<crate::app::PageModel>,
     tex: Option<TexId>,
 }
 
-/// Draws the page slot lays out whole, the keyboard or a list, each time what it shows changes.
+/// Draws the page slot lays out whole, a list or reader, each time what it shows changes.
 fn sync_page(app: &mut App, compositor: &mut Compositor, state: &mut PageSync) {
     let model = app.page_model();
     if model == state.shown {
@@ -1610,7 +1685,6 @@ fn sync_page(app: &mut App, compositor: &mut Compositor, state: &mut PageSync) {
     if let Some(page) = &model {
         let face = match page {
             crate::app::PageModel::List(list) => list.face(),
-            crate::app::PageModel::Keys(keys) => keys.face(),
             crate::app::PageModel::Qr(qr) => qr.face(),
             crate::app::PageModel::Text(text) => text.face(),
             crate::app::PageModel::Picture(picture) => picture.face(),
@@ -1630,6 +1704,123 @@ fn sync_page(app: &mut App, compositor: &mut Compositor, state: &mut PageSync) {
         app.set_page_face(tex, w, h);
     }
     state.shown = model;
+}
+
+#[derive(PartialEq, Eq)]
+struct KeyShape {
+    layout: KeyLayout,
+    canvas: (u32, u32),
+    light: bool,
+    title: String,
+    subtitle: Option<String>,
+    alert: bool,
+    masked: bool,
+    text: String,
+    shift: bool,
+    symbols: bool,
+}
+
+impl KeyShape {
+    fn of(kb: &Keyboard, canvas: Canvas, light: bool) -> KeyShape {
+        KeyShape {
+            layout: kb.layout(),
+            canvas: (canvas.w as u32, canvas.h as u32),
+            light,
+            title: kb.title().to_string(),
+            subtitle: kb.subtitle().map(str::to_string),
+            alert: kb.alert(),
+            masked: kb.is_masked(),
+            text: kb.text(),
+            shift: kb.shift(),
+            symbols: kb.symbols(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct KeyboardSync {
+    pool: Vec<TexId>,
+    keys: Option<KeyShape>,
+}
+
+fn swap_key_tex(compositor: &mut Compositor, slot: &mut KeyTex, face: &UndoFace) {
+    compositor.update_texture(slot.0, face.w, face.h, &face.rgba);
+    *slot = (slot.0, face.w, face.h);
+}
+
+fn sync_keyboard(app: &mut App, compositor: &mut Compositor, state: &mut KeyboardSync) {
+    let Some(kb) = app.keyboard().cloned() else {
+        if state.keys.take().is_some() {
+            app.set_keyboard_tex(None);
+            for id in &state.pool {
+                compositor.update_texture(*id, 1, 1, &[0; 4]);
+            }
+        }
+        return;
+    };
+    let canvas = app.canvas();
+    let light = app.light();
+    let now = KeyShape::of(&kb, canvas, light);
+    let held = app.take_keyboard_tex();
+    let (Some(was), Some(mut tex)) = (state.keys.as_ref(), held) else {
+        return upload_keyboard(app, compositor, state, &kb, now);
+    };
+    if was.layout != now.layout
+        || was.canvas != now.canvas
+        || was.light != now.light
+        || was.title != now.title
+        || was.subtitle != now.subtitle
+        || was.alert != now.alert
+    {
+        return upload_keyboard(app, compositor, state, &kb, now);
+    }
+    if was.text != now.text {
+        let (face, stops) = keyboard_text_face(&kb);
+        swap_key_tex(compositor, &mut tex.text, &face);
+        tex.stops = stops;
+    }
+    if (was.shift, was.symbols) != (now.shift, now.symbols) {
+        let faces = keyboard_cap_faces(&kb, canvas);
+        for (row, faces) in tex.caps.iter_mut().zip(faces) {
+            for (pair, faces) in row.iter_mut().zip(faces) {
+                for (slot, face) in pair.iter_mut().zip(faces.iter()) {
+                    swap_key_tex(compositor, slot, face);
+                }
+            }
+        }
+    }
+    app.set_keyboard_tex(Some(tex));
+    state.keys = Some(now);
+}
+
+fn upload_keyboard(
+    app: &mut App,
+    compositor: &mut Compositor,
+    state: &mut KeyboardSync,
+    kb: &Keyboard,
+    shape: KeyShape,
+) {
+    let pool = &mut state.pool;
+    let mut at = 0;
+    let canvas = app.canvas();
+    let light = app.light();
+    let tex = keyboard_faces(kb, canvas, light).upload(|f| {
+        let id = match pool.get(at) {
+            Some(&id) => {
+                compositor.update_texture(id, f.w, f.h, &f.rgba);
+                id
+            }
+            None => {
+                let id = compositor.create_texture(f.w, f.h, &f.rgba);
+                pool.push(id);
+                id
+            }
+        };
+        at += 1;
+        id
+    });
+    app.set_keyboard_tex(Some(tex));
+    state.keys = Some(shape);
 }
 
 fn upload(compositor: &mut Compositor, slot: &mut Option<TexId>, face: slot_ui::UndoFace) -> TexId {

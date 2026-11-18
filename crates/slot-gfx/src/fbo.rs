@@ -51,6 +51,7 @@ pub struct Compositor {
     bezel: Option<gl::types::GLuint>,
     game_bezel: Option<TexId>,
     sp_frame: bool,
+    game_panel: bool,
     overlay: Option<Overlay>,
     overlay_on: bool,
     turn: Option<Turn>,
@@ -155,6 +156,7 @@ impl Compositor {
                 bezel: None,
                 game_bezel: None,
                 sp_frame: true,
+                game_panel: false,
                 overlay: None,
                 overlay_on: false,
                 turn: None,
@@ -383,6 +385,10 @@ impl Compositor {
         self.game.set_custom_shader(src, linear)
     }
 
+    pub fn set_shader_parameters(&mut self, overrides: &[(String, f32)]) {
+        self.game.set_shader_parameters(overrides);
+    }
+
     pub fn set_picture(&mut self, rect: [f32; 4]) {
         self.game.set_picture(rect);
     }
@@ -393,6 +399,11 @@ impl Compositor {
 
     pub fn set_sp_frame(&mut self, on: bool) {
         self.sp_frame = on;
+    }
+
+    pub fn set_game_layout(&mut self, layout: crate::GameLayout) {
+        self.game_panel = layout.panel;
+        self.game.set_layout(layout.rect);
     }
 
     fn draw_game_bezel(&mut self) {
@@ -426,7 +437,7 @@ impl Compositor {
     }
 
     fn native(&self) -> bool {
-        self.overlaid() || self.native_menus()
+        self.overlaid() || self.game_panel || self.native_menus()
     }
 
     fn native_menus(&self) -> bool {
@@ -458,7 +469,7 @@ impl Compositor {
     /// Where the 720 by 480 canvas's drawing goes on a canvas the panel's size: all of it for
     /// the menus drawn at the panel's shape, else the band the canvas would be shown in.
     fn band(&self) -> (i32, i32, i32, i32) {
-        if !self.overlaid() || self.native_menus() {
+        if !(self.overlaid() || self.game_panel) || self.native_menus() {
             return (0, 0, self.size.0 as i32, self.size.1 as i32);
         }
         let (x, _, w, h) = blit_rect(self.window, 0.0);
@@ -842,6 +853,16 @@ impl Compositor {
             }
             self.quad.draw();
             unsafe { gl::Disable(gl::BLEND) };
+            return self.fill_band();
+        }
+        if self.game_panel {
+            self.game.set_fbo_scale(
+                self.size.0 as f32 / OUT_W as f32,
+                self.size.1 as f32 / OUT_H as f32,
+            );
+            self.game.set_origin(0.0, 0.0);
+            unsafe { gl::Viewport(0, 0, self.size.0 as i32, self.size.1 as i32) };
+            draw(self);
             return self.fill_band();
         }
         if !self.native() {

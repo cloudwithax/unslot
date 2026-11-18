@@ -25,7 +25,6 @@ vars:
     vecx:8f671cc9d737f2890c3ce19e177e2984dcae121f
     parallel_n64:a8280501a71c1bcd4c85c5b8bfe75cfa62cd6127
     flycast:6bb0fc3e18dac4b01694f488c7a71f5930e8a648
-    ppsspp:5f2d4afbdced51ac056af25a05fd182a1175b558
   # What libslotcast.so, which casting to a TV runs on, is built from: x264, Opus, mbedTLS and
   # FAAC.
   SLOTCAST: >-
@@ -44,7 +43,7 @@ vars:
     | binary(render_picture_modes) | binary(runahead) | binary(render) | binary(render_in_game_menu)
     | binary(render_power_wake) | binary(render_quick_menu) | binary(render_shelf)
     | binary(render_shelves)))
-    | (package(slot-gfx) & binary(pipeline)) | (package(slot-ui) & binary(render_row_edges))
+    | (package(slot-gfx) & binary(pipeline)) | (package(slot-ui) & (binary(render_row_edges) | binary(render_keyboard) | binary(render_trophies)))
     | (package(slot-retro) & (binary(options) | binary(netpacket) | binary(libretro)))
 
 tasks:
@@ -74,7 +73,7 @@ tasks:
       - cargo nextest run --workspace --no-fail-fast -E 'not ({{.IN_PROCESS}})'
       - cargo test -p slot --no-fail-fast {{.SLOT_IN_PROCESS}}
       - cargo test -p slot-gfx --test pipeline
-      - cargo test -p slot-ui --test render_row_edges
+      - cargo test -p slot-ui --test render_row_edges --test render_keyboard --test render_trophies
       - cargo test -p slot-retro --test options --test netpacket --test libretro
       - tools/target-cap/target-cap.sh
 
@@ -349,6 +348,38 @@ tasks:
       UID: {sh: id -u}
       GID: {sh: id -g}
 
+  glshim:
+    desc: >-
+      Build System/lib/libGL.so.1 for the handhelds, whose firmware has GLES 2 only: cores that
+      name desktop GL in their headers are refused by the loader without it
+    status:
+      - test -f vendor/glshim/libGL.so.1
+    cmds:
+      - sh tools/glshim/build.sh vendor/glshim
+
+  ppsspp:
+    desc: >-
+      Build standalone PPSSPPSDL and its unslot volume/hotkey shim into vendor/ppsspp for PSP,
+      linking against H700 SDL_drastic and noting sources in ppsspp.manifest
+    deps: [drastic]
+    status:
+      - test -f vendor/ppsspp/ppsspp.manifest
+      - test -f vendor/ppsspp/PPSSPPSDL
+      - test -f vendor/ppsspp/libs/libunslot-ppsspp.so
+    cmds:
+      - |
+        set -eu
+        run="DRASTIC_CACHE=target-device/drastic-cache sh tools/ppsspp/build.sh vendor/ppsspp"
+        if [ "$(uname -s)-$(uname -m)" = "Linux-aarch64" ]; then
+          sh -c "$run"
+        else
+          docker build -q -t unslot-gles cores/gles > /dev/null
+          docker run --rm -v "$PWD":/src -w /src unslot-gles sh -c "$run; s=\$?; \
+            chown -R $(id -u):$(id -g) target-device/ppsspp vendor/ppsspp; exit \$s"
+        fi
+      - file vendor/ppsspp/PPSSPPSDL | grep -q aarch64
+      - file vendor/ppsspp/libs/libunslot-ppsspp.so | grep -q aarch64
+
   portmaster:
     desc: >-
       Fetch what PortMaster's ports run on into vendor/portmaster: PortMaster's runtime, tools
@@ -500,7 +531,7 @@ tasks:
 
   core:gles:
     desc: >-
-      Build the GPU cores (ParaLLEl N64, Flycast, PPSSPP) and vecx against OpenGL ES from their
+      Build the GPU cores (ParaLLEl N64, Flycast) and vecx against OpenGL ES from their
       pinned commits, natively on an aarch64 Linux box or cross-compiled in cores/gles/Dockerfile
     status:
       - |
@@ -508,7 +539,6 @@ tasks:
           c="${spec%%:*}" commit="${spec#*:}"
           grep -q "^commit=$commit$" "vendor/${c}_libretro.so.meta" 2>/dev/null || exit 1
         done
-      - test -f vendor/PPSSPP/ppge_atlas.zim
     cmds:
       - |
         set -eu
@@ -572,10 +602,18 @@ tasks:
     cmds:
       - |
         set -eu
+        # unslot's ScreenScraper developer id is read at compile time, so it has to reach the
+        # container the build runs in; on an aarch64 machine the job's own environment has it,
+        # as it does in CI.
+        keys=""
+        for k in UNSLOT_SS_DEVID UNSLOT_SS_DEVPASSWORD; do
+          eval "v=\${$k:-}"
+          [ -n "$v" ] && keys="$keys -e $k"
+        done
         if [ "$(uname -s)-$(uname -m)" = "Linux-aarch64" ]; then
           sh -c '{{.CMD}}'
         else
-          docker run --rm --platform linux/arm64 -v "$PWD":/src -w /src rust:1-bullseye sh -c '{{.CMD}}'
+          docker run --rm --platform linux/arm64 $keys -v "$PWD":/src -w /src rust:1-bullseye sh -c '{{.CMD}}'
         fi
 
   build:device:
@@ -603,7 +641,7 @@ tasks:
 
   dist:device:
     desc: Build the SD2 tree for an H700 device, OUT defaults to ./dist-device
-    deps: [core:device, core:gpsp, core:fetch, core:gles, core:nodosumi, cast:lib, services, media, overlays, drastic, portmaster, build:device]
+    deps: [core:device, core:gpsp, core:fetch, core:gles, core:nodosumi, cast:lib, services, media, overlays, drastic, ppsspp, portmaster, glshim, build:device]
     vars:
       OUT: '{{.OUT | default "dist-device"}}'
       UID: {sh: id -u}
@@ -622,8 +660,8 @@ tasks:
       - cp vendor/gpsp_libretro.so {{.OUT}}/System/
       - for c in {{.FETCHED}}; do cp "vendor/${c}_libretro.so" {{.OUT}}/System/; done
       - for spec in {{.GLES_CORES}}; do cp "vendor/${spec%%:*}_libretro.so" {{.OUT}}/System/; done
-      - cp -R vendor/PPSSPP {{.OUT}}/System/PPSSPP
       - cp vendor/libslotcast.so {{.OUT}}/System/
+      - mkdir -p {{.OUT}}/System/lib && cp vendor/glshim/libGL.so.1 {{.OUT}}/System/lib/
       - cp -r licenses {{.OUT}}/System/licenses
       - cp vendor/libslotcast.so.meta {{.OUT}}/System/licenses/libslotcast.meta
       - |
@@ -652,6 +690,14 @@ tasks:
         mkdir -p "{{.OUT}}/System/drastic"
         cp -R vendor/drastic/drastic vendor/drastic/libs vendor/drastic/system vendor/drastic/game_database.xml "{{.OUT}}/System/drastic/"
         cp vendor/drastic/drastic.manifest vendor/drastic/drastic_readme.txt vendor/drastic/SDL-LICENSE.txt "{{.OUT}}/System/licenses/"
+      - |
+        set -eu
+        # Standalone PPSSPP-SDL beside card/System/ppsspp's launcher and tuned configs, with its
+        # GPL licence and where it came from.
+        mkdir -p "{{.OUT}}/System/ppsspp"
+        cp -R vendor/ppsspp/PPSSPPSDL vendor/ppsspp/assets vendor/ppsspp/libs "{{.OUT}}/System/ppsspp/"
+        cp vendor/ppsspp/ppsspp.manifest "{{.OUT}}/System/licenses/"
+        cp vendor/ppsspp/LICENSE.TXT "{{.OUT}}/System/licenses/ppsspp-LICENSE.txt"
       - |
         set -eu
         # PortMaster's runtime and tools beside the control.txt and harbourmaster
@@ -828,6 +874,10 @@ tasks:
         if test -f "$manifest" && ! test -s "$manifest"; then rm "$manifest"; fi
       - cp -R card/System/. {{.OUT}}/System/
       - cp -R ports/a133p/card/. {{.OUT}}/
+      - sh tools/a133p/portmaster.sh {{.OUT}}
+      # The H700's PPSSPP starts here but never gets an OpenGL context from either SDL the A133P
+      # has, and hangs; with no launcher a PSP game is refused instead.
+      - rm -rf {{.OUT}}/System/ppsspp {{.OUT}}/System/licenses/ppsspp.manifest {{.OUT}}/System/licenses/ppsspp-LICENSE.txt
       - |
         set -eu
         if test -f target-a133p/drastic/drastic.meta; then
@@ -855,7 +905,7 @@ tasks:
 
   deploy:device:
     desc: Build and push onto a device over adb, then restart it. SD defaults to /mnt/sdcard
-    deps: [core:device, core:gpsp, core:fetch, services, drastic, portmaster, build:device]
+    deps: [core:device, core:gpsp, core:fetch, services, drastic, ppsspp, portmaster, glshim, build:device]
     vars:
       SD: '{{.SD | default "/mnt/sdcard"}}'
     cmds:
@@ -868,8 +918,13 @@ tasks:
       - adb push vendor/gpsp_libretro.so '{{.SD}}/System/gpsp_libretro.so'
       - for c in {{.FETCHED}}; do adb push "vendor/${c}_libretro.so" '{{.SD}}/System/'; done
       - adb push licenses '{{.SD}}/System/'
+      - adb shell 'mkdir -p {{.SD}}/System/lib'
+      - adb push vendor/glshim/libGL.so.1 '{{.SD}}/System/lib/'
       - adb push vendor/services '{{.SD}}/System/'
       - for f in drastic libs system game_database.xml; do adb push "vendor/drastic/$f" '{{.SD}}/System/drastic/'; done
+      - for f in PPSSPPSDL assets libs; do adb push "vendor/ppsspp/$f" '{{.SD}}/System/ppsspp/'; done
+      - adb push vendor/ppsspp/ppsspp.manifest '{{.SD}}/System/licenses/'
+      - adb push vendor/ppsspp/LICENSE.TXT '{{.SD}}/System/licenses/ppsspp-LICENSE.txt'
       - adb push vendor/portmaster/PortMaster/. '{{.SD}}/System/PortMaster/'
       - adb shell 'mkdir -p {{.SD}}/System/PortMaster/libs.aarch64 {{.SD}}/System/bin'
       - adb push vendor/drastic/libs/libSDL2-2.0.so.0 '{{.SD}}/System/PortMaster/libs.aarch64/'

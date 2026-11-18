@@ -74,6 +74,33 @@ fn the_in_game_menu_takes_its_own_layout_once_it_shows() {
 }
 
 #[test]
+fn the_menu_keeps_its_canvas_until_its_strip_has_slid_away() {
+    let mut a = playing(PANEL_4_3);
+    a.apply(Action::QuickMenu);
+    for _ in 0..30 {
+        tick(&mut a);
+    }
+    assert_eq!(a.layout(), IN_GAME_MENU);
+    let canvas = a.canvas();
+    a.apply(Action::GbaDown(slot_input::Btn::B));
+    assert_eq!(a.in_game_menu(), None);
+    let mut slid = 0;
+    while a.menu_strip() > 0.0 {
+        assert_eq!(
+            a.canvas(),
+            canvas,
+            "the strip changed canvas with {} of it still out",
+            a.menu_strip()
+        );
+        tick(&mut a);
+        slid += 1;
+        assert!(slid < 120, "the strip never went");
+    }
+    assert!(slid > 2, "the strip did not slide at all");
+    assert_eq!(a.layout(), Layout::Framed);
+}
+
+#[test]
 fn the_photos_over_a_game_stay_framed() {
     let mut a = playing(PANEL_4_3);
     a.apply(Action::Polaroids);

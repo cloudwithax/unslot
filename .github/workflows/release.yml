@@ -49,10 +49,18 @@ jobs:
           done
           test "$(ls "$out"/System/*_libretro.so | wc -l)" -ge 47
           # The GPU cores are built for GLES; one linking desktop GL would not load on BaseOS.
-          for c in parallel_n64 nodosumi flycast ppsspp vecx; do
+          for c in parallel_n64 nodosumi flycast vecx; do
             ! readelf -d "$out/System/${c}_libretro.so" | grep -q 'libGL\.so\|libOpenGL\|libGLX'
           done
-          test -f "$out/System/PPSSPP/ppge_atlas.zim"
+          # The firmware has no desktop GL, so Beetle VB, which names it, loads on the card's shim.
+          file "$out/System/lib/libGL.so.1" | grep -q aarch64
+          # PSP runs in standalone PPSSPP-SDL, beside its launcher and its own SDL.
+          for f in PPSSPPSDL libs/libunslot-ppsspp.so; do
+            file "$out/System/ppsspp/$f" | grep -q aarch64
+          done
+          test -f "$out/System/ppsspp/launch.sh"
+          test -f "$out/System/ppsspp/assets/ppge_atlas.zim"
+          test -s "$out/System/licenses/ppsspp.manifest"
           file "$out/System/libslotcast.so" | grep -q aarch64
           test -s "$out/System/licenses/libslotcast.meta"
           test -s "$out/System/licenses/cores.manifest"
@@ -148,9 +156,110 @@ jobs:
             SHA256SUMS
           if-no-files-found: error
 
+  a133p:
+    name: TrimUI A133P card
+    needs: build
+    runs-on: ubuntu-24.04
+    outputs:
+      zip: ${{ steps.package.outputs.zip }}
+      pak: ${{ steps.package.outputs.pak }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-files
+          path: h700
+
+      - name: Install zig, cargo-zigbuild and Task
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zip unzip cmake binutils-aarch64-linux-gnu \
+            python3-pip libasound2-dev libudev-dev
+          pip3 install --break-system-packages ziglang==0.17.1
+          curl -fsSL https://taskfile.dev/install.sh | sudo sh -s -- -b /usr/local/bin
+          rustup target add aarch64-unknown-linux-gnu
+          cargo install --locked cargo-zigbuild@0.24.1
+
+      # The A133P's own cores, mGBA and DraStic, built by the a133p-cores workflow.
+      - name: Take the A133P cores
+        run: |
+          set -eu
+          gh release download a133p-cores --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP" \
+            --pattern 'a133p-cores.tar.gz' --pattern 'a133p-cores.tar.gz.sha256'
+          (cd "$RUNNER_TEMP" && sha256sum -c a133p-cores.tar.gz.sha256)
+          mkdir -p target-a133p
+          tar -xzf "$RUNNER_TEMP/a133p-cores.tar.gz" -C target-a133p
+
+      - name: Build the card
+        env:
+          UNSLOT_SS_DEVID: ${{ secrets.UNSLOT_SS_DEVID }}
+          UNSLOT_SS_DEVPASSWORD: ${{ secrets.UNSLOT_SS_DEVPASSWORD }}
+        run: |
+          set -eu
+          unzip -q "h700/unslot-${GITHUB_REF_NAME}-h700.zip"
+          task dist:a133p FROM="unslot-${GITHUB_REF_NAME}" OUT="unslot-${GITHUB_REF_NAME}-a133p" \
+            VERSION="${GITHUB_REF_NAME}"
+
+      - name: Check what is about to ship
+        run: |
+          set -eu
+          out="unslot-${GITHUB_REF_NAME}-a133p"
+          file "$out/System/slot" | grep -q aarch64
+          test "$(cat "$out/System/version")" = "$GITHUB_REF_NAME"
+          sh tools/a133p/check-glibc.sh "$out/System/slot"
+          # Everything a game runs on has to load on the firmware's glibc 2.33 and the libstdc++
+          # of GCC 10 it has.
+          newest() { objdump -T "$1" | grep -o "$2_[0-9.]*" | sed "s/$2_//" | sort -uV | tail -n 1; }
+          fits() { [ -z "$1" ] || [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n 1)" = "$2" ]; }
+          for f in "$out"/System/*_libretro.so "$out"/System/bin/zip "$out"/System/drastic/drastic \
+            "$out"/System/drastic/libs/*.so* "$out"/System/lib/*.so*; do
+            test -f "$f"
+            fits "$(newest "$f" GLIBC)" 2.33 || { echo "$f needs a newer glibc than 2.33" >&2; exit 1; }
+            fits "$(newest "$f" GLIBCXX)" 3.4.28 || { echo "$f needs a newer libstdc++" >&2; exit 1; }
+          done
+          test "$(ls "$out"/System/*_libretro.so | wc -l)" -ge 47
+          test -x "$out/.tmp_update/updater"
+          test -f "$out/System/a133p/launch.sh"
+          test -s "$out/System/licenses/drastic.meta"
+          test -s "$out/System/licenses/portmaster-a133p.manifest"
+          # The H700's PPSSPP hangs on the A133P's GPU, so a PSP game is refused rather than run.
+          test ! -e "$out/System/ppsspp"
+
+      - name: Package
+        id: package
+        env:
+          UNSLOT_PAK_KEY: ${{ secrets.UNSLOT_PAK_KEY }}
+        run: |
+          set -eu
+          out="unslot-${GITHUB_REF_NAME}-a133p"
+          zip="$out.zip"
+          zip -qry "$zip" "$out"
+          sh tools/update/pack.sh "$out" MinUI-a133p.zip a133p
+          test -n "$UNSLOT_PAK_KEY" || { echo "UNSLOT_PAK_KEY is not set" >&2; exit 1; }
+          pak="$out.pak"
+          cargo run -q --release -p slot --no-default-features --example make_pak -- \
+            MinUI-a133p.zip "$GITHUB_REF_NAME" "$pak"
+          test -f "$pak"
+          sha256sum "$zip" "$pak" > SHA256SUMS-a133p
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
+          echo "pak=$pak" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: a133p-files
+          path: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.pak }}
+            SHA256SUMS-a133p
+          if-no-files-found: error
+
   publish:
     name: release
-    needs: build
+    needs: [build, a133p]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -164,18 +273,26 @@ jobs:
         with:
           name: release-files
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: a133p-files
+
       # Keep the assets out of the public updater until the signed pack has been checked on-device.
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
           ZIP: ${{ needs.build.outputs.zip }}
           PAK: ${{ needs.build.outputs.pak }}
+          A133P_ZIP: ${{ needs.a133p.outputs.zip }}
+          A133P_PAK: ${{ needs.a133p.outputs.pak }}
         run: |
           set -eu
+          # One manifest for every asset, the TrimUI card's with the H700's.
+          cat SHA256SUMS-a133p >> SHA256SUMS
           # What the release is and how to install it, from .github/release-notes.md.
           sed "s/\$TAG/$GITHUB_REF_NAME/g" .github/release-notes.md > notes.md
-          gh release create "$GITHUB_REF_NAME" "$ZIP" "$PAK" MinUI.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" --notes-file notes.md --draft
+          gh release create "$GITHUB_REF_NAME" "$ZIP" "$PAK" MinUI.zip "$A133P_ZIP" "$A133P_PAK" SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes-file notes.md --draft
 
   images:
     name: card images

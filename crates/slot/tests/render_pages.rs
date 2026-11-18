@@ -180,3 +180,28 @@ fn the_settings_pages_draw_their_own_rows() {
         f.app().phase()
     );
 }
+
+#[test]
+fn the_keyboard_and_its_help_draw_through_the_frontend() {
+    let Some((_g, _s, mut c, _d, mut f, mut input)) = boot() else {
+        return;
+    };
+    tap(&mut f, &mut input, Btn::X);
+    assert!(f.app().keyboard().is_some(), "X did not open Search");
+    let px = composed(&mut f, &mut c);
+    assert!(
+        body_ink(&px) > 40,
+        "the keyboard drew almost nothing through Frontend"
+    );
+
+    tap(&mut f, &mut input, Btn::Menu);
+    assert!(
+        f.app().keyboard().is_some_and(|k| k.help()),
+        "Menu did not open Keyboard Help"
+    );
+    let help_px = composed(&mut f, &mut c);
+    assert!(
+        body_ink(&help_px) > 40,
+        "Keyboard Help drew almost nothing through Frontend"
+    );
+}

@@ -67,6 +67,8 @@ struct Host {
     labels: Vec<(String, String)>,
     /// The context of a core that draws with the GPU.
     hw: Option<Hw>,
+    /// The picture's size, pitch and format as last logged, so a change is said once.
+    video_logged: Option<(c_uint, c_uint, usize, PixelFormat)>,
     memory_maps: MemoryMaps,
 }
 
@@ -631,6 +633,20 @@ unsafe extern "C" fn video_refresh(
         return;
     }
     with_host(|h| {
+        // A core whose picture size, pitch or pixel format slot has not seen says what it is
+        // drawing, so a picture that comes out skewed or in the wrong colours can be read off.
+        let shape = (width, height, pitch, h.format);
+        if h.video_logged != Some(shape) {
+            h.video_logged = Some(shape);
+            eprintln!(
+                "slot-retro: video {width}x{height} pitch {pitch} {}",
+                match h.format {
+                    PixelFormat::Rgb1555 => "0RGB1555",
+                    PixelFormat::Xrgb8888 => "XRGB8888",
+                    PixelFormat::Rgb565 => "RGB565",
+                }
+            );
+        }
         let (cw, cols, rows, ox, oy) = match h.canvas {
             Canvas::Fixed(cw, ch) => {
                 let cols = width.min(cw) as usize;
@@ -954,6 +970,7 @@ impl LibretroCore {
             labels: Vec::new(),
             hw: None,
             memory_maps: MemoryMaps::default(),
+            video_logged: None,
         });
         unsafe {
             let _a = Active::bind(&mut host);
@@ -1365,6 +1382,7 @@ mod tests {
             labels: Vec::new(),
             hw: None,
             memory_maps: MemoryMaps::default(),
+            video_logged: None,
         })
     }
 

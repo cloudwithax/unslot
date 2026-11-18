@@ -76,6 +76,20 @@ fn an_appledouble_sidecar_is_not_shelved_as_a_cart() {
 }
 
 #[test]
+fn a_syncthing_conflict_copy_is_not_shelved_as_another_game() {
+    let d = tmp_root();
+    write_rom(&d, "GBA/Metroid Fusion.gba", "METROID");
+    write_rom(
+        &d,
+        "GBA/Metroid Fusion.sync-conflict-20261117-143937-AT3RKWR.gba",
+        "METROID",
+    );
+    let carts = scan(d.path()).unwrap();
+    assert_eq!(carts.len(), 1, "a conflict copy reached the shelf");
+    assert_eq!(carts[0].stem, "Metroid Fusion");
+}
+
+#[test]
 fn header_title_of_a_truncated_rom_is_none_not_a_panic() {
     let d = tmp_root();
     std::fs::write(d.path().join("Games/GBA/Tiny.gba"), [0u8; 8]).unwrap();
