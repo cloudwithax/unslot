@@ -608,7 +608,7 @@ tasks:
         keys=""
         for k in UNSLOT_SS_DEVID UNSLOT_SS_DEVPASSWORD; do
           eval "v=\${$k:-}"
-          [ -n "$v" ] && keys="$keys -e $k"
+          if [ -n "$v" ]; then keys="$keys -e $k"; fi
         done
         if [ "$(uname -s)-$(uname -m)" = "Linux-aarch64" ]; then
           sh -c '{{.CMD}}'
