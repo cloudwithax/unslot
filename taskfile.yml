@@ -332,6 +332,8 @@ tasks:
       Fetch DraStic and its own BIOS from trngaje's advanced_drastic and build SDL_drastic with
       Knulli's H700 patches into vendor/drastic, for the DS, noting where each came from in
       drastic.manifest
+    # dist:device wants it both directly and through ppsspp; two at once race on the download cache.
+    run: once
     status:
       - test -f vendor/drastic/drastic.manifest
       - test -f vendor/drastic/libs/libunslot-drastic.so
