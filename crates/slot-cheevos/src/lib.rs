@@ -11,6 +11,8 @@
 mod chd;
 pub mod offline;
 
+pub use offline::{read_trophy_catalog, CachedGameTrophies, TrophyItem};
+
 use std::cell::RefCell;
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr, CString};
 use std::path::Path;

@@ -1,6 +1,7 @@
 #!/bin/sh
 SD="${SLOT_ROOT:-/mnt/sdcard}"
 SYS="$SD/System"
+
 RUN="${AGS_RUN:-/run}"
 LOGS="$SD/Logs"
 SESSION_MAX=65536
@@ -42,7 +43,13 @@ if [ -n "$pak" ]; then
 	zip="$SD/.unslot-update/pak.zip"
 	if version="$($SLOT_BIN --unpack-pak "$pak" "$zip" 2>> "$LOGS/update.log")"; then
 		rm -rf "$SD/.tmp_update/unslot" "$SD/.tmp_update/$CHIP.sh"
-		if unzip -o -q "$zip" '.tmp_update/*' -d "$SD" && sh "$SD/.tmp_update/$CHIP.sh" > /dev/null 2>&1; then
+		# TrimUI's firmware has no unzip, so slot unpacks the pack itself there.
+		if command -v unzip > /dev/null 2>&1; then
+			unpack() { unzip -o -q "$zip" '.tmp_update/*' -d "$SD"; }
+		else
+			unpack() { $SLOT_BIN --unzip "$zip" "$SD" .tmp_update/; }
+		fi
+		if unpack 2>> "$LOGS/update.log" && sh "$SD/.tmp_update/$CHIP.sh" > /dev/null 2>&1; then
 			rm -f "$SD"/$PAKS
 		else
 			echo "$(date '+%F %T') $version did not install; left as $(basename "$pak").bad" >> "$LOGS/update.log"
@@ -96,7 +103,9 @@ echo "|/bin/sh $SYS/coresave.sh %p %s %e %t" > /proc/sys/kernel/core_pattern 2>/
 
 # BaseOS runs the CPU flat out but leaves the Mali on its lowest clock, 420 MHz, which its
 # governor never raises; the driver's performance scene holds it at 648 MHz.
-echo 1 > /sys/class/devfreq/gpu/device/scenectrl/command 2>/dev/null
+# The A133P has no such scene, and the shell would say so each time.
+scene=/sys/class/devfreq/gpu/device/scenectrl/command
+[ -w "$scene" ] && echo 1 > "$scene" 2> /dev/null
 
 # A port slot quit for, from the Apps page, or DraStic for a DS game: it runs from its own folder
 # with slot gone, and slot starts once it ends. The note's second line, when it has one, is what
@@ -190,4 +199,8 @@ fi
 [ -f "$LOGS/slot.log" ] && mv -f "$LOGS/slot.log" "$LOGS/slot.log.1"
 log "exec $SYS/slot"
 
-exec /lib/ld-linux-aarch64.so.1 "$SYS/slot" > "$LOGS/slot.log" 2>&1
+# The firmware has OpenGL ES 2 and no desktop OpenGL, and cores built for a desktop name libGL in
+# their headers whether or not they draw with it; the loader refuses such a core without the
+# System/lib/libGL.so.1 shim, which hands GLES 2's own entry points on. Only slot gets it: a port's
+# SDL or gl4es that found a libGL would pick desktop GL over the GLES it has.
+LD_LIBRARY_PATH="$SYS/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" exec $SLOT_BIN > "$LOGS/slot.log" 2>&1

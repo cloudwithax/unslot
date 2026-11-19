@@ -116,6 +116,19 @@ fn an_out_of_range_level_reads_as_default() {
 }
 
 #[test]
+fn a_saved_brightness_of_zero_boots_with_the_backlight_on() {
+    let d = tmp_root();
+    std::fs::write(
+        d.path().join("Config/slot.state"),
+        "cart=Emerald\nbrightness=0\nblue_light=1\nvolume=40\nmuted=0\nclock_set=1\nutc_offset_min=0\n",
+    )
+    .unwrap();
+    let s = read_slot_state(d.path());
+    assert_eq!(s.cart.as_deref(), Some("Emerald"), "the state was refused");
+    assert_eq!(s.brightness, 1, "step 0 is the screen off");
+}
+
+#[test]
 fn a_first_boot_is_neither_dark_nor_silent() {
     let d = tmp_root();
     let s = read_slot_state(d.path());
@@ -189,6 +202,26 @@ fn a_first_boot_rumbles_and_fast_forwards_silently_at_the_default() {
 }
 
 #[test]
+fn the_sp_frame_is_off_until_it_is_picked() {
+    let d = tmp_root();
+    assert_eq!(
+        read_slot_state(d.path()).screen(Platform::Gba).bezel,
+        BezelPick::Auto
+    );
+    // `ags-102` is what cards saved while it was every game's default: not a choice.
+    assert_eq!(BezelPick::parse("ags-102"), BezelPick::Auto);
+    assert_eq!(BezelPick::parse(""), BezelPick::Auto);
+    assert_eq!(BezelPick::parse("none"), BezelPick::None);
+    // Picked, it is kept.
+    let mut state = SlotState::default();
+    state.screen_mut(Platform::Gba).bezel = BezelPick::Ags102;
+    write_slot_state(d.path(), &state).unwrap();
+    let read = read_slot_state(d.path());
+    assert_eq!(read.screen(Platform::Gba).bezel, BezelPick::Ags102);
+    assert_eq!(read.screen(Platform::Gb).bezel, BezelPick::Auto);
+}
+
+#[test]
 fn a_card_from_before_the_settings_keeps_all_its_values() {
     let d = tmp_root();
     std::fs::write(
@@ -228,21 +261,21 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
                     shader: Shader::Grid,
                     colour_correction: false,
                     blending: Blending::Off,
-                    bezel: BezelPick::Ags102,
+                    bezel: BezelPick::Auto,
                     custom_shader: None,
                 },
                 Screen {
                     shader: Shader::Simpletex,
                     colour_correction: false,
                     blending: Blending::Off,
-                    bezel: BezelPick::Ags102,
+                    bezel: BezelPick::Auto,
                     custom_shader: None,
                 },
                 Screen {
                     shader: Shader::Simpletex,
                     colour_correction: false,
                     blending: Blending::Off,
-                    bezel: BezelPick::Ags102,
+                    bezel: BezelPick::Auto,
                     custom_shader: None,
                 },
             ]),
@@ -274,6 +307,10 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             favorites: Vec::new(),
             shelf: None,
             shelf_cart: None,
+            scale_gba: slot_store::Scale::default(),
+            scale_gb: slot_store::Scale::default(),
+            scale_gbc: slot_store::Scale::default(),
+            stretches: [slot_store::Stretch::default(); Platform::COUNT],
         }
     );
 }

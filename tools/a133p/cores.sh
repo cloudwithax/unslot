@@ -11,7 +11,7 @@ export CFLAGS="-Wno-error=date-time"
 export CXXFLAGS="-Wno-error=date-time"
 [ "$#" -gt 0 ] || set -- nodosumi parallel_n64 flycast vecx \
 	pcsx_rearmed fbneo snes9x neocd mame2003_plus dosbox_pure puae2021 hatarib \
-	mednafen_pcfx np2kai px68k retro8 tic80 mednafen_vb ppsspp \
+	mednafen_pcfx np2kai px68k retro8 tic80 mednafen_vb \
 	gpsp fceumm genesis_plus_gx mednafen_pce_fast race mednafen_wswan handy \
 	pokemini gw picodrive gearsystem mednafen_supergrafx stella2014 a5200 \
 	prosystem gearcoleco freeintv o2em freechaf potator sameduck fmsx bluemsx \
@@ -30,7 +30,7 @@ build() (
 	mame2003_plus) repo=libretro/mame2003-plus-libretro; commit=fde3d46fc48fcc0704797e96ac4613bb47ff2c57 ;;
 	dosbox_pure) repo=libretro/dosbox-pure; commit=e39497e7c2a32c67c26e6598dd14f6d58c384bfd; flags='CPUFLAGS=-DPAGESIZE=4096 STRIPCMD=true' ;;
 	puae2021) repo=libretro/libretro-uae; commit=5dbac2bf90b2dddf9d3f8d5b2ccad0651f798c1d; flags='TARGET_NAME=puae2021' ;;
-	mednafen_pcfx) repo=libretro/beetle-pcfx-libretro; commit=c1650bad5fbdcc3c3ccd45e29e3983e1ccf16cff ;;
+	mednafen_pcfx) repo=libretro/beetle-pcfx-libretro; commit=c1650bad5fbdcc3c3ccd45e29e3983e1ccf16cff; flags='IS_X86=0' ;;
 	np2kai) repo=libretro/NP2kai; commit=1ea561cd7fd62b33f4e7b3f1c2e30fc3e6089f28; sub=sdl; file=Makefile.libretro ;;
 	hatarib) repo=bbbradsmith/hatariB; commit=5f05733fc21903dce7d978bd0d7aae445ffe1185; file=makefile.libretro; flags="WERROR= MULTITHREAD=-j${JOBS:-4} CMAKE_TOOLCHAIN_FILE=tools/a133p/toolchain.cmake" ;;
 	tic80) repo=libretro/TIC-80; commit=14fd99edc29962778bc88d81773288ffc6e8aa53; output=build/bin/tic80_libretro.so
@@ -38,8 +38,6 @@ build() (
 	px68k) repo=libretro/px68k-libretro; commit=3f4f542a39a89ca63c626326fa50c4f0ea5871d7; file=Makefile.libretro ;;
 	retro8) repo=libretro/retro8; commit=ddc06a142398ee9755894b3f0bb17c8dc428151d ;;
 	mednafen_vb) repo=libretro/beetle-vb-libretro; commit=d5ae54c8e23b573a3b34e888b2d48a588027e92c; flags='HAVE_OPENGL=0 HAVE_GLES=0' ;;
-	ppsspp) repo=hrydgard/ppsspp; commit=5f2d4afbdced51ac056af25a05fd182a1175b558; output=build/lib/ppsspp_libretro.so
-		flags='-DLIBRETRO=ON -DUSING_GLES2=ON -DUSING_EGL=OFF -DUSING_X11_VULKAN=OFF -DVULKAN=OFF -DARM_NO_VULKAN=ON -DUSE_WAYLAND_WSI=OFF -DCMAKE_DISABLE_FIND_PACKAGE_Wayland=ON -DUSE_DISCORD=OFF -DUSE_MINIUPNPC=OFF -DUSE_SYSTEM_FFMPEG=OFF -DUSE_SYSTEM_LIBZIP=OFF -DUSE_SYSTEM_LIBPNG=OFF -DCMAKE_BUILD_TYPE=Release' ;;
 	*) echo "no recipe for $name" >&2; exit 2 ;;
 	esac
 	src="$work/src/$name"
@@ -56,26 +54,6 @@ build() (
 			-DCMAKE_C_FLAGS_RELEASE="-O3 -DNDEBUG -fno-lto" \
 			-DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -fno-lto" $flags
 		cmake --build build --target tic80_libretro -j"${JOBS:-4}"
-	elif [ "$name" = ppsspp ]; then
-		git -C "$src" submodule update --init --recursive --depth 1
-		patch="$root/tools/a133p/ppsspp-libcxx.patch"
-		git -C "$src" apply --reverse --check "$patch" 2>/dev/null ||
-			git -C "$src" apply "$patch"
-		# Keep host libc headers out of zig's include search path.
-		mkdir -p "$work/khronos"
-		for dir in GLES2 GLES3 EGL KHR; do
-			cp -R "${KHRONOS_HEADERS:-/usr/include}/$dir" "$work/khronos/"
-		done
-		CFLAGS="$CFLAGS -I$work/khronos"
-		CXXFLAGS="$CXXFLAGS -I$work/khronos"
-		gpu="${A133P_GPU_LIBS:-$work/gpu}"
-		for lib in libGLESv2.so libEGL.so; do
-			[ -f "$gpu/$lib" ] || { echo "provide firmware GPU libraries in $gpu" >&2; exit 1; }
-		done
-		cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$root/tools/a133p/toolchain.cmake" \
-			-DCMAKE_SHARED_LINKER_FLAGS="-L$gpu" \
-			-DCMAKE_C_FLAGS="$CFLAGS" -DCMAKE_CXX_FLAGS="$CXXFLAGS" $flags
-		cmake --build build --target ppsspp_libretro -j"${JOBS:-4}"
 	elif [ "$name" = hatarib ]; then
 		git -C "$src" submodule update --init --depth 1
 		make -f "$file" -j"${JOBS:-4}" platform=unix CC="$cc" CXX="$cxx" \
@@ -96,8 +74,6 @@ build() (
 		echo "compiler=tools/a133p/zcc,zcxx -target aarch64-linux-gnu.2.23 -mcpu=cortex_a53"
 		echo "CFLAGS=$CFLAGS CXXFLAGS=$CXXFLAGS"
 		[ "$name" != fbneo ] || echo "SHARED=-shared -Wl,--no-undefined -Wl,--version-script=../../burner/libretro/link.T"
-		[ "$name" != ppsspp ] || echo "patch=tools/a133p/ppsspp-libcxx.patch sha256:$(sha256sum "$patch" | cut -d' ' -f1)"
-		[ "$name" != ppsspp ] || echo "CMAKE_SHARED_LINKER_FLAGS=-L$gpu"
 		[ "$name" != tic80 ] || echo "CMAKE_C_FLAGS_RELEASE=CMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -fno-lto"
 	} >"$work/cores/${name}_libretro.so.meta"
 )

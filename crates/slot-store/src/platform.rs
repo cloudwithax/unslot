@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::core::Core;
 use crate::slot_state::Shader;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub enum Platform {
     #[default]
     Gba,
@@ -60,6 +60,7 @@ pub enum Platform {
     ScummVm,
     Pico8,
     Tic80,
+    /// Run by standalone PPSSPP-SDL, which slot quits for as it does for DraStic or a port.
     Psp,
     /// Run by DraStic, which slot quits for as it does for a port, rather than by a core.
     Nds,
@@ -693,7 +694,6 @@ const SPECS: [Spec; Platform::COUNT] = [
         short: "PSP",
         dir: "PSP",
         extensions: &["iso", "cso", "pbp", "chd", "elf", "prx"],
-        cores: &[Core::Ppsspp],
         shoulders: true,
         turbo: false,
         rewind: false,
@@ -847,12 +847,13 @@ mod tests {
 
     #[test]
     fn every_spec_is_complete() {
-        // The apps are opened by slot itself: no core, no files. DS games are run by DraStic.
+        // The apps are opened by slot itself: no core, no files. DS and PSP games are run by
+        // standalone DraStic and PPSSPP-SDL.
         for p in Platform::ALL.into_iter().filter(|p| *p != Platform::Apps) {
             let s = p.spec();
             assert!(!s.name.is_empty() && !s.dir.is_empty(), "{p:?} has no name");
             assert!(
-                p == Platform::Nds || !s.cores.is_empty(),
+                matches!(p, Platform::Nds | Platform::Psp) || !s.cores.is_empty(),
                 "{p:?} has no core"
             );
             assert!(

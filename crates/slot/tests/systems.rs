@@ -183,29 +183,28 @@ fn every_system_has_its_own_folder_on_the_card() {
 
 /// Types `word` on the keyboard by walking to each key, which starts on `q`.
 fn type_word(a: &mut slot::app::App, word: &str) {
-    const ROWS: [&str; 4] = ["1234567890", "qwertyuiop", "asdfghjkl-", "zxcvbnm_.@"];
-    let (mut row, mut col) = (1usize, 0usize);
     for ch in word.chars() {
-        let r = ROWS
+        if ch == ' ' {
+            press(a, Btn::X);
+            continue;
+        }
+        let target = ch.to_string();
+        let kb = a.keyboard().expect("no keyboard");
+        let (r, c) = kb
+            .rows()
             .iter()
-            .position(|r| r.contains(ch))
+            .enumerate()
+            .find_map(|(r, row)| {
+                row.iter()
+                    .position(|cap| kb.label(*cap) == target)
+                    .map(|c| (r, c))
+            })
             .expect("a key for it");
-        let c = ROWS[r].find(ch).unwrap();
-        while row < r {
+        while a.keyboard().unwrap().row() != r {
             press(a, Btn::Down);
-            row += 1;
         }
-        while row > r {
-            press(a, Btn::Up);
-            row -= 1;
-        }
-        while col < c {
+        while a.keyboard().unwrap().col() != c {
             press(a, Btn::Right);
-            col += 1;
-        }
-        while col > c {
-            press(a, Btn::Left);
-            col -= 1;
         }
         press(a, Btn::A);
     }
@@ -223,7 +222,7 @@ fn x_finds_a_game_on_any_shelf_and_a_takes_the_slot_to_it() {
     let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
     press(&mut a, Btn::X);
     assert!(
-        matches!(a.page_model(), Some(PageModel::Keys(_))),
+        a.keyboard().is_some(),
         "X opened no keyboard: {:?}",
         a.phase()
     );
@@ -257,9 +256,9 @@ fn x_finds_a_game_on_any_shelf_and_a_takes_the_slot_to_it() {
     assert!(matches!(a.phase(), Phase::Shelf), "{:?}", a.phase());
     assert_eq!(a.selected_stem(), Some("Super Metroid"));
 
-    // Y from the results searches again from what was typed; MENU goes back to them.
+    // Y from the results searches again from what was typed; Y on the keyboard cancels back.
     press(&mut a, Btn::X);
-    let Some(PageModel::Keys(keys)) = a.page_model() else {
+    let Some(keys) = a.keyboard() else {
         panic!("no keyboard");
     };
     assert_eq!(keys.text(), "met", "the last search was not kept");

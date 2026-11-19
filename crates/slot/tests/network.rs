@@ -142,11 +142,19 @@ fn an_open_network_joins_with_one_press() {
 fn a_secured_network_asks_for_its_password_and_says_when_it_is_wrong() {
     let (_d, mut a) = on_network_list();
     press(&mut a, Btn::A);
-    let Some(PageModel::Keys(keys)) = a.page_model() else {
+    let Some(keys) = a.keyboard() else {
         panic!("Home-5G did not ask for a password: {:?}", a.phase());
     };
-    assert_eq!(keys.shown(), "", "the field did not start empty");
-    for _ in 0..8 {
+    assert_eq!(keys.text(), "", "the field did not start empty");
+    for _ in 0..5 {
+        press(&mut a, Btn::A);
+    }
+    press(&mut a, Btn::Start);
+    assert!(
+        a.keyboard().is_some_and(|k| k.alert()),
+        "a 5-letter WPA password did not refuse inline"
+    );
+    for _ in 0..3 {
         press(&mut a, Btn::A);
     }
     press(&mut a, Btn::Start);
@@ -172,6 +180,16 @@ fn the_keyboard_gives_up_on_menu_and_keeps_the_place_in_the_list() {
         "B threw the password away"
     );
     a.apply(Action::QuickMenu);
+    assert!(
+        a.keyboard().is_some_and(|k| k.help()),
+        "Menu did not open Keyboard Help"
+    );
+    press(&mut a, Btn::B);
+    assert!(
+        a.keyboard().is_some_and(|k| !k.help()),
+        "B did not close Keyboard Help"
+    );
+    press(&mut a, Btn::Y);
     assert!(matches!(a.phase(), Phase::Networks { cursor, .. } if *cursor == at));
 }
 
@@ -181,10 +199,10 @@ fn a_hidden_network_is_asked_for_by_name_then_password() {
     let at = list(&a).rows.len() - 1;
     go_to_row(&mut a, at);
     press(&mut a, Btn::A);
-    let Some(PageModel::Keys(keys)) = a.page_model() else {
+    let Some(keys) = a.keyboard() else {
         panic!("no keyboard for the name");
     };
-    assert_eq!(keys.shown(), "");
+    assert_eq!(keys.text(), "");
     press(&mut a, Btn::A);
     press(&mut a, Btn::Start);
     assert!(
@@ -398,7 +416,7 @@ fn file_sharing_asks_for_a_password_first_then_shares() {
     go_to(&mut a, "File sharing");
     press(&mut a, Btn::A);
     assert!(
-        matches!(a.page_model(), Some(PageModel::Keys(_))),
+        a.keyboard().is_some(),
         "sharing began with no password: {:?}",
         a.phase()
     );
@@ -425,7 +443,7 @@ fn syncthing_asks_for_a_password_then_x_shows_its_device_id() {
     go_to(&mut a, "Syncthing");
     press(&mut a, Btn::A);
     assert!(
-        matches!(a.page_model(), Some(PageModel::Keys(_))),
+        a.keyboard().is_some(),
         "Syncthing began with no password: {:?}",
         a.phase()
     );
@@ -686,16 +704,16 @@ fn a_screenscraper_login_is_typed_in_on_game_art_and_saved_to_the_card() {
     press(&mut a, Btn::Up);
     assert_eq!(action(&a), Some("Sign In".to_string()));
     press(&mut a, Btn::A);
-    let Some(PageModel::Keys(_)) = a.page_model() else {
+    if a.keyboard().is_none() {
         panic!("no keyboard for the username: {:?}", a.phase());
-    };
+    }
     for _ in 0..2 {
         press(&mut a, Btn::A);
     }
     press(&mut a, Btn::Start);
-    let Some(PageModel::Keys(_)) = a.page_model() else {
+    if a.keyboard().is_none() {
         panic!("no keyboard for the password: {:?}", a.phase());
-    };
+    }
     for _ in 0..4 {
         press(&mut a, Btn::A);
     }
@@ -1185,4 +1203,50 @@ fn with_art_while_asleep_off_the_lid_shut_finds_nothing() {
     }
     assert!(!a.scrape_view().running);
     assert!(!d.path().join("Labels/GBA/Zero.png").exists());
+}
+
+#[test]
+fn holding_b_and_directions_repeat_while_a_only_repeats_on_delete() {
+    let (_d, mut a) = on_network_list();
+    press(&mut a, Btn::A);
+    assert!(a.keyboard().is_some());
+
+    // Holding A on 'q' types it once and never repeats.
+    a.apply(Action::GbaDown(Btn::A));
+    for t in (16..=800).step_by(16) {
+        a.tick_ms(t);
+    }
+    a.apply(Action::GbaUp(Btn::A));
+    assert_eq!(a.keyboard().unwrap().text(), "q");
+
+    for _ in 0..6 {
+        press(&mut a, Btn::A);
+    }
+    assert_eq!(a.keyboard().unwrap().text().len(), 7);
+
+    // Holding B repeats backspace.
+    a.apply(Action::GbaDown(Btn::B));
+    for t in (816..=1500).step_by(16) {
+        a.tick_ms(t);
+    }
+    a.apply(Action::GbaUp(Btn::B));
+    assert!(a.keyboard().unwrap().text().len() < 4);
+
+    // Holding A on the Delete key also repeats backspace.
+    for _ in 0..6 {
+        press(&mut a, Btn::A);
+    }
+    while a.keyboard().unwrap().row() != 0 {
+        press(&mut a, Btn::Up);
+    }
+    while !a.keyboard().unwrap().on_delete() {
+        press(&mut a, Btn::Right);
+    }
+    let before = a.keyboard().unwrap().text().len();
+    a.apply(Action::GbaDown(Btn::A));
+    for t in (1516..=2200).step_by(16) {
+        a.tick_ms(t);
+    }
+    a.apply(Action::GbaUp(Btn::A));
+    assert!(a.keyboard().unwrap().text().len() < before - 2);
 }

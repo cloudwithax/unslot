@@ -38,6 +38,17 @@ const FAR: i32 = 8;
 
 pub const REPEAT_DELAY_MS: Millis = 400;
 
+/// One cart as the row draws it: its cart, the box it fills and how solid it is.
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub struct CartPlacement {
+    pub index: usize,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub alpha: f32,
+}
+
 pub const STAR_SCALE: u32 = 2;
 pub const STAR_INK: [u8; 3] = [0xf6, 0xc3, 0x2c];
 const STAR_INSET: f32 = 5.0;
@@ -467,15 +478,26 @@ impl Shelf {
         dim: f32,
         out: &mut Vec<Draw>,
     ) {
+        self.draw_row_at(canvas, hidden, shake, recede, dim, 0.0, out);
+    }
+
+    /// The carts the row draws, in the order it draws them, each with the box it fills and how
+    /// solid it is. A screen that puts something of its own on a cart, as a trophy, finds it here.
+    pub fn row(
+        &self,
+        canvas: Canvas,
+        hidden: Option<&str>,
+        shake: f32,
+        recede: f32,
+    ) -> Vec<CartPlacement> {
         let recede = recede.clamp(0.0, 1.0);
-        let dim = dim.clamp(0.0, 1.0);
         let target = self.scroll_target();
+        let mut out = Vec::new();
         for slot in -SLOTS..=SLOTS {
             let Some(i) = self.cart_at_offset(slot) else {
                 continue;
             };
-            let cart = &self.carts[i];
-            if hidden == Some(cart.stem.as_str()) {
+            if hidden == Some(self.carts[i].stem.as_str()) {
                 continue;
             }
             let offset = target + slot as f32 - self.scroll;
@@ -489,8 +511,44 @@ impl Shelf {
             if x + w <= 0.0 || x >= canvas.w || alpha <= 0.0 {
                 continue;
             }
-            let x = x + shake;
-            let y = foot_y(ch as f32) + canvas.extra() / 2.0 - h;
+            out.push(CartPlacement {
+                index: i,
+                x: x + shake,
+                y: foot_y(ch as f32) + canvas.extra() / 2.0 - h,
+                w,
+                h,
+                alpha,
+            });
+        }
+        out
+    }
+
+    /// As `draw_row`, with every cart `sink` pixels lower than it rests, so a screen can pull
+    /// them down behind the slot's front.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_row_at(
+        &self,
+        canvas: Canvas,
+        hidden: Option<&str>,
+        shake: f32,
+        recede: f32,
+        dim: f32,
+        sink: f32,
+        out: &mut Vec<Draw>,
+    ) {
+        let dim = dim.clamp(0.0, 1.0);
+        for p in self.row(canvas, hidden, shake, recede) {
+            let CartPlacement {
+                index: i,
+                x,
+                w,
+                h,
+                alpha,
+                ..
+            } = p;
+            // The slot's front hides a cart on its way down or up, so it stays solid.
+            let y = p.y + sink;
+            let cart = &self.carts[i];
             if alpha < 1.0 && !self.real(i) {
                 if let Some(tex) = self.shadows[self.shell(i).index()] {
                     out.push(Draw::Tex {

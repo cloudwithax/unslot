@@ -37,10 +37,11 @@ mod sticker;
 pub mod text;
 mod text_page;
 mod toast;
+mod trophies;
 
 pub use backdrop::{
     bezel_face, blur_background, default_background, default_game_bezel_face, draw_backdrop,
-    draw_ground, wallpaper_face,
+    draw_ground, wallpaper_face, BezelArt,
 };
 pub use barcode::{code39, CODE39_NARROW, CODE39_WIDE};
 pub use battery::{draw_gauge, Gauge, BOLT_PX, GAUGE_H, GAUGE_W, WALL};
@@ -71,7 +72,11 @@ pub use hud::{
     HUD_ICON_PX, HUD_INK, HUD_MS, LINK_HOST_INK, LINK_JOIN_INK, PLATE_H,
 };
 pub use icon::{badge_face, icon_box, icon_face, star_face, warm_fonts, Badge, Icon};
-pub use keyboard::{KeyInput, KeyOutcome, Keyboard};
+pub use keyboard::{
+    draw_keyboard, draw_keyboard_legends, key_rect, keyboard_cap_faces, keyboard_faces,
+    keyboard_help_columns, keyboard_help_face, keyboard_text_face, Cap, KeyLayout, KeyTex,
+    Keyboard, KeyboardFaces, KeyboardTex, Shortcut, Special, Typed, KEYBOARD_HELP_TITLE,
+};
 pub use link_art::{
     link_art, LinkArt, ADAPTER_BASE_X, ADAPTER_BASE_Y, ADAPTER_H, ADAPTER_W, ARCS, ARROW_H,
     ARROW_LEFT_X, ARROW_RIGHT_X, ARROW_W, ARROW_Y, CLICKS_H, CLICKS_W, CLICKS_X, CLICKS_Y, PLUG_H,
@@ -98,7 +103,9 @@ pub use quick_menu::{
 pub use rebuild::{rebuild_count_face, rebuild_title_face, RebuildScreen};
 pub use refusal::Refusal;
 pub use scraped::{box_hue, hue_of, scraped_label};
-pub use shelf::{foot_y, repeat_gap, rest_y, Shelf, REPEAT_DELAY_MS, STAR_INK, STAR_SCALE};
+pub use shelf::{
+    foot_y, repeat_gap, rest_y, CartPlacement, Shelf, REPEAT_DELAY_MS, STAR_INK, STAR_SCALE,
+};
 pub use shell::{
     gb_plastics, gb_table_shells, gba_plastics, gba_shell_for,
     lookup_order_is_exact_then_family_then_default, shell_for, shell_presets, table_keys, Finish,
@@ -106,8 +113,8 @@ pub use shell::{
 };
 pub use silhouette::{gb_silhouette, silhouette, GbShell};
 pub use slot_chrome::{
-    draw_empty_slot, draw_slot_name, draw_slot_title, ease, edge, housing, opening, recess,
-    slot_name_y, SlotChrome, ALERT_PX, LIP_H, MOUTH_H, MOUTH_W,
+    draw_empty_slot, draw_slot_name, draw_slot_name_above, draw_slot_title, ease, edge, housing,
+    opening, recess, slot_name_y, SlotChrome, ALERT_PX, LIP_H, MOUTH_H, MOUTH_W,
 };
 pub use sticker::{
     draw_sticker, head_rows, sticker_face, sticker_lines, sticker_rect, StickerFields, COPYRIGHT,
@@ -115,3 +122,8 @@ pub use sticker::{
 };
 pub use text_page::{wrap as wrap_text, TextPage, TEXT_LINES, TEXT_PX, TEXT_W};
 pub use toast::{line_toast_face, toast_box, toast_face, toast_rect, Toast};
+pub use trophies::{
+    beam_rgba, draw_trophy_carousel, draw_trophy_ground, draw_trophy_strip, spotlight_rgba,
+    trophy_assets, trophy_badge_over, trophy_strip_row, StripTrophy, TrophyAssets, TrophyBadge,
+    TrophyTextures, TrophyTier,
+};

@@ -171,6 +171,16 @@ launch
 ! grep -qs -- --port "$TMP/asked" || fail "DraStic's launch looked for runtimes or read the volume"
 [ ! -e "$TMP/fs/roms" ] || fail "DraStic's launch linked PortMaster's folders"
 
+# A PSP game slot quit for goes to standalone PPSSPP's script whole, spaces and all, and nothing is linked.
+setup
+mkdir -p "$TMP/card/System/ppsspp"
+printf '#!/bin/sh\necho "$#:$1" > ran\n' > "$TMP/card/System/ppsspp/launch.sh"
+printf '%s\n%s' "$TMP/card/System/ppsspp/launch.sh" "$TMP/card/Games/PSP/Crisis Core.iso" > "$TMP/card/.unslot-port"
+launch
+[ "$(cat "$TMP/card/System/ppsspp/ran")" = "1:$TMP/card/Games/PSP/Crisis Core.iso" ] || fail "PPSSPP was not handed the game"
+! grep -qs -- --port "$TMP/asked" || fail "PPSSPP's launch looked for runtimes or read the volume"
+[ ! -e "$TMP/fs/roms" ] || fail "PPSSPP's launch linked PortMaster's folders"
+
 # A firmware without /etc/ssl/certs/ca-certificates.crt gets the card's CA bundle; one with its own keeps it.
 setup
 mkdir -p "$TMP/card/System/ssl" "$TMP/card/Ports"
@@ -187,5 +197,18 @@ printf '%s' "$TMP/card/Ports/Certs.sh" > "$TMP/card/.unslot-port"
 (unset SSL_CERT_FILE CURL_CA_BUNDLE; launch)
 [ "$(cat "$TMP/card/Ports/certs")" = ":" ] ||
 	fail "the card's CA bundle overrode the firmware's own: $(cat "$TMP/card/Ports/certs")"
+
+# Cores that name desktop GL are refused by the loader on a firmware without it, so slot gets the
+# card's shim on its loader path, first, with what was there after it; a port does not.
+setup
+mkdir -p "$TMP/card/System/lib" "$TMP/card/Ports"
+: > "$TMP/card/System/lib/libGL.so.1"
+printf '#!/bin/sh\necho "${LD_LIBRARY_PATH:-}" > %s/loader\n' "$TMP" > "$TMP/slot"
+printf '#!/bin/sh\necho "${LD_LIBRARY_PATH:-}" > loader\n' > "$TMP/card/Ports/Loader.sh"
+printf '%s' "$TMP/card/Ports/Loader.sh" > "$TMP/card/.unslot-port"
+(unset LD_LIBRARY_PATH; launch)
+[ "$(cat "$TMP/loader" 2>/dev/null)" = "$TMP/card/System/lib" ] ||
+	fail "slot was not given the card's libGL shim: $(cat "$TMP/loader" 2>/dev/null)"
+[ -z "$(cat "$TMP/card/Ports/loader" 2>/dev/null)" ] || fail "a port was given the libGL shim"
 
 echo "launch: all passed"

@@ -102,7 +102,14 @@ pub fn scan(root: &Path) -> Result<Vec<Cart>, StoreError> {
                     Some(disc) => disc,
                     None => continue,
                 },
-                false if is_hidden(&rom) || !platform.accepts(&rom) || !is_file(&entry) => continue,
+                false
+                    if is_hidden(&rom)
+                        || is_sync_conflict(&rom)
+                        || !platform.accepts(&rom)
+                        || !is_file(&entry) =>
+                {
+                    continue
+                }
                 false => rom,
             };
             let Some(stem) = rom.file_stem().and_then(|s| s.to_str()) else {
@@ -223,6 +230,14 @@ pub fn initial(stem: &str) -> char {
             .unwrap_or('#'),
         _ => '#',
     }
+}
+
+/// Syncthing's copy of a file two devices changed at once, `name.sync-conflict-<when>-<who>.ext`:
+/// the same game again, not another one.
+fn is_sync_conflict(p: &Path) -> bool {
+    p.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.contains(".sync-conflict-"))
 }
 
 pub fn is_hidden(p: &Path) -> bool {

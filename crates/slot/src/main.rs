@@ -35,11 +35,36 @@ fn main() {
             }
             return;
         }
+        // For System/launch_frontend.sh on a firmware with no unzip: the entries of ZIP under
+        // PREFIX, unpacked into DEST.
+        Some("--unzip") => {
+            let (Some(zip), Some(dest)) = (args.next(), args.next()) else {
+                eprintln!("slot: --unzip needs a zip and where to unpack it");
+                std::process::exit(2);
+            };
+            let prefix = args.next().unwrap_or_default();
+            if let Err(e) = slot::unzip::extract(
+                std::path::Path::new(&zip),
+                std::path::Path::new(&dest),
+                &prefix,
+            ) {
+                eprintln!("{zip}: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
         // For System/drastic/launch.sh: the volume keys and Menu, while DraStic runs in slot's
         // place.
         Some("--drastic") => {
             let root = std::env::var_os("SLOT_ROOT").unwrap_or_else(|| "/mnt/sdcard".into());
             slot::drastic::run(std::path::Path::new(&root));
+            return;
+        }
+        // For System/ppsspp/launch.sh: the volume keys and Menu, while PPSSPP-SDL runs in slot's
+        // place.
+        Some("--ppsspp") => {
+            let root = std::env::var_os("SLOT_ROOT").unwrap_or_else(|| "/mnt/sdcard".into());
+            slot::drastic::run_ppsspp(std::path::Path::new(&root));
             return;
         }
         // The in-game menu over a stopped DraStic, for --drastic.

@@ -2,8 +2,8 @@
 # Builds the cores that draw with the GPU for the H700's Mali, against OpenGL ES. The buildbot's
 # aarch64 builds of these are made for desktop GL, which BaseOS does not have.
 #
-#   build.sh CORE COMMIT WORK OUT        CORE is parallel_n64, flycast, flycast_xtreme, nodosumi,
-#                                       ppsspp or vecx
+#   build.sh CORE COMMIT WORK OUT        CORE is parallel_n64, flycast, flycast_xtreme, nodosumi
+#                                       or vecx
 #
 # Runs on an aarch64 Debian bullseye box, as the release does, or cross-compiles from an amd64 one
 # (cores/gles/Dockerfile); bullseye's glibc is older than the device's, so what it builds loads
@@ -85,19 +85,6 @@ nodosumi)
 	cmake -S "$work" -B "$work/build" $(cmake_cross) -DBUILD_LIBRETRO=ON -DA64_JIT=ON
 	cmake --build "$work/build" -j"$jobs"
 	built="$(find "$work/build" -name nodosumi_libretro.so | head -n 1)"
-	;;
-ppsspp)
-	fetch hrydgard/ppsspp
-	# shellcheck disable=SC2046
-	cmake -S "$work" -B "$work/build" $(cmake_cross) -DLIBRETRO=ON -DUSING_GLES2=ON \
-		-DUSING_EGL=OFF -DUSING_X11_VULKAN=OFF -DVULKAN=OFF -DUSE_DISCORD=OFF \
-		-DUSE_MINIUPNPC=OFF -DUSE_SYSTEM_FFMPEG=OFF -DUSE_SYSTEM_LIBZIP=OFF
-	cmake --build "$work/build" -j"$jobs" --target ppsspp_libretro
-	built="$(find "$work/build" -name ppsspp_libretro.so | head -n 1)"
-	# Its fonts, atlas and shaders, which it reads from the BIOS folder's PPSSPP.
-	rm -rf "$(dirname "$out")/PPSSPP"
-	mkdir -p "$(dirname "$out")"
-	cp -r "$work/assets" "$(dirname "$out")/PPSSPP"
 	;;
 vecx)
 	# Not a GPU core here: its buildbot build links desktop GL, so it is built to draw in

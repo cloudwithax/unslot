@@ -2328,6 +2328,7 @@ dependencies = [
  "qrcode",
  "resvg",
  "slot-gfx",
+ "slot-input",
  "slot-power",
  "slot-store",
  "tempfile",

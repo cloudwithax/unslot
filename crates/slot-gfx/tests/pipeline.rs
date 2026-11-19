@@ -892,6 +892,16 @@ fn a_retroarch_shader_draws_the_game_the_right_way_up() {
     assert_eq!(px(&frame, 3, 0), [0, 0, 0], "bled one cell right");
     assert_eq!(px(&frame, 0, OUT_H as usize - 1), [0, 0, 0], "upside down");
     assert_eq!(px(&frame, OUT_W as usize - 1, 0), [0, 0, 0], "mirrored");
+
+    c.set_shader_parameters(&[("green".into(), 0.2)]);
+    c.begin_frame(slot_gfx::Layout::Framed);
+    c.draw_game();
+    let dimmed = c.read_frame();
+    let g = px(&dimmed, 1, 1)[1];
+    assert!(
+        g.abs_diff(51) <= 2,
+        "parameter override did not update green uniform: {g}"
+    );
 }
 
 #[test]

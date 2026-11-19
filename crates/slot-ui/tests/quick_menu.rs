@@ -114,7 +114,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Haptics",
             "Sound on TV",
             "Saturation",
-            "Contrast"
+            "Contrast",
+            "Kiosk Mode",
         ]
     );
     let screens: Vec<&str> = QuickRow::screen_page()
@@ -122,8 +123,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
         .map(QuickRow::label)
         .collect();
     // The Game Boy family first, then every other system in the order of the shelves.
-    // Every system but the apps, which draw no game, and the DS, which DraStic draws.
-    assert_eq!(screens.len(), Platform::COUNT - 2);
+    // Every system except Apps (no game drawn), DS (DraStic), and PSP (standalone PPSSPP-SDL).
+    assert_eq!(screens.len(), Platform::COUNT - 3);
     assert_eq!(
         screens[..13],
         [
@@ -147,14 +148,30 @@ fn the_rows_run_in_the_order_the_user_chose() {
             .into_iter()
             .map(QuickRow::label)
             .collect::<Vec<_>>(),
-        ["Shader", "Color Correction", "Frame Blending", "Bezel"]
+        [
+            "Shader",
+            "Shader Parameters",
+            "Color Correction",
+            "Frame Blending",
+            "Bezel",
+            "Scale",
+            "Stretch"
+        ]
     );
     assert_eq!(
         QuickRow::screen_of(Platform::Gbc)
             .into_iter()
             .map(QuickRow::label)
             .collect::<Vec<_>>(),
-        ["Shader", "Color Correction", "Frame Blending", "Bezel"]
+        [
+            "Shader",
+            "Shader Parameters",
+            "Color Correction",
+            "Frame Blending",
+            "Bezel",
+            "Scale",
+            "Stretch"
+        ]
     );
     assert_eq!(
         QuickRow::screen_of(Platform::Gb)
@@ -163,10 +180,13 @@ fn the_rows_run_in_the_order_the_user_chose() {
             .collect::<Vec<_>>(),
         [
             "Shader",
+            "Shader Parameters",
             "Color Correction",
             "Palettes",
             "Frame Blending",
-            "Bezel"
+            "Bezel",
+            "Scale",
+            "Stretch"
         ]
     );
     assert_eq!(
@@ -201,6 +221,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::ExitGame,
             QuickRow::PlayScreen,
             QuickRow::PlayGameplay,
+            QuickRow::ShaderParams,
             QuickRow::Network,
             QuickRow::WifiNetworks,
             QuickRow::BtDevices,
@@ -213,6 +234,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::ShutDown,
             QuickRow::Reload,
             QuickRow::Achievements,
+            QuickRow::TrophyRoom,
+            QuickRow::Kiosk,
             QuickRow::Cast,
             QuickRow::PlayCast,
             QuickRow::Controls,
@@ -222,6 +245,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
         ]
         .into_iter()
         .chain(Platform::ALL.map(QuickRow::ScreenOf))
+        .chain(Platform::ALL.map(QuickRow::ShaderParamsOf))
         .collect::<Vec<_>>()
     );
     for page in [
@@ -249,7 +273,7 @@ fn a_hidden_row_is_stepped_over_and_takes_no_place() {
     let hidden = [QuickRow::WallpaperTint];
     assert_eq!(QuickRow::Wallpaper.down(&hidden), QuickRow::Theme);
     assert_eq!(QuickRow::Theme.up(&hidden), QuickRow::Wallpaper);
-    assert_eq!(QuickRow::Wallpaper.up(&hidden), QuickRow::Contrast);
+    assert_eq!(QuickRow::Wallpaper.up(&hidden), QuickRow::Kiosk);
     assert_eq!(QuickRow::Theme.position(&hidden), 1);
     assert_eq!(QuickRow::Wallpaper.down(&[]), QuickRow::WallpaperTint);
     assert_eq!(QuickRow::Theme.position(&[]), 2);
@@ -305,6 +329,11 @@ fn the_values_read_as_the_menu_prints_them() {
             "9",
             "Mix",
             "Ghosting",
+            "SP Screen",
+            "Integer",
+            "Fit",
+            "Full Screen",
+            "Classic",
             "1 min",
             "3 min",
             "5 min",
@@ -425,10 +454,13 @@ fn the_in_game_pages_hold_their_rows_in_order() {
         QuickRow::PLAY_SCREEN,
         [
             QuickRow::Shader,
+            QuickRow::ShaderParams,
             QuickRow::ColourCorrection,
             QuickRow::Palette,
             QuickRow::Blending,
             QuickRow::Bezel,
+            QuickRow::Scale,
+            QuickRow::Stretch,
             QuickRow::PlaySaturation,
             QuickRow::PlayContrast
         ]
@@ -478,7 +510,7 @@ fn in_game_rows_read_as_the_menu_shows_them() {
         assert!(row.centred(), "{row:?}");
     }
     for row in QuickRow::PLAY_SCREEN {
-        assert!(!row.opens(), "{row:?}");
+        assert_eq!(row.opens(), row == QuickRow::ShaderParams, "{row:?}");
         assert!(!row.centred(), "{row:?}");
     }
     assert!(QuickRow::General.centred());
@@ -487,7 +519,13 @@ fn in_game_rows_read_as_the_menu_shows_them() {
 
 #[test]
 fn a_hidden_palette_and_bezel_are_stepped_over() {
-    let hidden = [QuickRow::Palette, QuickRow::Bezel];
+    let hidden = [
+        QuickRow::ShaderParams,
+        QuickRow::Palette,
+        QuickRow::Bezel,
+        QuickRow::Scale,
+        QuickRow::Stretch,
+    ];
     assert_eq!(
         QuickRow::Shader.shown(&hidden),
         vec![
@@ -533,7 +571,12 @@ fn screen_opens_a_page_per_console_and_each_backs_out_to_its_console() {
 
 #[test]
 fn screen_rows_in_game_sit_in_a_panel_at_the_bottom() {
-    let hidden = [QuickRow::Palette];
+    let hidden = [
+        QuickRow::ShaderParams,
+        QuickRow::Palette,
+        QuickRow::Scale,
+        QuickRow::Stretch,
+    ];
     let shader = slot_ui::quick_row_top(QuickRow::Shader, &hidden);
     let colour = slot_ui::quick_row_top(QuickRow::ColourCorrection, &hidden);
     assert_eq!(colour - shader, slot_ui::QUICK_PITCH);
@@ -542,7 +585,13 @@ fn screen_rows_in_game_sit_in_a_panel_at_the_bottom() {
         slot_ui::quick_row_top(QuickRow::PlayContrast, &hidden),
         slot_ui::quick_row_top(
             QuickRow::PlayContrast,
-            &[QuickRow::Palette, QuickRow::Bezel]
+            &[
+                QuickRow::ShaderParams,
+                QuickRow::Palette,
+                QuickRow::Scale,
+                QuickRow::Stretch,
+                QuickRow::Bezel,
+            ]
         )
     );
     assert!(slot_ui::quick_row_top(QuickRow::FastForward, &[]) < shader);

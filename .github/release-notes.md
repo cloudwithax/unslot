@@ -1,11 +1,14 @@
 ## Changes
 
-- **Dreamcast (Nodosumi v1.4.0)**: ships Nodosumi 1.4.0 for H700 (as well as A133P), adding A64 JIT first-target indirect branch prediction, 1 ms ARM7 sound CPU batching, and GLES 3.0 entry-point/FBO fixes.
-- **Audio pacing & rate control**: output thread paces writes on deep ALSA dmix rings so the queue does not drain and trigger sharp pitch/warble, and the rate controller drains a nearly full queue faster (`Level::FULL_MIN`) without holding up the next frame.
-- **4:3 screen layout**: 640×480 and 1024×768 4:3 panels keep the full 720-wide shelf and menu layout with room above and below instead of cropping the sides.
-- **Zero-copy GPU frames & TrimUI A133P port**: imports shared ION/DMA-BUF GPU frames directly as EGL images when supported (falling back cleanly to copy on H700 Mali), plus experimental TrimUI A133P (Brick Pro / Brick / Smart Pro) support (`task dist:a133p`), bundled Mozilla CA certificates (`System/ssl/ca-certificates.crt`) for firmwares without `/etc/ssl/certs`, and paused GPU swaps while asleep (`Doze`).
+- **TrimUI A133P cards (Brick Pro, Brick, Smart Pro)**: every release now carries `unslot-$TAG-a133p.zip` for a new card and a signed `unslot-$TAG-a133p.pak` for the updater, built with the A133P's own cores, mGBA, DraStic and PPSSPP. Tested on a Brick Pro; the Brick and Smart Pro have not been tried.
+- **PSP in standalone PPSSPP v1.20.4**: replaces the libretro core on H700 and A133P. Menu opens slot's menu over the game, Select + X opens PPSSPP's own, and old saves move over on first launch. On the A133P, PSP now shows its picture and God of War: Chains of Olympus no longer crashes.
+- **Kiosk Mode**: locks the handheld to chosen systems and games behind a PIN or password, with optional ESRB rating limits.
+- **RetroAchievements Trophy Room**: under Settings → Online, a shelf of your games with achievements and the trophies earned in each.
+- **Screen**: a Stretch row for every system, Scale and Stretch for Game Boy, Game Boy Color and Game Boy Advance with built-in GB and GBC bezels, and adjustable custom-shader parameters.
+- **Keyboard**: upstream slot's on-screen keyboard, with General, Host and Numeric layouts.
+- **Fixes**: the lowest brightness steps no longer turn the screen off, Virtual Boy runs on devices without `libGL.so.1`, Syncthing conflict copies no longer appear as games, and updates keep the shelf's drawn labels.
 
-Verified on TrimUI Brick Pro (Nodosumi v1.4.0 / Crazy Taxi 2); H700 targets inherit Nodosumi v1.4.0, the 4:3 layout fix, and the audio pacing/rate-control updates and are covered by CI checks and host unit tests.
+The full list is in [CHANGELOG.md](https://github.com/cloudwithax/unslot/blob/$TAG/CHANGELOG.md).
 
 ## New card: flash the image
 
@@ -34,6 +37,11 @@ The `.img.zip` files are images of a whole card: BaseOS, the small Linux these h
 ## Already running unslot
 
 Settings → Online → Updates downloads `unslot-$TAG.pak` and installs it when you restart. Or copy `unslot-$TAG.pak` to the root of the card yourself and restart with the power connected. unslot installs it only if it is a signed unslot release; your games, saves and settings stay.
+
+## TrimUI A133P (Brick Pro, Brick, Smart Pro)
+
+- **New card:** unzip `unslot-$TAG-a133p.zip` and copy everything in its `unslot-$TAG-a133p` folder, the hidden `.tmp_update` folder too, to the root of a FAT32 or exFAT card, then boot the handheld with it. It runs on TrimUI's stock firmware in place of its own frontend.
+- **Already running unslot:** Settings → Online → Updates installs `unslot-$TAG-a133p.pak`.
 
 ## Already running BaseOS, or slot
 

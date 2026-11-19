@@ -11,6 +11,7 @@ pub const SRC_W: u32 = OUT_W / SCALE;
 pub const SRC_H: u32 = OUT_H / SCALE;
 
 pub const WHOLE_TEXTURE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+const FULL_LAYOUT: [f32; 4] = [0.0, 0.0, OUT_W as f32, OUT_H as f32];
 
 pub struct GamePass {
     prog: gl::types::GLuint,
@@ -58,6 +59,7 @@ pub struct GamePass {
     /// Whether the picture fills the viewport, as it does in an overlay's window.
     whole: bool,
     src: [f32; 4],
+    layout: [f32; 4],
 }
 
 impl GamePass {
@@ -129,6 +131,7 @@ impl GamePass {
             bottom: 0.0,
             whole: false,
             src: WHOLE_TEXTURE,
+            layout: FULL_LAYOUT,
         })
     }
 
@@ -141,10 +144,14 @@ impl GamePass {
     }
 
     pub fn frame(&self) -> (f32, f32, f32, f32) {
-        self.placed()
+        self.frame_rect(false)
     }
 
     fn placed(&self) -> (f32, f32, f32, f32) {
+        self.frame_rect(true)
+    }
+
+    fn frame_rect(&self, use_layout: bool) -> (f32, f32, f32, f32) {
         if self.whole {
             return (0.0, 0.0, OUT_W as f32, OUT_H as f32);
         }
@@ -155,8 +162,13 @@ impl GamePass {
         };
         match self.aspect {
             Some(aspect) => fit_aspect(rect, aspect),
+            None if use_layout => placed_in(rect, self.layout),
             None => rect,
         }
+    }
+
+    pub fn set_layout(&mut self, rect: [f32; 4]) {
+        self.layout = rect;
     }
 
     pub fn set_rotation(&mut self, quarter_turns: u32) {
@@ -199,6 +211,12 @@ impl GamePass {
             self.custom = Some(CustomPass::new(src, linear)?);
         }
         Ok(())
+    }
+
+    pub fn set_shader_parameters(&mut self, overrides: &[(String, f32)]) {
+        if let Some(custom) = &self.custom {
+            custom.set_parameters(overrides);
+        }
     }
 
     pub fn set_paper(&mut self, size: u32, gray: &[u8]) {
@@ -401,6 +419,13 @@ fn whole_scale_source(src: [f32; 4], fbo: [f32; 2], texels: (u32, u32)) -> [f32;
     let (x, w) = whole_scale(src[0], src[2], texels.0 as f32, OUT_W as f32 * fbo[0]);
     let (y, h) = whole_scale(src[1], src[3], texels.1 as f32, OUT_H as f32 * fbo[1]);
     [x, y, w, h]
+}
+
+/// Maps `layout` (in `OUT_W`x`OUT_H` space) into `frame`.
+fn placed_in((fx, fy, fw, fh): (f32, f32, f32, f32), layout: [f32; 4]) -> (f32, f32, f32, f32) {
+    let [lx, ly, lw, lh] = layout;
+    let (sx, sy) = (fw / OUT_W as f32, fh / OUT_H as f32);
+    (fx + lx * sx, fy + ly * sy, lw * sx, lh * sy)
 }
 
 /// The largest rect of `aspect` centred in `rect`, as (x, y, w, h).

@@ -5,7 +5,7 @@
 > an uncropped menu layout, working Wi-Fi and Bluetooth; the Smart Pro and Brick have not been tried. If you try it,
 > [open an issue](https://github.com/cloudwithax/unslot/issues) with the files in `Logs`.
 
-The port lives on the `a133p` branch. It runs unslot on TrimUI's stock firmware, in place of
+It runs unslot on TrimUI's stock firmware, in place of
 TrimUI's frontend, with no BaseOS under it.
 
 ## Devices
@@ -78,6 +78,30 @@ a reload, a port or a DS game.
 - **Bluetooth** uses the firmware's XRadio attachment, waiting for firmware loading to finish,
   and runs bluetoothd from `/etc/bluetooth/bluetoothd`.
 
+## PSP
+
+PSP games run in standalone PPSSPP-SDL `v1.20.4`, built for the PowerVR by `task ppsspp:a133p`
+and staged into `System/ppsspp` beside the launcher it shares with the H700. It links the same
+source-built SDL2 (`SDL2_trimui`, the mali/`SDL2_POWERVR_GE8300` video driver, PowerVR's null
+native EGL window) that DraStic uses, and the volume/hotkey shim from `tools/ppsspp/volume.c`, so
+the volume keys, Menu over the game and Exit Game work as they do on the H700.
+
+PPSSPP loads GLES 3's entry points with `eglGetProcAddress`. PowerVR's EGL answers only for entry
+points that extensions add — on the Brick Pro `eglGetProcAddress` returns NULL for every core
+entry point, `glGetStringi` included, while all of them are ordinary exports of `libGLESv2.so.2`
+— so PPSSPP assigned itself null pointers, `gl3stubInit()` failed, and `CheckGLExtensions()` then
+called the null `glGetStringi` because it keys the GLES 3 extension list off the reported version.
+`tools/a133p/ppsspp-gles-proc.patch` makes each lookup fall back to `dlsym`, which is what
+`SDL_GL_GetProcAddress` does; the OES/EXT-suffixed names PPSSPP asks EGL for directly
+(`glGenVertexArraysOES`, `glMapBufferOES`) are served by PowerVR's EGL and not by the library, so
+they are left alone.
+
+Verified on the Brick Pro: Bomberman (USA) boots and plays at 30/30 (100%, 1× resolution) with
+sound on the codec, the volume keys move the level in `/run/unslot-ppsspp-volume` and slot.state
+and draw the shim's bar, Menu suspends the game and draws slot's menu over it, and Exit Game
+returns to the shelf with PPSSPP's own clean exit. Save states live in `States/PSP`, PPSSPP's
+settings and the games' saves in `Saves/PSP/ppsspp/PSP`.
+
 ## Updates
 
 A133P builds look for `unslot-<version>-a133p.pak`, not the H700's `unslot-<version>.pak`. None is
@@ -105,6 +129,11 @@ The last four are recorded when an empty `System/trace-radio.on` is present on t
 
 ## Building
 
+Each release carries a TrimUI card, `unslot-<version>-a133p.zip`, and its signed update,
+`unslot-<version>-a133p.pak`, built by the release workflow from the H700 tree and the cores,
+mGBA and DraStic in the `a133p-cores` prerelease; run the `a133p-cores` workflow when a recipe in
+`tools/a133p` changes. To build one by hand:
+
 Builds use [Task](https://taskfile.dev), and cross-compile against glibc 2.23 through zig.
 
 | Task | What it makes |
@@ -113,6 +142,7 @@ Builds use [Task](https://taskfile.dev), and cross-compile against glibc 2.23 th
 | `task core:a133p` | mGBA for glibc 2.23, through zig and `tools/a133p/toolchain.cmake`. |
 | `task core:a133p:extra -- pcsx_rearmed fbneo` | Selected extra cores from pinned upstream sources, using zig. Without arguments, attempts all 47 shipped cores other than mGBA. |
 | `task drastic:a133p` | Host-staged DraStic with a source-built PowerVR SDL2 and TrimUI control defaults. The proprietary runner requires glibc 2.27. |
+| `task ppsspp:a133p` | Standalone PPSSPPSDL for the PowerVR through zig, against the SDL2 DraStic uses and with `tools/a133p/ppsspp-gles-proc.patch`. |
 | `task dist:a133p FROM=<tree>` | The card in `dist-a133p`. |
 
 `dist:a133p` starts from an H700 device tree, `FROM`, which defaults to `dist-device`; an unzipped

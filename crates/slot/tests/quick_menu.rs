@@ -537,6 +537,8 @@ fn screen_opens_a_page_of_its_own_and_b_comes_back_to_it() {
         QuickRow::GbPalettes,
         QuickRow::BlendingOf(Platform::Gb),
         QuickRow::BezelOf(Platform::Gb),
+        QuickRow::ScaleOf(Platform::Gb),
+        QuickRow::StretchOf(Platform::Gb),
         QuickRow::ShaderOf(Platform::Gb),
     ] {
         press(&mut a, Btn::Down);
@@ -1416,8 +1418,14 @@ fn a_wide_panel_offers_gb_and_gbc_frames_from_none_through_the_card() {
         BezelPick::File("Pocket.png".into())
     );
     assert_eq!(a.resolved_bezel(Platform::Gb), BezelPick::None);
-    press(&mut a, Btn::Down);
-    assert_eq!(a.quick_menu(), Some(QuickRow::ShaderOf(Platform::Gbc)));
+    // The overlay places the game in its own window, so Scale is not offered under it.
+    for want in [
+        QuickRow::StretchOf(Platform::Gbc),
+        QuickRow::ShaderOf(Platform::Gbc),
+    ] {
+        press(&mut a, Btn::Down);
+        assert_eq!(a.quick_menu(), Some(want));
+    }
     assert!(!a.sp_frame());
 }
 
@@ -1458,35 +1466,34 @@ fn the_shader_row_steps_past_the_built_in_shaders_to_the_cards_shader_files() {
 }
 
 #[test]
-fn a_four_by_three_panel_keeps_ags_102_until_another_frame_is_picked() {
+fn a_four_by_three_panel_has_no_ags_102_until_it_is_picked() {
     let (d, mut a, _) = on_carousel();
     a.set_panel((640, 480));
-    for platform in [Platform::Gba, Platform::Gb, Platform::Gbc] {
+    for platform in [Platform::Gb, Platform::Gbc] {
         assert_eq!(
             a.resolved_bezel(platform),
-            BezelPick::Ags102,
+            BezelPick::Default,
             "{platform:?}"
         );
     }
-    assert!(a.sp_frame());
-    open_at(&mut a, QuickRow::BezelOf(Platform::Gba));
-    press(&mut a, Btn::Right);
-    assert_eq!(a.resolved_bezel(Platform::Gba), BezelPick::None);
-    assert!(!a.sp_frame());
-    press(&mut a, Btn::Right);
-    assert_eq!(a.resolved_bezel(Platform::Gba), BezelPick::Ags102);
-    while a.quick_menu().is_some() {
-        press(&mut a, Btn::B);
+    // It was every system's frame: a system with no frame of its own now has none.
+    for platform in [Platform::Gba, Platform::Nes] {
+        assert_eq!(a.resolved_bezel(platform), BezelPick::None, "{platform:?}");
     }
-    open_at(&mut a, QuickRow::BezelOf(Platform::Gbc));
-    press(&mut a, Btn::Left);
-    assert_eq!(a.resolved_bezel(Platform::Gbc), BezelPick::Default);
-    assert_eq!(
-        read_slot_state(d.path()).screen(Platform::Gbc).bezel,
-        BezelPick::Default
-    );
+    assert!(!a.sp_frame());
+    open_at(&mut a, QuickRow::BezelOf(Platform::Gba));
+    // The frame is among what is offered, and picking it turns it on for that game's system only.
+    while a.resolved_bezel(Platform::Gba) != BezelPick::Ags102 {
+        press(&mut a, Btn::Right);
+    }
+    assert!(a.sp_frame());
+    assert_ne!(a.resolved_bezel(Platform::Gbc), BezelPick::Ags102);
     assert_eq!(
         read_slot_state(d.path()).screen(Platform::Gba).bezel,
+        BezelPick::Ags102
+    );
+    assert_ne!(
+        read_slot_state(d.path()).screen(Platform::Gbc).bezel,
         BezelPick::Ags102
     );
 }
@@ -1497,6 +1504,21 @@ fn a_frame_file_that_is_gone_reads_back_as_none() {
     state.screen_mut(Platform::Gb).bezel = BezelPick::File("gone.png".into());
     let (_d, a, _) = on_carousel_with(state);
     assert_eq!(a.resolved_bezel(Platform::Gb), BezelPick::None);
+}
+
+#[test]
+fn an_overlay_that_places_the_game_itself_has_no_scale_row() {
+    let mut state = SlotState::default();
+    state.screen_mut(Platform::Gb).bezel = BezelPick::File("Game Boy.png".into());
+    let (d, mut a, _) = on_carousel_with(state);
+    let overlay = d.path().join("Bezels/GB/Game Boy.png");
+    std::fs::create_dir_all(overlay.parent().unwrap()).unwrap();
+    std::fs::write(&overlay, b"").unwrap();
+    a.set_panel((720, 720));
+    assert!(a.scale_choices(Platform::Gb).len() >= 2);
+    assert!(a.hidden_rows().contains(&QuickRow::ScaleOf(Platform::Gb)));
+    std::fs::remove_file(&overlay).unwrap();
+    assert!(!a.hidden_rows().contains(&QuickRow::ScaleOf(Platform::Gb)));
 }
 
 #[test]
@@ -1527,24 +1549,18 @@ fn hostname_is_visible_without_wifi_and_invalid_done_keeps_the_keyboard() {
         panic!("no keyboard");
     };
     assert_eq!(keys.text(), name);
-    press(&mut a, Btn::Y);
+    press(&mut a, Btn::X);
     press(&mut a, Btn::Start);
     let Phase::Keyboard { keys, .. } = a.phase() else {
         panic!("invalid name closed the keyboard");
     };
     assert_eq!(keys.text(), format!("{name} "));
     assert_eq!(a.hostname_label(), name);
-    assert_eq!(
-        a.cheevo_text().as_deref(),
-        Some(slot::baseos::HOSTNAME_HINT)
+    assert!(
+        keys.alert(),
+        "invalid hostname did not alert on the keyboard"
     );
-    let tex = TexId::from_raw(9999);
-    a.set_cheevo_face(Some((tex, 400, 40)));
-    let mut draws = Vec::new();
-    a.draw(&mut draws);
-    assert!(draws
-        .iter()
-        .any(|d| matches!(d, Draw::Tex { tex: at, .. } if *at == tex)));
+    assert_eq!(keys.subtitle(), Some(slot::baseos::HOSTNAME_HINT));
 }
 
 #[test]
@@ -1594,4 +1610,49 @@ fn power_settings_cycle_and_persist_the_literal_values() {
         assert_eq!(a.quick_value(QuickRow::PowerOffAfter).unwrap().text(), text);
         assert_eq!(read_slot_state(d.path()).power_off_after, minutes);
     }
+}
+
+#[test]
+fn a_console_drawn_at_its_own_shape_can_be_stretched_over_the_whole_screen() {
+    let d = tmp_root_with_carts(&["Emerald"]);
+    std::fs::create_dir_all(d.path().join("Games/NES")).unwrap();
+    std::fs::write(d.path().join("Games/NES/Mario.nes"), [0u8; 64]).unwrap();
+    write_slot_state(
+        d.path(),
+        &SlotState {
+            clock_set: true,
+            ..SlotState::default()
+        },
+    )
+    .unwrap();
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    a.set_panel((640, 480));
+    // It keeps its own shape until asked, in the band, with room for a bezel.
+    assert!(!a.game_layout_of(Platform::Nes).panel);
+    assert!(!a
+        .hidden_rows()
+        .contains(&QuickRow::StretchOf(Platform::Nes)));
+    open_at(&mut a, QuickRow::StretchOf(Platform::Nes));
+    assert_eq!(a.quick_menu(), Some(QuickRow::StretchOf(Platform::Nes)));
+    assert_eq!(
+        a.quick_value(QuickRow::StretchOf(Platform::Nes)),
+        Some(QuickValue::stretch(slot_store::Stretch::Classic))
+    );
+    press(&mut a, Btn::Right);
+    assert_eq!(
+        a.quick_value(QuickRow::StretchOf(Platform::Nes)),
+        Some(QuickValue::stretch(slot_store::Stretch::FullScreen))
+    );
+    // Over the whole screen, with no bezel to pick, and kept for that system alone.
+    assert!(a.game_layout_of(Platform::Nes).panel);
+    assert!(a.hidden_rows().contains(&QuickRow::BezelOf(Platform::Nes)));
+    let saved = read_slot_state(d.path());
+    assert_eq!(
+        saved.stretches[Platform::Nes.index()],
+        slot_store::Stretch::FullScreen
+    );
+    assert_eq!(
+        saved.stretches[Platform::Genesis.index()],
+        slot_store::Stretch::Classic
+    );
 }

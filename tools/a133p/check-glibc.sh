@@ -21,7 +21,7 @@ if [ "${1:-}" = -r ]; then
 	find "$2" -type f | sort | while IFS= read -r f; do
 		head -c 4 "$f" 2> /dev/null | grep -q 'ELF' || continue
 		v="$(needs "$f")"
-		over "$v" && echo "glibc $v: ${f#"$2"/}"
+		if over "$v"; then echo "glibc $v: ${f#"$2"/}"; fi
 	done
 	exit 0
 fi

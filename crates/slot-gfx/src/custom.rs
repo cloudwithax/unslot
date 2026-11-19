@@ -7,12 +7,23 @@ use std::cell::Cell;
 const VERTEX_AT: gl::types::GLuint = 0;
 const TEX_AT: gl::types::GLuint = 1;
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShaderParam {
+    pub name: String,
+    pub label: String,
+    pub default: f32,
+    pub min: f32,
+    pub max: f32,
+    pub step: f32,
+}
+
 pub struct CustomPass {
     prog: gl::types::GLuint,
     vao: gl::types::GLuint,
     vbo: gl::types::GLuint,
     linear: bool,
     frames: Cell<u32>,
+    params: Vec<(ShaderParam, gl::types::GLint)>,
     u_mvp: gl::types::GLint,
     u_texture_size: gl::types::GLint,
     u_input_size: gl::types::GLint,
@@ -56,7 +67,7 @@ pub fn stage(src: &str, stage: &str, es: bool) -> String {
 
 // RetroArch metadata is not GLSL: some ES drivers reject the quoted description even in a pragma.
 // Use its default for uniforms, including those declared outside PARAMETER_UNIFORM guards.
-fn parameter(line: &str) -> Option<(&str, f32)> {
+pub fn parse_parameter(line: &str) -> Option<ShaderParam> {
     let rest = line.trim_start().strip_prefix("#pragma")?;
     if !rest.starts_with(char::is_whitespace) {
         return None;
@@ -68,14 +79,57 @@ fn parameter(line: &str) -> Option<(&str, f32)> {
     let rest = rest.trim_start();
     let end = rest.find(char::is_whitespace)?;
     let name = &rest[..end];
-    let description = rest[end..].trim_start().strip_prefix('"')?;
-    let end = description.find('"')?;
-    let default = description[end + 1..]
+    let after_name = rest[end..].trim_start().strip_prefix('"')?;
+    let quote_end = after_name.find('"')?;
+    let label = &after_name[..quote_end];
+    let mut nums = after_name[quote_end + 1..]
         .split_whitespace()
-        .next()?
-        .parse()
-        .ok()?;
-    Some((name, default))
+        .map(|t| t.parse::<f32>().ok());
+    let default = nums.next()??;
+    let raw_min = nums.next().flatten().unwrap_or_else(|| default.min(0.0));
+    let raw_max = nums.next().flatten().unwrap_or_else(|| default.max(1.0));
+    let (min, max) = if raw_min <= raw_max {
+        (raw_min, raw_max)
+    } else {
+        (raw_max, raw_min)
+    };
+    let step = nums
+        .next()
+        .flatten()
+        .filter(|s| *s > 0.0)
+        .unwrap_or_else(|| {
+            if max > min {
+                ((max - min) / 20.0).max(0.01)
+            } else {
+                1.0
+            }
+        });
+    Some(ShaderParam {
+        name: name.to_string(),
+        label: if label.trim().is_empty() {
+            name.to_string()
+        } else {
+            label.to_string()
+        },
+        default: default.clamp(min, max),
+        min,
+        max,
+        step,
+    })
+}
+
+pub fn parse_parameters(src: &str) -> Vec<ShaderParam> {
+    let mut out: Vec<ShaderParam> = Vec::new();
+    for p in src.lines().filter_map(parse_parameter) {
+        if !out.iter().any(|existing| existing.name == p.name) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+fn parameter(line: &str) -> Option<(String, f32)> {
+    parse_parameter(line).map(|p| (p.name, p.default))
 }
 
 /// The column-major matrix that takes the unit square onto `rect` in clip space.
@@ -138,12 +192,18 @@ impl CustomPass {
             &stage(src, "FRAGMENT", es),
             &[(VERTEX_AT, "VertexCoord"), (TEX_AT, "TexCoord")],
         )?;
-        let at = |name| crate::gl::uniform_location(prog, name);
+        let at = |name: &str| crate::gl::uniform_location(prog, name);
+        let declared = parse_parameters(src);
         let pass = unsafe {
             gl::UseProgram(prog);
             gl::Uniform1i(at("Texture"), 0);
-            for (name, value) in src.lines().filter_map(parameter) {
-                gl::Uniform1f(at(name), value);
+            let mut params = Vec::with_capacity(declared.len());
+            for p in declared {
+                let loc = at(&p.name);
+                if loc >= 0 {
+                    gl::Uniform1f(loc, p.default);
+                }
+                params.push((p, loc));
             }
             let mut vao = 0;
             if !es {
@@ -157,6 +217,7 @@ impl CustomPass {
                 vbo,
                 linear,
                 frames: Cell::new(0),
+                params,
                 u_mvp: at("MVPMatrix"),
                 u_texture_size: at("TextureSize"),
                 u_input_size: at("InputSize"),
@@ -166,6 +227,24 @@ impl CustomPass {
             }
         };
         Ok(pass)
+    }
+
+    pub fn set_parameters(&self, overrides: &[(String, f32)]) {
+        unsafe {
+            gl::UseProgram(self.prog);
+            for (param, loc) in &self.params {
+                if *loc < 0 {
+                    continue;
+                }
+                let val = overrides
+                    .iter()
+                    .find(|(k, _)| k == &param.name)
+                    .map(|(_, v)| *v)
+                    .unwrap_or(param.default)
+                    .clamp(param.min, param.max);
+                gl::Uniform1f(*loc, val);
+            }
+        }
     }
 
     pub fn draw(&self, tex: gl::types::GLuint, placed: &Placed) {
@@ -256,10 +335,20 @@ mod tests {
 
     #[test]
     fn parameter_metadata_is_removed_and_defaults_are_read() {
-        let line = "  #pragma parameter size \"Grid size\" 1.0 1.0 2.0 1.0";
-        assert_eq!(parameter(line), Some(("size", 1.0)));
+        let line = "  #pragma parameter size \"Grid size\" 1.0 0.5 2.0 0.25";
+        assert_eq!(
+            parse_parameter(line),
+            Some(ShaderParam {
+                name: "size".into(),
+                label: "Grid size".into(),
+                default: 1.0,
+                min: 0.5,
+                max: 2.0,
+                step: 0.25,
+            })
+        );
         assert!(!stage(line, "VERTEX", true).contains("Grid size"));
-        assert_eq!(parameter("#pragma optimize(on)"), None);
+        assert_eq!(parse_parameter("#pragma optimize(on)"), None);
     }
 
     #[test]

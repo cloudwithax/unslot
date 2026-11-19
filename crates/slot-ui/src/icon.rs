@@ -24,10 +24,14 @@ pub enum Icon {
     Wifi,
     Bluetooth,
     Cast,
+    Backspace,
+    Return,
+    Shift,
+    Space,
 }
 
 impl Icon {
-    pub const ALL: [Icon; 15] = [
+    pub const ALL: [Icon; 19] = [
         Icon::Volume,
         Icon::VolumeZero,
         Icon::VolumeMuted,
@@ -43,6 +47,10 @@ impl Icon {
         Icon::Wifi,
         Icon::Bluetooth,
         Icon::Cast,
+        Icon::Backspace,
+        Icon::Return,
+        Icon::Shift,
+        Icon::Space,
     ];
 
     pub fn index(self) -> usize {
@@ -66,6 +74,10 @@ impl Icon {
             Icon::Wifi => '\u{f05a9}',
             Icon::Bluetooth => '\u{f00af}',
             Icon::Cast => '\u{f0119}',
+            Icon::Backspace => '\u{f0b5c}',
+            Icon::Return => '\u{f0311}',
+            Icon::Shift => '\u{f0636}',
+            Icon::Space => '\u{f1050}',
         }
     }
 }
@@ -222,6 +234,10 @@ struct Raster {
 }
 
 type Cache = Mutex<HashMap<(Icon, u32), Arc<Raster>>>;
+
+pub(crate) fn icon_coverage(icon: Icon, px: f32) -> Option<(Vec<u8>, u32, u32)> {
+    raster(icon, px).map(|r| (r.cov.clone(), r.w, r.h))
+}
 
 fn raster(icon: Icon, px: f32) -> Option<Arc<Raster>> {
     static CACHE: OnceLock<Cache> = OnceLock::new();

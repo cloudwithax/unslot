@@ -67,10 +67,19 @@ keep_runtimes() {
 }
 
 # Power went after the new System was moved in but before the pack was cleared.
+# The labels drawn for the shelf, and the databases and faces the scraper kept: each entry checks
+# itself against what it was made from, so the old ones are good, and rebuilding thousands of them
+# after every update keeps the shelf waiting.
+keep_caches() {
+	[ -d "$UPD/System.old/Cache" ] && [ ! -e "$SD/System/Cache" ] || return 0
+	/bin/mv "$UPD/System.old/Cache" "$SD/System/Cache" || say "the caches could not be kept"
+}
+
 if [ ! -d "$PACK/System" ]; then
 	say "the pack is already installed; clearing it"
 	keep_bundled
 	keep_runtimes
+	keep_caches
 	/bin/rm -f "$SD/MinUI.zip"
 	clear_pack
 	exit 0
@@ -104,6 +113,7 @@ fi
 [ -d "$UPD/System.old" ] && echo 0 > "$UPD/trial"
 keep_bundled
 keep_runtimes
+keep_caches
 /bin/rm -f "$SD/MinUI.zip"
 say "installed $version"
 clear_pack

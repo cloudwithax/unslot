@@ -106,6 +106,53 @@ pub fn console_for(platform: Platform) -> Option<Console> {
     Some(Console(id))
 }
 
+/// The handheld system for a RetroAchievements console ID (`rc_consoles.h`).
+pub fn platform_for_console(console_id: u32) -> Option<Platform> {
+    Some(match console_id {
+        1 => Platform::Genesis,
+        2 => Platform::Nintendo64,
+        3 => Platform::Snes,
+        4 => Platform::Gb,
+        5 => Platform::Gba,
+        6 => Platform::Gbc,
+        7 => Platform::Nes,
+        8 => Platform::PcEngine,
+        9 => Platform::SegaCd,
+        10 => Platform::Sega32x,
+        11 => Platform::MasterSystem,
+        12 => Platform::PlayStation,
+        13 => Platform::Lynx,
+        14 => Platform::NeoGeoPocket,
+        15 => Platform::GameGear,
+        18 => Platform::Nds,
+        23 => Platform::Odyssey2,
+        24 => Platform::PokemonMini,
+        25 => Platform::Atari2600,
+        27 => Platform::Arcade,
+        28 => Platform::VirtualBoy,
+        29 => Platform::Msx,
+        33 => Platform::Sg1000,
+        37 => Platform::AmstradCpc,
+        40 => Platform::Dreamcast,
+        41 => Platform::Psp,
+        44 => Platform::ColecoVision,
+        45 => Platform::Intellivision,
+        46 => Platform::Vectrex,
+        49 => Platform::PcFx,
+        51 => Platform::Atari7800,
+        53 => Platform::WonderSwan,
+        56 => Platform::NeoGeoCd,
+        57 => Platform::ChannelF,
+        59 => Platform::ZxSpectrum,
+        63 => Platform::Supervision,
+        65 => Platform::Tic80,
+        69 => Platform::MegaDuck,
+        76 => Platform::PcEngineCd,
+        81 => Platform::Fds,
+        _ => return None,
+    })
+}
+
 fn user_agent() -> String {
     // unslot is a libretro frontend, like RetroArch. The RA server checks this header
     // to decide whether hardcore unlocks may be submitted. The version must match a

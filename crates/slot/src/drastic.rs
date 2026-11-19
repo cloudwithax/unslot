@@ -111,8 +111,17 @@ fn write_level(file: &Path, level: u8, presses: u32, quit: bool) {
     }
 }
 
-/// Runs until the script that started it is gone.
+/// Runs until the DraStic launch script that started it is gone.
 pub fn run(root: &Path) {
+    run_for(root, "drastic");
+}
+
+/// Runs until the PPSSPP-SDL launch script that started it is gone.
+pub fn run_ppsspp(root: &Path) {
+    run_for(root, "PPSSPPSDL");
+}
+
+fn run_for(root: &Path, comm_name: &str) {
     use slot_power::Platform;
     let Some(file) = std::env::var_os(FILE_VAR) else {
         eprintln!("slot: drastic volume: {FILE_VAR} is not set");
@@ -137,10 +146,15 @@ pub fn run(root: &Path) {
             actions.extend(gestures.feed(ev, now));
         }
         if actions.contains(&Action::QuickMenu) {
-            if let Some(game) = drastic_pid(parent) {
-                if pause_for_menu(root, game) {
+            if let Some(game) = child_pid(parent, comm_name) {
+                let exit = if slot_store::read_kiosk_config(root).active {
+                    true
+                } else {
+                    pause_for_menu(root, game)
+                };
+                if exit {
                     write_level(file, volume.output(), presses, true);
-                    quit(game, parent);
+                    quit(game, parent, comm_name);
                     return;
                 }
             }
@@ -175,15 +189,15 @@ pub fn run(root: &Path) {
     }
 }
 
-/// DraStic, as launch.sh started it beside this.
-fn drastic_pid(parent: u32) -> Option<i32> {
+/// Standalone emulator child process (`drastic` or `PPSSPPSDL`) started beside this supervisor.
+fn child_pid(parent: u32, comm_name: &str) -> Option<i32> {
     std::fs::read_dir("/proc").ok()?.flatten().find_map(|e| {
         let pid: i32 = e.file_name().to_str()?.parse().ok()?;
         let stat = std::fs::read_to_string(e.path().join("stat")).ok()?;
         // pid (comm) state ppid ...
         let (comm, rest) = stat.split_once(" (")?.1.rsplit_once(") ")?;
         let ppid: u32 = rest.split_whitespace().nth(1)?.parse().ok()?;
-        (comm == "drastic" && ppid == parent).then_some(pid)
+        (comm == comm_name && ppid == parent).then_some(pid)
     })
 }
 
@@ -230,12 +244,12 @@ fn menu_command(root: &Path, frame: &Path) -> std::io::Result<std::process::Comm
     Ok(c)
 }
 
-/// Waits for DraStic to close itself, as the shim asks it to, and closes it if it does not.
-fn quit(game: i32, parent: u32) {
+/// Waits for the emulator to close itself, as the shim asks it to, and closes it if it does not.
+fn quit(game: i32, parent: u32, comm_name: &str) {
     let asked = Instant::now();
-    while drastic_pid(parent) == Some(game) {
+    while child_pid(parent, comm_name) == Some(game) {
         if asked.elapsed() >= QUIT_GRACE {
-            eprintln!("slot: drastic menu: DraStic did not close, so it is made to");
+            eprintln!("slot: {comm_name} menu: emulator did not close, so it is made to");
             unsafe { libc::kill(game, libc::SIGKILL) };
             return;
         }

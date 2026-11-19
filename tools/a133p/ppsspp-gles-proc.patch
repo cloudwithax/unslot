@@ -1,0 +1,67 @@
+--- a/Common/GPU/OpenGL/gl3stub.c
++++ b/Common/GPU/OpenGL/gl3stub.c
+@@ -22,8 +22,34 @@
+ #if !PPSSPP_PLATFORM(IOS)
+ #include "EGL/egl.h"
+ 
++#include <dlfcn.h>
++
++/* Some libEGLs, PowerVR's on the A133P included, answer eglGetProcAddress only for the entry
++ * points extensions add; every core entry point, GLES 3.0's included, comes back NULL, and the
++ * NULL is then called. Those are ordinary exported symbols of the GLES library the EGL belongs
++ * to, which is where SDL_GL_GetProcAddress looks for them second, so look there too.
++ *
++ * The library is asked through its own handle rather than RTLD_DEFAULT: the pointers this file
++ * declares, this one included, are global variables of this very program, and a link that
++ * exports them - lld's, which the A133P build uses - would otherwise have RTLD_DEFAULT answer
++ * with the variable itself, which is still NULL, and be called. */
++static void *ppsspp_gl_proc(const char *name) {
++    static void *lib;
++    void *p = (void *)eglGetProcAddress(name);
++    if (p) {
++        return p;
++    }
++    if (!lib) {
++        lib = dlopen("libGLESv2.so.2", RTLD_NOW | RTLD_GLOBAL);
++        if (!lib) {
++            lib = dlopen("libGLESv2.so", RTLD_NOW | RTLD_GLOBAL);
++        }
++    }
++    return lib ? dlsym(lib, name) : 0;
++}
++
+ GLboolean gl3stubInit() {
+-    #define FIND_PROC(s) s = (void*)eglGetProcAddress(#s)
++    #define FIND_PROC(s) s = (void*)ppsspp_gl_proc(#s)
+     FIND_PROC(glReadBuffer);
+     FIND_PROC(glDrawRangeElements);
+     FIND_PROC(glTexImage3D);
+@@ -39,9 +65,9 @@ GLboolean gl3stubInit() {
+     FIND_PROC(glGetQueryiv);
+     FIND_PROC(glGetQueryObjectuiv);
+     // GL_EXT_disjoint_timer_query - load EXT suffix versions into non-suffix pointers
+-    glQueryCounter = (void*)eglGetProcAddress("glQueryCounterEXT");
+-    glGetQueryObjecti64v = (void*)eglGetProcAddress("glGetQueryObjecti64vEXT");
+-    glGetQueryObjectui64v = (void*)eglGetProcAddress("glGetQueryObjectui64vEXT");
++    glQueryCounter = (void*)ppsspp_gl_proc("glQueryCounterEXT");
++    glGetQueryObjecti64v = (void*)ppsspp_gl_proc("glGetQueryObjecti64vEXT");
++    glGetQueryObjectui64v = (void*)ppsspp_gl_proc("glGetQueryObjectui64vEXT");
+     FIND_PROC(glUnmapBuffer);
+     FIND_PROC(glGetBufferPointerv);
+     FIND_PROC(glDrawBuffers);
+@@ -146,6 +172,15 @@ GLboolean gl3stubInit() {
+ 
+     /* OES_copy_image, etc. */
+     FIND_PROC(glCopyImageSubDataOES);
++    /* Only Android builds alias the EXT entry point onto this pointer (GLFeatures.cpp), yet any
++     * build reports framebuffer copies supported when GL_EXT_copy_image is listed, as PowerVR's
++     * on the A133P is, and then calls it. GLES 3.2's core name takes the same arguments. */
++    if (!glCopyImageSubDataOES) {
++        glCopyImageSubDataOES = (void*)ppsspp_gl_proc("glCopyImageSubDataEXT");
++    }
++    if (!glCopyImageSubDataOES) {
++        glCopyImageSubDataOES = (void*)ppsspp_gl_proc("glCopyImageSubData");
++    }
+ 
+     #undef FIND_PROC
+ 
