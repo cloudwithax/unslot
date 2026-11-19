@@ -30,7 +30,7 @@ build() (
 	mame2003_plus) repo=libretro/mame2003-plus-libretro; commit=fde3d46fc48fcc0704797e96ac4613bb47ff2c57 ;;
 	dosbox_pure) repo=libretro/dosbox-pure; commit=e39497e7c2a32c67c26e6598dd14f6d58c384bfd; flags='CPUFLAGS=-DPAGESIZE=4096 STRIPCMD=true' ;;
 	puae2021) repo=libretro/libretro-uae; commit=5dbac2bf90b2dddf9d3f8d5b2ccad0651f798c1d; flags='TARGET_NAME=puae2021' ;;
-	mednafen_pcfx) repo=libretro/beetle-pcfx-libretro; commit=c1650bad5fbdcc3c3ccd45e29e3983e1ccf16cff ;;
+	mednafen_pcfx) repo=libretro/beetle-pcfx-libretro; commit=c1650bad5fbdcc3c3ccd45e29e3983e1ccf16cff; flags='IS_X86=0' ;;
 	np2kai) repo=libretro/NP2kai; commit=1ea561cd7fd62b33f4e7b3f1c2e30fc3e6089f28; sub=sdl; file=Makefile.libretro ;;
 	hatarib) repo=bbbradsmith/hatariB; commit=5f05733fc21903dce7d978bd0d7aae445ffe1185; file=makefile.libretro; flags="WERROR= MULTITHREAD=-j${JOBS:-4} CMAKE_TOOLCHAIN_FILE=tools/a133p/toolchain.cmake" ;;
 	tic80) repo=libretro/TIC-80; commit=14fd99edc29962778bc88d81773288ffc6e8aa53; output=build/bin/tic80_libretro.so
