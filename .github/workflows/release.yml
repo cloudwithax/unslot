@@ -174,7 +174,7 @@ jobs:
           name: release-files
           path: h700
 
-      - name: Install zig, cargo-zigbuild and Task
+      - name: Install zig and Task
         run: |
           set -eu
           sudo apt-get update
@@ -183,7 +183,11 @@ jobs:
           pip3 install --break-system-packages ziglang==0.17.1
           curl -fsSL https://taskfile.dev/install.sh | sudo sh -s -- -b /usr/local/bin
           rustup target add aarch64-unknown-linux-gnu
-          cargo install --locked cargo-zigbuild@0.24.1
+
+      # A prebuilt cargo-zigbuild, instead of minutes compiling it.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild@0.24.1
 
       # The A133P's own cores, mGBA and DraStic, built by the a133p-cores workflow.
       - name: Take the A133P cores
@@ -206,35 +210,7 @@ jobs:
             VERSION="${GITHUB_REF_NAME}"
 
       - name: Check what is about to ship
-        run: |
-          set -eu
-          out="unslot-${GITHUB_REF_NAME}-a133p"
-          file "$out/System/slot" | grep -q aarch64
-          test "$(cat "$out/System/version")" = "$GITHUB_REF_NAME"
-          sh tools/a133p/check-glibc.sh "$out/System/slot"
-          # Everything a game runs on has to load on the firmware's glibc 2.33 and the libstdc++
-          # of GCC 10 it has.
-          newest() { objdump -T "$1" | grep -o "$2_[0-9.]*" | sed "s/$2_//" | sort -uV | tail -n 1; }
-          fits() { [ -z "$1" ] || [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n 1)" = "$2" ]; }
-          for f in "$out"/System/*_libretro.so "$out"/System/bin/zip "$out"/System/drastic/drastic \
-            "$out"/System/drastic/libs/*.so* "$out"/System/lib/*.so* \
-            "$out"/System/ppsspp/PPSSPPSDL "$out"/System/ppsspp/libs/*.so*; do
-            test -f "$f"
-            fits "$(newest "$f" GLIBC)" 2.33 || { echo "$f needs a newer glibc than 2.33" >&2; exit 1; }
-            fits "$(newest "$f" GLIBCXX)" 3.4.28 || { echo "$f needs a newer libstdc++" >&2; exit 1; }
-          done
-          test "$(ls "$out"/System/*_libretro.so | wc -l)" -ge 47
-          test -x "$out/.tmp_update/updater"
-          test -f "$out/System/a133p/launch.sh"
-          test -s "$out/System/licenses/drastic.meta"
-          test -s "$out/System/licenses/portmaster-a133p.manifest"
-          # PSP runs in the A133P's own PPSSPPSDL, beside its launcher and its own PowerVR SDL2.
-          for f in PPSSPPSDL libs/libunslot-ppsspp.so libs/libSDL2-2.0.so.0; do
-            file "$out/System/ppsspp/$f" | grep -q aarch64
-          done
-          test -f "$out/System/ppsspp/launch.sh"
-          test -f "$out/System/ppsspp/assets/ppge_atlas.zim"
-          test -s "$out/System/licenses/ppsspp.meta"
+        run: sh tools/a133p/check-card.sh "unslot-${GITHUB_REF_NAME}-a133p" "$GITHUB_REF_NAME"
 
       - name: Package
         id: package

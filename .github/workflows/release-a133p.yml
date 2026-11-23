@@ -1,0 +1,129 @@
+name: release-a133p
+
+# A release for TrimUI's A133P handhelds alone, for a fix only they need. The H700 tree the card
+# is built on is taken from the newest release that has one, not built again: the A133P card
+# swaps in its own slot, cores, DraStic, PPSSPP and this checkout's card/System, so only that is
+# built, from the a133p-cores prerelease and a cached cargo. The release has the A133P's zip and
+# pack alone; H700 handhelds keep the release they have. Run by hand with the new tag, which it
+# makes at the commit it ran on and which must not exist yet. It is made through the API, so
+# the release workflow does not run for it, and the release is a draft until its pack has been
+# checked on a handheld.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The new version, v2.17.1 say
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-a133p-${{ inputs.tag }}
+
+jobs:
+  a133p:
+    name: TrimUI A133P release
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the tag
+        run: |
+          set -eu
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "$TAG is not vX.Y.Z" >&2; exit 1; }
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > /dev/null 2>&1; then
+            echo "$TAG exists already" >&2
+            exit 1
+          fi
+
+      - name: Install zig and Task
+        id: tools
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zip unzip cmake binutils-aarch64-linux-gnu \
+            python3-pip libasound2-dev libudev-dev
+          pip3 install --break-system-packages ziglang==0.17.1
+          curl -fsSL https://taskfile.dev/install.sh | sudo sh -s -- -b /usr/local/bin
+          rustup target add aarch64-unknown-linux-gnu
+          echo "rustc=$(rustc -V | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      # A prebuilt cargo-zigbuild, instead of minutes compiling it.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild@0.24.1
+
+      # The crates, slot's dependencies built for the A133P and the host's make_pak, and zig's
+      # glibc stubs, from the last run with the same Cargo.lock and rustc.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.cache/zig
+            ~/.cache/cargo-zigbuild
+            target-a133p/aarch64-unknown-linux-gnu
+            target-a133p/release
+          key: a133p-${{ steps.tools.outputs.rustc }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: a133p-${{ steps.tools.outputs.rustc }}-
+
+      - name: Take the newest H700 tree
+        id: base
+        run: |
+          set -eu
+          base="$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq \
+            '[.[] | select(.draft | not) | select(.prerelease | not)
+              | select(.tag_name as $t | any(.assets[]; .name == "unslot-\($t)-h700.zip"))][0].tag_name')"
+          test -n "$base" && test "$base" != null
+          gh release download "$base" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP" \
+            --pattern "unslot-$base-h700.zip" --pattern SHA256SUMS
+          (cd "$RUNNER_TEMP" && grep " unslot-$base-h700.zip\$" SHA256SUMS | sha256sum -c -)
+          unzip -q "$RUNNER_TEMP/unslot-$base-h700.zip"
+          echo "Building on $base's H700 tree"
+          echo "tree=unslot-$base" >> "$GITHUB_OUTPUT"
+
+      # The A133P's own cores, mGBA, DraStic and PPSSPP, built by the a133p-cores workflow.
+      - name: Take the A133P cores
+        run: |
+          set -eu
+          gh release download a133p-cores --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP" \
+            --pattern 'a133p-cores.tar.gz' --pattern 'a133p-cores.tar.gz.sha256'
+          (cd "$RUNNER_TEMP" && sha256sum -c a133p-cores.tar.gz.sha256)
+          mkdir -p target-a133p
+          tar -xzf "$RUNNER_TEMP/a133p-cores.tar.gz" -C target-a133p
+
+      - name: Build the card
+        env:
+          UNSLOT_SS_DEVID: ${{ secrets.UNSLOT_SS_DEVID }}
+          UNSLOT_SS_DEVPASSWORD: ${{ secrets.UNSLOT_SS_DEVPASSWORD }}
+        run: task dist:a133p FROM="${{ steps.base.outputs.tree }}" OUT="unslot-$TAG-a133p" VERSION="$TAG"
+
+      - name: Check what is about to ship
+        run: sh tools/a133p/check-card.sh "unslot-$TAG-a133p" "$TAG"
+
+      - name: Package
+        env:
+          UNSLOT_PAK_KEY: ${{ secrets.UNSLOT_PAK_KEY }}
+        run: |
+          set -eu
+          out="unslot-$TAG-a133p"
+          zip -qry "$out.zip" "$out"
+          sh tools/update/pack.sh "$out" MinUI-a133p.zip a133p
+          test -n "$UNSLOT_PAK_KEY" || { echo "UNSLOT_PAK_KEY is not set" >&2; exit 1; }
+          cargo run -q --release --target-dir target-a133p -p slot --no-default-features \
+            --example make_pak -- MinUI-a133p.zip "$TAG" "$out.pak"
+          sha256sum "$out.zip" "$out.pak" > SHA256SUMS
+
+      # Keep the pack out of the public updater until it has been checked on-device.
+      - name: Create the draft release
+        run: |
+          set -eu
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" > /dev/null
+          sed "s/\$TAG/$TAG/g" .github/release-notes-a133p.md > notes.md
+          gh release create "$TAG" "unslot-$TAG-a133p.zip" "unslot-$TAG-a133p.pak" SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes-file notes.md --draft

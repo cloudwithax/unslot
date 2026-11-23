@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.17.1
+
+- TrimUI A133P only: DraStic and PPSSPP run inside slot, with its in-game menu, states and Exit Game. v2.17.0's A133P card carried their shims from an `a133p-cores` built before `tools/bridge`, so each emulator drew straight over slot's last frame and Menu never reached slot. The release now refuses a shim without the bridge (`tools/a133p/check-card.sh`).
+- A release for the A133P alone is built by the `release-a133p` workflow, on the newest release's H700 tree instead of a new one, with a prebuilt cargo-zigbuild and a cached cargo.
+
 ## v2.17.0
 
 - PICO-8 carts play in fake-08 by default, built from source with slot-pico's patches so a save state keeps the cart's Lua (`task core:fake08`); Retro8 is still a choice under Core.

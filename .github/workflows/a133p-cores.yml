@@ -5,7 +5,8 @@ name: a133p-cores
 # tools/a133p/drastic.sh. They go in the prerelease tagged `a133p-cores`, which a release's A133P
 # card is built from, as an H700 card takes libretro's from the `cores` release. Run by hand when
 # a recipe in tools/a133p changes. The release is never the latest, so the updater, which asks
-# GitHub for the latest, does not take it for unslot's.
+# GitHub for the latest, does not take it for unslot's. DraStic's and PPSSPP's shims are built here
+# too, so a change to tools/drastic/volume.c, tools/ppsspp/volume.c or tools/bridge wants a run.
 on:
   workflow_dispatch:
 
