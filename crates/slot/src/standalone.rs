@@ -118,9 +118,11 @@ unsafe impl Send for StandaloneCore {}
 impl StandaloneCore {
     pub fn new(emulator: Emulator, root: &Path) -> std::io::Result<Self> {
         let size = std::mem::size_of::<Bridge>();
-        // SAFETY: a new memfd, sized and mapped as the shim maps it.
+        // SAFETY: a new memfd, sized and mapped as the shim maps it. Through the syscall, as glibc
+        // only wraps it from 2.27 and TrimUI's firmware has 2.23.
         let (mem, fd) = unsafe {
-            let fd = libc::memfd_create(c"unslot-bridge".as_ptr(), 0);
+            let fd =
+                libc::syscall(libc::SYS_memfd_create, c"unslot-bridge".as_ptr(), 0) as libc::c_int;
             if fd < 0 {
                 return Err(std::io::Error::last_os_error());
             }
