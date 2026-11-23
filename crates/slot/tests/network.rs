@@ -470,6 +470,32 @@ fn syncthing_asks_for_a_password_then_x_shows_its_device_id() {
 }
 
 #[test]
+fn syncthing_coming_on_turns_romms_save_sync_off() {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    let conf = slot::romm::Conf {
+        server: "http://romm".into(),
+        token: "rmm_sim".into(),
+        device: slot::romm::SimRomm::DEVICE.into(),
+        saves: true,
+        ..slot::romm::Conf::default()
+    };
+    slot::romm::write(d.path(), &conf).unwrap();
+    let mut a = on_services(&d);
+    go_to(&mut a, "Syncthing");
+    press(&mut a, Btn::A);
+    for _ in 0..4 {
+        press(&mut a, Btn::A);
+    }
+    press(&mut a, Btn::Start);
+    assert!(read_slot_state(d.path()).syncthing);
+    assert!(!slot::romm::read(d.path()).saves);
+    assert_eq!(
+        list(&a).status,
+        "RomM's save sync is off now: it and Syncthing would both change saves"
+    );
+}
+
+#[test]
 fn tailscale_shows_a_code_to_sign_in_and_x_turns_it_off() {
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
     let mut a = on_services(&d);

@@ -123,8 +123,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
         .map(QuickRow::label)
         .collect();
     // The Game Boy family first, then every other system in the order of the shelves.
-    // Every system except Apps (no game drawn), DS (DraStic), and PSP (standalone PPSSPP-SDL).
-    assert_eq!(screens.len(), Platform::COUNT - 3);
+    // Every system except Ports and Apps (no game drawn).
+    assert_eq!(screens.len(), Platform::COUNT - 2);
     assert_eq!(
         screens[..13],
         [
@@ -229,6 +229,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::Updates,
             QuickRow::Cores,
             QuickRow::GameArt,
+            QuickRow::Romm,
             QuickRow::Power,
             QuickRow::Restart,
             QuickRow::ShutDown,

@@ -1,8 +1,7 @@
 #!/bin/sh
-# Runs the DS game $1 in DraStic, for launch_frontend.sh once slot has quit for it; slot starts
-# again when the game is left from slot's menu or DraStic's. DraStic keeps its settings, saves and states in the
-# folder it runs from, so it runs from Saves/NDS, which an update leaves alone, with its own BIOS
-# and game fixes brought over from here.
+# Runs the DS game $1 in DraStic, for slot to drive as one of its cores. DraStic keeps its
+# settings, saves and states in the folder it runs from, so it runs from Saves/NDS, which an
+# update leaves alone, with its own BIOS and game fixes brought over from here.
 here="$(cd "$(dirname "$0")" && pwd)"
 home="${SLOT_ROOT:-/mnt/sdcard}/Saves/NDS"
 mkdir -p "$home/system" "$home/config"
@@ -22,14 +21,8 @@ if grep -q '^active=1$' "${SLOT_ROOT:-/mnt/sdcard}/Config/kiosk.conf" 2>/dev/nul
 	cp config/drastic.cfg "$keep"
 	sed -i 's/^\(controls_[ab]\[CONTROL_INDEX_MENU\]\) = .*/\1 = 65535/' config/drastic.cfg
 fi
-# DraStic has no volume of its own, so slot reads the volume keys while it runs and leaves the
-# level in UNSLOT_VOLUME, which libunslot-drastic.so scales DraStic's sound by and shows. slot
-# reads Menu too, and opens its own menu over the game; DraStic's is on Select + X.
-export UNSLOT_VOLUME=/run/unslot-drastic-volume
-/lib/ld-linux-aarch64.so.1 "$here/../slot" --drastic &
-volume=$!
+# slot drives DraStic itself (crates/slot/src/standalone.rs): libunslot-drastic.so hands it each
+# frame, its sound and the pad over UNSLOT_BRIDGE, so slot's volume and menu are its own.
 LD_LIBRARY_PATH="$here/libs" LD_PRELOAD="$here/libs/libunslot-drastic.so" SDL_LINUX_JOYSTICK_CLASSIC=1 \
 	"$here/drastic" "$1"
-kill "$volume" 2>/dev/null
-rm -f "$UNSLOT_VOLUME"
 if [ -f "$keep" ]; then mv "$keep" config/drastic.cfg; fi

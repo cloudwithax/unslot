@@ -60,6 +60,12 @@ pub enum Core {
     Scummvm,
     Retro8,
     Tic80,
+    Fake08,
+    /// The owner's own PICO-8, which slot hands the device to instead of loading a core.
+    Pico8,
+    /// DraStic and PPSSPP-SDL, which slot starts and drives as it would a core of its own.
+    Drastic,
+    Ppsspp,
     Nodosumi,
     VbaNext,
     Vbam,
@@ -96,7 +102,7 @@ pub enum Core {
 }
 
 impl Core {
-    pub const ALL: [Core; 79] = [
+    pub const ALL: [Core; 83] = [
         Core::Mgba,
         Core::Gpsp,
         Core::Fceumm,
@@ -143,6 +149,10 @@ impl Core {
         Core::Scummvm,
         Core::Retro8,
         Core::Tic80,
+        Core::Fake08,
+        Core::Pico8,
+        Core::Drastic,
+        Core::Ppsspp,
         Core::Nodosumi,
         Core::VbaNext,
         Core::Vbam,
@@ -227,6 +237,10 @@ impl Core {
             Core::Scummvm => "scummvm",
             Core::Retro8 => "retro8",
             Core::Tic80 => "tic80",
+            Core::Fake08 => "fake08",
+            Core::Pico8 => "pico8",
+            Core::Drastic => "drastic",
+            Core::Ppsspp => "ppsspp",
             Core::Nodosumi => "nodosumi",
             Core::VbaNext => "vba_next",
             Core::Vbam => "vbam",
@@ -315,6 +329,10 @@ impl Core {
             Core::Scummvm => "ScummVM",
             Core::Retro8 => "Retro8",
             Core::Tic80 => "TIC-80",
+            Core::Fake08 => "fake-08",
+            Core::Pico8 => "PICO-8",
+            Core::Drastic => "DraStic",
+            Core::Ppsspp => "PPSSPP",
             Core::Nodosumi => "Nodosumi",
             Core::VbaNext => "VBA Next",
             Core::Vbam => "VBA-M",
@@ -373,9 +391,19 @@ impl Core {
         self.index() >= Core::VbaNext.index()
     }
 
-    /// Whether the core can be opened: it came with unslot, or it has been downloaded.
+    /// Whether the core can be opened: it came with unslot, or it has been downloaded. PICO-8
+    /// is the owner's to put in BIOS/PICO-8.
     pub fn installed(self, root: &Path) -> bool {
-        !self.download_only() || root.join(CORES_DIR).join(self.file_name()).is_file()
+        match self {
+            Core::Pico8 => pico8_installed(root),
+            _ => !self.download_only() || root.join(CORES_DIR).join(self.file_name()).is_file(),
+        }
+    }
+
+    /// Whether slot hands the device to another program to play a game, instead of loading
+    /// this core itself.
+    pub fn runs_outside(self) -> bool {
+        self == Core::Pico8
     }
 
     pub fn runs(self, platform: Platform) -> bool {
@@ -385,6 +413,43 @@ impl Core {
     pub fn default_for(platform: Platform) -> Core {
         platform.spec().cores[0]
     }
+}
+
+/// Where the owner puts their PICO-8: the Raspberry Pi zip, or what is in it.
+pub const PICO8_DIR: &str = "BIOS/PICO-8";
+
+/// Whether BIOS/PICO-8 holds a PICO-8 for the Raspberry Pi, unzipped or still in its zip.
+pub fn pico8_installed(root: &Path) -> bool {
+    let dir = root.join(PICO8_DIR);
+    let unzipped = [dir.clone(), dir.join("pico-8")].iter().any(|d| {
+        d.join("pico8.dat").is_file()
+            && ["pico8_dyn", "pico8", "pico8_64"]
+                .iter()
+                .any(|b| d.join(b).is_file())
+    });
+    unzipped || pico8_zip(root).is_some()
+}
+
+/// The Raspberry Pi zip as it comes from Lexaloffle, left whole in BIOS/PICO-8 or BIOS.
+pub fn pico8_zip(root: &Path) -> Option<std::path::PathBuf> {
+    [root.join(PICO8_DIR), root.join("BIOS")]
+        .iter()
+        .find_map(|dir| {
+            let mut zips: Vec<_> = std::fs::read_dir(dir)
+                .ok()?
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    let name = p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+                        .unwrap_or_default();
+                    name.starts_with("pico-8") && name.ends_with(".zip")
+                })
+                .collect();
+            zips.sort();
+            zips.pop()
+        })
 }
 
 pub fn read_selected_cores(root: &Path) -> HashMap<String, Core> {

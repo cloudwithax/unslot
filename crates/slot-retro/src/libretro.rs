@@ -1117,7 +1117,11 @@ impl RetroCore for LibretroCore {
         }
         self.loaded = true;
         let mut av = SystemAvInfo::default();
-        unsafe { (self.api.get_system_av_info)(&mut av) };
+        // Bound, as some cores (fake-08) set their pixel format from in here.
+        {
+            let _a = Active::bind(&mut self.host);
+            unsafe { (self.api.get_system_av_info)(&mut av) };
+        }
         self.host.timing = AvInfo {
             fps: av.timing.fps,
             sample_rate: av.timing.sample_rate,

@@ -53,27 +53,13 @@ fn main() {
             }
             return;
         }
-        // For System/drastic/launch.sh: the volume keys and Menu, while DraStic runs in slot's
-        // place.
-        Some("--drastic") => {
+        // For System/pico8/launch.sh: the owner's PICO-8 on the cart, or Splore, driven by slot.
+        Some("--pico8") => {
             let root = std::env::var_os("SLOT_ROOT").unwrap_or_else(|| "/mnt/sdcard".into());
-            slot::drastic::run(std::path::Path::new(&root));
-            return;
-        }
-        // For System/ppsspp/launch.sh: the volume keys and Menu, while PPSSPP-SDL runs in slot's
-        // place.
-        Some("--ppsspp") => {
-            let root = std::env::var_os("SLOT_ROOT").unwrap_or_else(|| "/mnt/sdcard".into());
-            slot::drastic::run_ppsspp(std::path::Path::new(&root));
-            return;
-        }
-        // The in-game menu over a stopped DraStic, for --drastic.
-        Some("--drastic-menu") => {
-            let root = std::env::var_os("SLOT_ROOT").unwrap_or_else(|| "/mnt/sdcard".into());
-            let frame = std::env::args_os().nth(2).unwrap_or_default();
-            std::process::exit(slot::drastic::menu(
+            let rom = std::env::args_os().nth(2).unwrap_or_default();
+            std::process::exit(slot::pico8::run(
                 std::path::Path::new(&root),
-                std::path::Path::new(&frame),
+                std::path::Path::new(&rom),
             ));
         }
         // Owns a port process and its volume keys, restoring the mixer before slot restarts.

@@ -1,0 +1,51 @@
+#!/bin/sh
+# The wget Splore downloads carts with, put first on PICO-8's PATH: BaseOS has curl and no wget,
+# so the few wget options PICO-8 uses are turned into curl's. Exits as wget does: 1 for options it
+# cannot read, 3 when the file cannot be written, 4 for the network, 8 when the server says no.
+unset LD_PRELOAD LD_LIBRARY_PATH
+out=-
+post=
+url=
+while [ $# -gt 0 ]; do
+	case "$1" in
+	-q | --quiet | -nv | --no-check-certificate) ;;
+	-O | --output-document)
+		[ $# -ge 2 ] || exit 1
+		out="$2"
+		shift
+		;;
+	--output-document=*) out="${1#*=}" ;;
+	-O?*) out="${1#-O}" ;;
+	--post-file)
+		[ $# -ge 2 ] || exit 1
+		post="$2"
+		shift
+		;;
+	--post-file=*) post="${1#*=}" ;;
+	-*) exit 1 ;;
+	*) url="$1" ;;
+	esac
+	shift
+done
+[ -n "$url" ] || exit 1
+set -- -sSfL --connect-timeout 10 --max-time 30 --max-filesize 8388608 -o "$out"
+[ -n "$post" ] && set -- "$@" -H "Content-Type: application/x-www-form-urlencoded" --data-binary "@$post"
+# Wi-Fi can still be joining when Splore first asks, so a host that cannot be found or reached
+# is asked again for a while.
+tries=0
+while :; do
+	curl "$@" "$url"
+	code=$?
+	case "$code" in
+	6 | 7) [ "$tries" -lt 10 ] || break ;;
+	*) break ;;
+	esac
+	tries=$((tries + 1))
+	sleep 2
+done
+case "$code" in
+0) exit 0 ;;
+22) exit 8 ;;
+23) exit 3 ;;
+*) exit 4 ;;
+esac

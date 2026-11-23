@@ -3,7 +3,7 @@ mod common;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use common::{boot, tmp_root_with_carts};
+use common::{boot, stored_zip, tmp_root_with_carts};
 use slot::app::{App, PageModel, Phase};
 use slot_input::{Action, Btn};
 use slot_store::Platform;
@@ -34,14 +34,19 @@ fn list(a: &App) -> ListPage {
 
 /// Takes the app called `name` off the Apps shelf.
 fn open_app(root: &Path, name: &str) -> App {
+    open_from(root, "Apps", name)
+}
+
+/// Takes the cart called `name` off the shelf called `shelf`.
+fn open_from(root: &Path, shelf: &str, name: &str) -> App {
     let mut a = boot(root);
     for _ in 0..Platform::COUNT {
-        if a.shelf_platform_name() == Some("Apps") {
+        if a.shelf_platform_name() == Some(shelf) {
             break;
         }
         press(&mut a, Btn::R1);
     }
-    assert_eq!(a.shelf_platform_name(), Some("Apps"));
+    assert_eq!(a.shelf_platform_name(), Some(shelf));
     for _ in 0..30 {
         if a.selected_stem() == Some(name) {
             break;
@@ -67,31 +72,38 @@ fn open(a: &mut App, label: &str) {
 }
 
 #[test]
-fn the_apps_shelf_holds_the_apps_then_the_ports_and_b_goes_back_to_it() {
+fn the_apps_shelf_holds_the_apps_and_b_goes_back_to_it() {
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
-    std::fs::create_dir_all(d.path().join("Ports")).unwrap();
-    std::fs::write(d.path().join("Ports/Cave Story.sh"), "#!/bin/sh\n").unwrap();
-    std::fs::write(d.path().join("Ports/readme.txt"), "not a port").unwrap();
     let mut a = open_app(d.path(), "Files");
     assert_eq!(list(&a).title, "Files");
     press(&mut a, Btn::B);
     assert!(matches!(a.phase(), Phase::Shelf), "{:?}", a.phase());
     assert_eq!(a.shelf_platform_name(), Some("Apps"));
     let mut stems = Vec::new();
-    for _ in 0..6 {
+    for _ in 0..5 {
         stems.push(a.selected_stem().unwrap().to_string());
         press(&mut a, Btn::Right);
     }
+    assert_eq!(stems, ["Files", "Books", "Manuals", "Gallery", "Music"]);
+}
+
+#[test]
+fn the_ports_have_a_shelf_of_their_own_as_discs() {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    std::fs::create_dir_all(d.path().join("Ports")).unwrap();
+    std::fs::write(d.path().join("Ports/Cave Story.sh"), "#!/bin/sh\n").unwrap();
+    std::fs::write(d.path().join("Ports/Doom.sh"), "#!/bin/sh\n").unwrap();
+    std::fs::write(d.path().join("Ports/readme.txt"), "not a port").unwrap();
+    let a = boot(d.path());
+    let ports: Vec<&str> = a
+        .carts()
+        .filter(|c| c.platform == Platform::Ports)
+        .map(|c| c.stem.as_str())
+        .collect();
+    assert_eq!(ports, ["Cave Story", "Doom"]);
     assert_eq!(
-        stems,
-        [
-            "Files",
-            "Books",
-            "Manuals",
-            "Gallery",
-            "Music",
-            "Cave Story"
-        ]
+        slot_ui::Media::of(Platform::Ports),
+        Some(slot_ui::Media::Disc)
     );
 }
 
@@ -101,21 +113,17 @@ fn a_port_is_left_for_the_launcher_and_slot_quits_for_it() {
     std::fs::create_dir_all(d.path().join("Ports")).unwrap();
     let script = d.path().join("Ports/Cave Story.sh");
     std::fs::write(&script, "#!/bin/sh\n").unwrap();
-    let mut a = open_app(d.path(), "Cave Story");
+    let mut a = open_from(d.path(), "Ports", "Cave Story");
     let queued = std::fs::read_to_string(d.path().join(".unslot-port")).unwrap();
     assert_eq!(Path::new(&queued), script);
     until(&mut a, App::ready_to_reload);
 }
 
 #[test]
-fn a_ds_game_is_left_for_drastic_and_slot_quits_for_it() {
+fn a_ds_game_goes_in_as_any_cart_does_for_slot_to_drive_drastic() {
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
     std::fs::create_dir_all(d.path().join("Games/NDS")).unwrap();
-    let rom = d.path().join("Games/NDS/Mario 64 DS.nds");
-    std::fs::write(&rom, "nds").unwrap();
-    let launcher = d.path().join("System/drastic/launch.sh");
-    std::fs::create_dir_all(launcher.parent().unwrap()).unwrap();
-    std::fs::write(&launcher, "#!/bin/sh\n").unwrap();
+    std::fs::write(d.path().join("Games/NDS/Mario 64 DS.nds"), "nds").unwrap();
     let mut a = boot(d.path());
     for _ in 0..Platform::COUNT {
         if a.shelf_platform_name() == Some("Nintendo DS") {
@@ -125,20 +133,22 @@ fn a_ds_game_is_left_for_drastic_and_slot_quits_for_it() {
     }
     assert_eq!(a.shelf_platform_name(), Some("Nintendo DS"));
     press(&mut a, Btn::A);
-    let queued = std::fs::read_to_string(d.path().join(".unslot-port")).unwrap();
-    assert_eq!(queued, format!("{}\n{}", launcher.display(), rom.display()));
-    until(&mut a, App::ready_to_reload);
+    assert!(
+        matches!(a.phase(), Phase::Inserting { .. }),
+        "{:?}",
+        a.phase()
+    );
+    assert!(
+        !d.path().join(".unslot-port").exists(),
+        "slot quit for DraStic"
+    );
 }
 
 #[test]
-fn a_psp_game_is_left_for_ppsspp_and_slot_quits_for_it() {
+fn a_psp_game_goes_in_as_any_cart_does_for_slot_to_drive_ppsspp() {
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
     std::fs::create_dir_all(d.path().join("Games/PSP")).unwrap();
-    let rom = d.path().join("Games/PSP/Lumines.iso");
-    std::fs::write(&rom, "psp").unwrap();
-    let launcher = d.path().join("System/ppsspp/launch.sh");
-    std::fs::create_dir_all(launcher.parent().unwrap()).unwrap();
-    std::fs::write(&launcher, "#!/bin/sh\n").unwrap();
+    std::fs::write(d.path().join("Games/PSP/Lumines.iso"), "psp").unwrap();
     let mut a = boot(d.path());
     for _ in 0..Platform::COUNT {
         if a.shelf_platform_name() == Some("PlayStation Portable") {
@@ -148,9 +158,15 @@ fn a_psp_game_is_left_for_ppsspp_and_slot_quits_for_it() {
     }
     assert_eq!(a.shelf_platform_name(), Some("PlayStation Portable"));
     press(&mut a, Btn::A);
-    let queued = std::fs::read_to_string(d.path().join(".unslot-port")).unwrap();
-    assert_eq!(queued, format!("{}\n{}", launcher.display(), rom.display()));
-    until(&mut a, App::ready_to_reload);
+    assert!(
+        matches!(a.phase(), Phase::Inserting { .. }),
+        "{:?}",
+        a.phase()
+    );
+    assert!(
+        !d.path().join(".unslot-port").exists(),
+        "slot quit for PPSSPP"
+    );
 }
 
 #[test]
@@ -214,45 +230,6 @@ fn a_book_turns_its_pages_and_opens_again_where_it_was_left() {
     press(&mut a, Btn::B);
     open(&mut a, "Long.txt");
     assert_eq!(text_page(&a).lines, second.lines, "the place was not kept");
-}
-
-/// A zip with each file stored as it is, as an EPUB may be.
-fn stored_zip(files: &[(&str, &str)]) -> Vec<u8> {
-    let mut out = Vec::new();
-    let mut central = Vec::new();
-    for (name, body) in files {
-        let at = out.len() as u32;
-        let head = |sig: u32, out: &mut Vec<u8>, central: bool| {
-            out.extend(sig.to_le_bytes());
-            if central {
-                out.extend(20u16.to_le_bytes());
-            }
-            out.extend([20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-            out.extend(0u32.to_le_bytes());
-            out.extend((body.len() as u32).to_le_bytes());
-            out.extend((body.len() as u32).to_le_bytes());
-            out.extend((name.len() as u16).to_le_bytes());
-            out.extend(0u16.to_le_bytes());
-        };
-        head(0x0403_4b50, &mut out, false);
-        out.extend(name.as_bytes());
-        out.extend(body.as_bytes());
-        head(0x0201_4b50, &mut central, true);
-        central.extend([0; 6]);
-        central.extend(0u32.to_le_bytes());
-        central.extend(at.to_le_bytes());
-        central.extend(name.as_bytes());
-    }
-    let start = out.len() as u32;
-    out.extend(&central);
-    out.extend(0x0605_4b50u32.to_le_bytes());
-    out.extend([0; 4]);
-    out.extend((files.len() as u16).to_le_bytes());
-    out.extend((files.len() as u16).to_le_bytes());
-    out.extend((central.len() as u32).to_le_bytes());
-    out.extend(start.to_le_bytes());
-    out.extend(0u16.to_le_bytes());
-    out
 }
 
 #[test]

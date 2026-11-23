@@ -566,15 +566,22 @@ impl Session {
     }
 
     fn spawn_core(&mut self, stem: &str, serial: &'static str) {
-        let Some((rom, platform)) = self
-            .app
-            .seated_cart()
-            .filter(|c| c.stem == stem)
-            .map(|c| (c.rom.clone(), c.platform))
+        let Some((rom, platform, native)) =
+            self.app.seated_cart().filter(|c| c.stem == stem).map(|c| {
+                (
+                    c.rom.clone(),
+                    c.platform,
+                    crate::pico8::runs_native(&self.root, c),
+                )
+            })
         else {
             return;
         };
-        let core = slot_store::core_for_platform(&self.root, stem, platform);
+        // Splore is the owner's PICO-8's whichever core the PICO-8 shelf is set to.
+        let core = match native {
+            true => slot_store::Core::Pico8,
+            false => slot_store::core_for_platform(&self.root, stem, platform),
+        };
         launch(&format!("opening {stem} on {}", core.as_str()));
         self.app.set_core(core);
         self.app.set_platform(platform);

@@ -66,17 +66,15 @@ fn a_single_cart_that_will_not_load_falls_back_to_the_shelf() {
 }
 
 #[test]
-fn one_ds_game_waits_on_the_shelf_rather_than_quitting_for_drastic_each_boot() {
+fn one_ds_game_boots_straight_into_the_game_as_any_cart_does() {
     let d = tmp_root_with_carts(&[]);
     std::fs::create_dir_all(d.path().join("Games/NDS")).unwrap();
     std::fs::write(d.path().join("Games/NDS/Mario 64 DS.nds"), "nds").unwrap();
-    std::fs::create_dir_all(d.path().join("System/drastic")).unwrap();
-    std::fs::write(d.path().join("System/drastic/launch.sh"), "#!/bin/sh\n").unwrap();
     let a = boot(d.path());
     assert!(a.single_cart());
-    assert!(matches!(a.phase(), Phase::Shelf));
+    assert!(matches!(a.phase(), Phase::Inserting { .. }));
     assert!(
         !d.path().join(".unslot-port").exists(),
-        "slot quit for DraStic on its own"
+        "slot quit for DraStic"
     );
 }

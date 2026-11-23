@@ -1,12 +1,10 @@
 ## Changes
 
-- **TrimUI A133P cards (Brick Pro, Brick, Smart Pro)**: every release now carries `unslot-$TAG-a133p.zip` for a new card and a signed `unslot-$TAG-a133p.pak` for the updater, built with the A133P's own cores, mGBA, DraStic and PPSSPP. Tested on a Brick Pro; the Brick and Smart Pro have not been tried.
-- **PSP in standalone PPSSPP v1.20.4**: replaces the libretro core on H700 and A133P. Menu opens slot's menu over the game, Select + X opens PPSSPP's own, and old saves move over on first launch. On the A133P, PSP now shows its picture and God of War: Chains of Olympus no longer crashes.
-- **Kiosk Mode**: locks the handheld to chosen systems and games behind a PIN or password, with optional ESRB rating limits.
-- **RetroAchievements Trophy Room**: under Settings → Online, a shelf of your games with achievements and the trophies earned in each.
-- **Screen**: a Stretch row for every system, Scale and Stretch for Game Boy, Game Boy Color and Game Boy Advance with built-in GB and GBC bezels, and adjustable custom-shader parameters.
-- **Keyboard**: upstream slot's on-screen keyboard, with General, Host and Numeric layouts.
-- **Fixes**: the lowest brightness steps no longer turn the screen off, Virtual Boy runs on devices without `libGL.so.1`, Syncthing conflict copies no longer appear as games, and updates keep the shelf's drawn labels.
+- **RomM**: under Settings → Online, a client for your own [RomM](https://github.com/rommapp/romm) server. Sign in by scanning a code with your phone, browse the library and fetch games straight onto the shelf, and games sent to the handheld from RomM's web page land on the shelf by themselves. Game Art can come from RomM. Save Sync keeps battery saves in step with RomM on the same `autosave` slot Grout uses (DS, PSP and PICO-8 saves stay out of it), and turns Syncthing off, as both would change the same saves. Tested against RomM 5.4.1.
+- **DraStic, PPSSPP and PICO-8 inside slot**: the standalone emulators now run as slot's own cores do, with the same in-game menu, states, shaders, bezels, volume keys and resume state as every other system.
+- **PICO-8**: carts play in fake-08 by default, with Retro8 still a choice. Your own PICO-8 (the Raspberry Pi zip from Lexaloffle, in `BIOS/PICO-8`) plays carts too and opens Splore, and carts you favourite in Splore go on the shelf. PICO-8 carts have a cart of their own, labelled from the cart itself.
+- **Ports**: a shelf of their own beside Apps, each one a disc. A Kiosk Mode rule that named a port under Apps needs setting again under Ports.
+- **DS**: the two screens are stacked, top over bottom, by default. A card with DraStic settings already keeps its layout.
 
 The full list is in [CHANGELOG.md](https://github.com/cloudwithax/unslot/blob/$TAG/CHANGELOG.md).
 

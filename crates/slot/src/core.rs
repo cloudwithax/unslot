@@ -95,6 +95,21 @@ fn open_named(
     paths: &[PathBuf],
 ) -> Option<Box<dyn RetroCore>> {
     #[cfg(feature = "device")]
+    if let Some(emulator) = match core {
+        Core::Drastic => Some(crate::standalone::Emulator::Drastic),
+        Core::Ppsspp => Some(crate::standalone::Emulator::Ppsspp),
+        Core::Pico8 => Some(crate::standalone::Emulator::Pico8),
+        _ => None,
+    } {
+        return match crate::standalone::StandaloneCore::new(emulator, root) {
+            Ok(standalone) => Some(Box::new(standalone)),
+            Err(e) => {
+                eprintln!("slot: {}: {e}", core.as_str());
+                None
+            }
+        };
+    }
+    #[cfg(feature = "device")]
     if matches!(core, Core::Nodosumi | Core::Flycast | Core::ParallelN64)
         && palette.is_none()
         && link.is_none()
@@ -203,7 +218,15 @@ fn open_here(
 ) -> Option<Box<dyn RetroCore>> {
     crate::gpu::install();
     let bios = root::bios_dir(root);
-    let saves = root::saves_dir(root);
+    // fake-08 keeps cart data where the owner's PICO-8 does, in the same files, so a game saved
+    // on one carries on on the other.
+    let saves = match core {
+        Core::Fake08 => crate::pico8::home_dir(root),
+        _ => root::saves_dir(root),
+    };
+    if let Err(e) = std::fs::create_dir_all(&saves) {
+        eprintln!("slot: {}: {e}", saves.display());
+    }
     for path in paths {
         if !path.exists() {
             continue;
@@ -269,6 +292,14 @@ fn init_options(core: Core) -> &'static [(&'static str, &'static str)] {
     match core {
         // Boots the card's Game Boy BIOS when there is one.
         Core::Gambatte => &[("gambatte_gb_bootloader", "enabled")],
+        // PICO-8's own 128 by 128 picture, uncropped: slot does the scaling.
+        Core::Fake08 => &[
+            ("fake08_video_scale", "1x"),
+            ("fake08_crop_h_left", "0"),
+            ("fake08_crop_h_right", "0"),
+            ("fake08_crop_v_top", "0"),
+            ("fake08_crop_v_bottom", "0"),
+        ],
         _ => &[],
     }
 }

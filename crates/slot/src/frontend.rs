@@ -812,6 +812,16 @@ impl Frontend {
         // A picture turned on its side shows the other way round.
         let turned = self.game_rotation % 2 == 1;
         let aspect = self.game_aspect.map(|a| if turned { 1.0 / a } else { a });
+        // Drawn over the whole panel, the 720 by 480 canvas is stretched to the panel's shape,
+        // so the shape kept on it is the picture's taken back by as much.
+        let aspect = match self.session.app().game_layout().panel {
+            true => {
+                let (w, h) = self.session.app().panel();
+                let stretch = (h as f32 / OUT_H as f32) / (w as f32 / OUT_W as f32);
+                aspect.map(|a| a * stretch)
+            }
+            false => aspect,
+        };
         compositor.set_game_rotation(self.game_rotation);
         compositor.set_game_aspect(aspect.filter(|_| !stretched));
         let synced = ft::span(ev::RENDER_SYNC, 0);

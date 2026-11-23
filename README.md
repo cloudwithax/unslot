@@ -28,17 +28,18 @@ Join the [unslot Discord](https://discord.gg/uBZPeKrmyQ) for questions, sharing 
 
 ## What it does
 
-- **Fifty-six systems**, from arcade boards to the PSP, each on its own shelf as the media it came on: carts, cards, discs, floppies and tapes. Nintendo 64, Dreamcast and PSP draw on the GPU. The DS runs in DraStic, with unslot's menu on Menu and DraStic's on Select + X.
+- **Fifty-six systems**, from arcade boards to the PSP, each on its own shelf as the media it came on: carts, cards, discs, floppies and tapes. Nintendo 64, Dreamcast and PSP draw on the GPU. The DS runs in DraStic, with unslot's menu on Menu and DraStic's on Select + X. PICO-8 carts play in fake-08, or in your own PICO-8, with Splore on the shelf and its favourites put beside it.
 - **Wi-Fi** with an on-screen keyboard, and **Bluetooth** controllers and headphones.
 - **Analog sticks** on the models that have them.
 - **Services:** SSH and SFTP, sharing the card over SMB, Syncthing (add the device by scanning its ID), Tailscale (sign in by scanning a code) and WireGuard.
 - **Updates over the air**, for unslot and for BaseOS under it, with an automatic rollback if a new version never starts.
 - **Game Art** finds a label for each game online, matched by CRC and file name. It keeps going while you play, and each label shows on the shelf as soon as it is found.
+- **RomM:** sign in to your own [RomM](https://github.com/rommapp/romm) server by scanning a code, fetch its games onto the shelf or send them from RomM's web page, keep saves in step with RomM (and with Grout handhelds), and take each game's art from RomM in place of Game Art's.
 - **Menu sounds and haptics:** recorded clicks of real buttons and switches, and a nudge of the rumble motor when a cart goes home or a setting changes. Both can be turned off in Settings → General.
 - **Search:** X on the shelf finds a game by name on every system's shelf, with each result's cart, card or disc beside it, and A takes the slot to it.
 - **RetroAchievements**, softcore or hardcore, and they keep working offline once a game's set is cached.
 - **Bezels** for every system, with R. Savant's H700 overlay pack built in, and **custom shaders** from RetroArch `.glsl` files.
-- **Apps:** Files, Books, Manuals, Gallery and Music on their own shelf, plus PortMaster-style ports in `Ports`.
+- **Apps:** Files, Books, Manuals, Gallery and Music on their own shelf, and PortMaster-style ports in `Ports` on theirs, as discs.
 - **Cast to a TV** over Wi-Fi, to a Chromecast or Google TV, or to a Miracast TV over Wi-Fi Direct.
 - **Controls:** remap the game's buttons for every game, for one system or for one game, and use the D-pad as the left stick on handhelds without one.
 - **Upload from Phone:** scan a code to send the card a game, a wallpaper or a bezel from a phone on the same Wi-Fi.
@@ -48,8 +49,8 @@ Everything slot does is still here: the carts, the shelves, the link cable, the 
 
 ## Apps, artwork and screen effects
 
-The **Apps** shelf contains Files, Books, Manuals, Gallery and Music, plus ports in `Ports`. Each
-opens directly from its cart and returns to the shelf with B. Books reads text, EPUBs and PDFs and
+The **Apps** shelf contains Files, Books, Manuals, Gallery and Music, and the **Ports** shelf the
+ports in `Ports`, each a disc with its label from `Labels/PORTS`. Each opens directly from its cart and returns to the shelf with B. Books reads text, EPUBs and PDFs and
 keeps your page; Gallery shows the pictures in `Pictures`, and videos play there with L1 and R1
 skipping ten seconds; Music plays on with its page closed and holds while a game runs. PDF reading
 and video playback use the bundled `System/bin/mutool` and `System/bin/ffmpeg`.
@@ -65,7 +66,7 @@ before it starts whether to download it from PortMaster, over Wi-Fi; runtimes ar
 `System/PortMaster/libs`, through updates. A port that needs a library unslot does not bring and
 BaseOS has not got may still not start; `Logs/ports.log` says why.
 
-**Settings → Online** holds Upload from Phone, Game Art, Art While Asleep, RetroAchievements,
+**Settings → Online** holds Upload from Phone, Game Art, RomM, Art While Asleep, RetroAchievements,
 Updates, Cores and **Auto-Update Cores**, which fetches new builds of the cores on the card once a
 start has the Wi-Fi up. Game Art's **Clear All Art** takes every label off the card, on a second
 press. Settings → Network keeps Wi-Fi, Bluetooth, Cast and services.
@@ -220,7 +221,7 @@ A `.pak` is the release's `MinUI.zip`, untouched, with its version and checksum 
 | PC-98 | `PC98` | `.d98`, `.fdi`, `.hdi`, `.hdm`, `.fdd`, `.nhd`, `.thd`, `.m3u` | Neko Project II Kai | `np2kai/font.bmp` or `np2kai/FONT.ROM` (required), `np2kai/bios.rom` etc. |
 | Sharp X68000 | `X68000` | `.dim`, `.xdf`, `.hdm`, `.hdf`, `.2hd`, `.m3u` | PX68k | `keropi/iplrom.dat` and `keropi/cgrom.dat` (required) |
 | ScummVM | `SCUMMVM` | `.scummvm` | ScummVM |  |
-| PICO-8 | `PICO8` | `.p8`, `.png` | Retro8 |  |
+| PICO-8 | `PICO8` | `.p8`, `.png` | fake-08, Retro8, PICO-8 | your own PICO-8's Raspberry Pi zip in `BIOS/PICO-8`, for the PICO-8 choice and Splore (optional) |
 | TIC-80 | `TIC80` | `.tic` | TIC-80 |  |
 | PlayStation Portable | `PSP` | `.iso`, `.cso`, `.pbp`, `.chd` | PPSSPP |  |
 
@@ -241,6 +242,7 @@ A `.pak` is the release's `MinUI.zip`, untouched, with its version and checksum 
 | `Config/retroachievements` | Achievements earned offline, until the service confirms them. Keep it with your saves. |
 | `Config/wireguard` | WireGuard tunnels, as wg-quick `.conf` files. |
 | `Config/screenscraper.conf` | Your ScreenScraper login (`ssid=`, `sspassword=`), which you can also enter from Game Art's ScreenScraper row, and optionally a developer ID (`devid=`, `devpassword=`) to use in place of the one built into the release. With both, Game Art asks ScreenScraper first. |
+| `Config/romm.conf` | Your RomM server (`server=`), the device's sign-in to it (`token=`, `user=`, `device=`), whether art comes from unslot or RomM (`art=unslot` or `art=romm`), and whether saves sync with RomM (`saves=romm` or `saves=off`). Keep it private: the token lets anyone fetch your library. |
 | `System` | unslot itself. Updates replace it whole. |
 
 ## A look around
@@ -295,7 +297,7 @@ unslot is a fork of **[slot](https://github.com/BrandonKowalski/slot)** by Brand
 | Area | Credit |
 |---|---|
 | Operating system | [BaseOS](https://github.com/pvaibhav/BaseOS) by pvaibhav |
-| Emulation | [mGBA](https://mgba.io), [gpSP](https://github.com/libretro/gpsp), and the libretro cores in the systems table. The Dreamcast's [Nodosumi](https://github.com/cloudwithax/nodosumi) ships with each release, with Flycast as the other choice. The DS runs in Exophase's [DraStic](https://drastic-ds.com), by way of trngaje's [advanced_drastic](https://github.com/trngaje/advanced_drastic). |
+| Emulation | [mGBA](https://mgba.io), [gpSP](https://github.com/libretro/gpsp), and the libretro cores in the systems table. The Dreamcast's [Nodosumi](https://github.com/cloudwithax/nodosumi) ships with each release, with Flycast as the other choice. The DS runs in Exophase's [DraStic](https://drastic-ds.com), by way of trngaje's [advanced_drastic](https://github.com/trngaje/advanced_drastic). PICO-8 carts play in jtothebell's [fake-08](https://github.com/jtothebell/fake-08); the native PICO-8, Splore and cart art come from keeponjammin's [slot-pico](https://github.com/keeponjammin/slot-pico). |
 | Achievements | [rcheevos](https://github.com/RetroAchievements/rcheevos) (MIT), by way of machomano's slot fork (GPL-3.0) |
 | Bezels | [R. Savant's Anbernic H700 Overlays](https://github.com/RighteousSavant/Anbernic-H700-Overlays), free for any H700 handheld. The default bezel is "Perfect GBA SP" by mugwomp93, by way of chrizzo-hb's knulli-bezels (CC BY-SA 4.0). |
 | Apps | [MuPDF](https://mupdf.com)'s `mutool` (AGPL-3.0) reads PDFs and [FFmpeg](https://ffmpeg.org) (GPL) plays video. Ports run on [PortMaster](https://portmaster.games)'s runtime (MIT), with its [gptokeyb](https://github.com/PortsMaster/gptokeyb) and [gptokeyb2](https://github.com/PortsMaster/gptokeyb2) (GPL-2.0), [LÖVE](https://love2d.org) (zlib) and the tools it ships under their own licences, and Ubuntu's bash (GPL-3.0), zip, OpenAL Soft and mpg123 (LGPL-2.1), and Vorbis and Ogg (BSD) |

@@ -20,6 +20,7 @@ mod link_art;
 mod list_page;
 mod media;
 mod page;
+mod pico8_strip;
 mod picture_page;
 mod plate;
 mod polaroids;

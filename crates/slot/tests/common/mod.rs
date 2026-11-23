@@ -631,3 +631,42 @@ fn seated(root: &Path, snapshot: Box<dyn Snapshot>, state: SlotState) -> App {
     }
     a
 }
+
+/// A zip with each file stored as it is, as an EPUB may be.
+pub fn stored_zip(files: &[(&str, &str)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    for (name, body) in files {
+        let at = out.len() as u32;
+        let head = |sig: u32, out: &mut Vec<u8>, central: bool| {
+            out.extend(sig.to_le_bytes());
+            if central {
+                out.extend(20u16.to_le_bytes());
+            }
+            out.extend([20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            out.extend(0u32.to_le_bytes());
+            out.extend((body.len() as u32).to_le_bytes());
+            out.extend((body.len() as u32).to_le_bytes());
+            out.extend((name.len() as u16).to_le_bytes());
+            out.extend(0u16.to_le_bytes());
+        };
+        head(0x0403_4b50, &mut out, false);
+        out.extend(name.as_bytes());
+        out.extend(body.as_bytes());
+        head(0x0201_4b50, &mut central, true);
+        central.extend([0; 6]);
+        central.extend(0u32.to_le_bytes());
+        central.extend(at.to_le_bytes());
+        central.extend(name.as_bytes());
+    }
+    let start = out.len() as u32;
+    out.extend(&central);
+    out.extend(0x0605_4b50u32.to_le_bytes());
+    out.extend([0; 4]);
+    out.extend((files.len() as u16).to_le_bytes());
+    out.extend((files.len() as u16).to_le_bytes());
+    out.extend((central.len() as u32).to_le_bytes());
+    out.extend(start.to_le_bytes());
+    out.extend(0u16.to_le_bytes());
+    out
+}

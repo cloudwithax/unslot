@@ -9,10 +9,12 @@ use super::files::{list, Kind};
 pub const DIR: &str = "Ports";
 /// The port to run next, left at the card's root for launch_frontend.sh.
 pub const QUEUE: &str = ".unslot-port";
-/// The script that runs a DS game in DraStic, which slot quits for as it does for a port.
+/// The script that runs a DS game in DraStic, which slot drives (crate::standalone).
 pub const DRASTIC: &str = "System/drastic/launch.sh";
-/// The script that runs a PSP game in standalone PPSSPP-SDL, which slot quits for as it does for a port.
+/// The script that runs a PSP game in standalone PPSSPP-SDL, which slot drives.
 pub const PPSSPP: &str = "System/ppsspp/launch.sh";
+/// The script that runs a cart, or Splore, in the owner's PICO-8, which slot drives.
+pub const PICO8: &str = "System/pico8/launch.sh";
 
 /// The scripts in `Ports`, in name order.
 pub fn scripts(root: &Path) -> Vec<PathBuf> {
@@ -23,12 +25,7 @@ pub fn scripts(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Leaves `script` for launch_frontend.sh to run once slot has quit, with `arg` on the line
-/// after it to hand it.
-pub fn queue(root: &Path, script: &Path, arg: Option<&Path>) -> std::io::Result<()> {
-    let mut note = script.to_string_lossy().into_owned();
-    if let Some(arg) = arg {
-        note = format!("{note}\n{}", arg.display());
-    }
-    slot_store::atomic_write(&root.join(QUEUE), note.as_bytes())
+/// Leaves `script` for launch_frontend.sh to run once slot has quit.
+pub fn queue(root: &Path, script: &Path) -> std::io::Result<()> {
+    slot_store::atomic_write(&root.join(QUEUE), script.to_string_lossy().as_bytes())
 }

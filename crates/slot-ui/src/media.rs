@@ -47,6 +47,7 @@ pub enum Media {
     Umd,
     Nds,
     Fantasy,
+    Pico8,
 }
 
 struct Art {
@@ -317,6 +318,15 @@ const ART: [Art; Media::COUNT] = [
         label: (41, 46, 238, 192),
         colour: [0xe0, 0x50, 0x60],
     },
+    // Modelled on the printed carts PICO-8's fans make: a square label window, and a strip under
+    // it the cart's name is printed on (see pico8_strip.rs).
+    Art {
+        png: include_bytes!("../../../assets/pico8_neutral.png"),
+        w: 264,
+        h: 328,
+        label: (32, 28, 200, 200),
+        colour: [0x30, 0x30, 0x34],
+    },
 ];
 
 /// The disc's print runs from the clear hub to just inside the rim, as fractions of its radius:
@@ -331,7 +341,7 @@ const UMD_PRINT_INNER: f32 = 12.6 / 28.4;
 const SEATED_MAX_H: u32 = 259;
 
 impl Media {
-    pub const COUNT: usize = 37;
+    pub const COUNT: usize = 38;
     pub const ALL: [Media; Media::COUNT] = [
         Media::Nes,
         Media::Snes,
@@ -370,6 +380,7 @@ impl Media {
         Media::Umd,
         Media::Nds,
         Media::Fantasy,
+        Media::Pico8,
     ];
 
     /// What a platform's games come on, or None for the Game Boy family's own moulds.
@@ -422,7 +433,10 @@ impl Media {
             Platform::AmstradCpc => Media::AmstradDisk,
             Platform::Psp => Media::Umd,
             Platform::Nds => Media::Nds,
-            Platform::Pico8 | Platform::Tic80 | Platform::Apps => Media::Fantasy,
+            Platform::Pico8 => Media::Pico8,
+            // Most ports are PC games, which came on CD.
+            Platform::Ports => Media::Disc,
+            Platform::Tic80 | Platform::Apps => Media::Fantasy,
         })
     }
 

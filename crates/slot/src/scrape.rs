@@ -105,7 +105,7 @@ pub fn source(platform: Platform, rom: &Path) -> (Vec<&'static str>, u32) {
         Platform::Psp => (vec!["Sony - PlayStation Portable"], 61),
         Platform::Nds => (vec!["Nintendo - Nintendo DS"], 15),
         // Not games: nothing to look up.
-        Platform::Apps => (vec![], 0),
+        Platform::Ports | Platform::Apps => (vec![], 0),
     }
 }
 
@@ -608,6 +608,10 @@ fn work(
     while let Ok(carts) = jobs.recv() {
         // Read afresh each time, so a login typed in since is used.
         let login = read_ss_conf(&root);
+        // Art comes from RomM instead, when the player has chosen it. Its library is asked for
+        // once a run.
+        let romm = Some(crate::romm::read(&root)).filter(crate::romm::Conf::art_from_romm);
+        let (mut library, mut http) = (None, crate::romm::for_build());
         let total = carts.len();
         set(&mut |v| {
             v.running = true;
@@ -618,7 +622,17 @@ fn work(
         });
         for cart in carts {
             set(&mut |v| v.current = Some(cart.stem.clone()));
-            match label_for(&mut *fetch, &root, &mut dats, login.as_ref(), &cart) {
+            let found = match &romm {
+                Some(conf) => {
+                    crate::romm::label_for(&mut *http, conf, &mut library, &cart).map(|png| Found {
+                        png,
+                        render: None,
+                        turned_away: false,
+                    })
+                }
+                None => label_for(&mut *fetch, &root, &mut dats, login.as_ref(), &cart),
+            };
+            match found {
                 Ok(found) => match found.png {
                     Some(png) => {
                         let dir = root.join("Labels").join(cart.platform.dir_name());
@@ -981,7 +995,7 @@ impl EsrbScraper {
         let missing: Vec<Cart> = carts
             .into_iter()
             .filter(|c| {
-                c.platform != Platform::Apps
+                !matches!(c.platform, Platform::Ports | Platform::Apps)
                     && !existing.contains_key(&(c.platform, c.stem.clone()))
             })
             .collect();

@@ -1,0 +1,57 @@
+--- a/source/vm.cpp
++++ b/source/vm.cpp
+@@ -171,17 +171,20 @@
+     // we call this function to establish the default global state of things not to save in the save state
+     // needs to be called after globals are loaded but before the cart is run, or _init is called
+     //TODO: move these calls to the glue code?
+-    // lua_getglobal(luaState, "eris");
+-	// lua_getfield(luaState, -1, "init_persist_all");
+-
+-    // if (lua_pcall(luaState, 0, 0, 0)){
+-    //     Logger_Write("Error setting up lua persistence: %s\n", lua_tostring(luaState, -1));
+-    //     lua_pop(luaState, 1);
+-    //     return false;
+-    // }
++    // Without it eris has no permanents table, persisting the globals fails on the first C
++    // function, and a save state holds no Lua at all: restoring one rewinds RAM but leaves the
++    // cart's variables where they were.
++    lua_getglobal(luaState, "eris");
++    lua_getfield(luaState, -1, "init_persist_all");
++
++    if (lua_pcall(luaState, 0, 0, 0)){
++        Logger_Write("Error setting up lua persistence: %s\n", lua_tostring(luaState, -1));
++        lua_pop(luaState, 2);
++        return false;
++    }
+ 
+-    // //pop the eris.init_persist_all fuction off the stack now that we're done with it
+-    // lua_pop(luaState, 1);
++    //pop the eris table off the stack now that we're done with it
++    lua_pop(luaState, 1);
+ 
+ 
+     return true;
+@@ -1509,15 +1512,22 @@
+ }
+ 
+ void Vm::deserializeLuaState(const char* src, size_t len) {
++    // Eris rebuilds the cart's functions piece by piece, and a collection in the middle frees
++    // prototypes it is still filling in: restoring a real cart's state then reads freed memory
++    // and corrupts the heap. Nothing is collected until the restore is done.
++    lua_gc(_luaState, LUA_GCSTOP, 0);
+     lua_getglobal(_luaState, "eris");
+ 	lua_getfield(_luaState, -1, "restore_all");
+ 	lua_pushlstring(_luaState, src, len);
+ 
+ 	if (lua_pcall(_luaState, 1, 0, 0) != 0) {
+ 		std::string e = lua_tostring(_luaState, -1);
+-		lua_pop(_luaState, 1);
++		Logger_Write("Error restoring lua state: %s\n", e.c_str());
++		lua_pop(_luaState, 2);
++		lua_gc(_luaState, LUA_GCRESTART, 0);
+ 		return;
+ 	}
+ 	lua_pop(_luaState, 1);
++	lua_gc(_luaState, LUA_GCRESTART, 0);
+ }
+ 

@@ -1,4 +1,4 @@
-//! Apps: the Apps shelf's carts, the built-in ones and the ports in `Ports`. Each opens on its own
+//! Apps: the Apps shelf's carts, the built-in ones, and the Ports shelf's. Each opens on its own
 //! from the shelf; a page opens over the last, and B goes back to the one before, then to the
 //! shelf.
 
@@ -69,27 +69,29 @@ pub fn built_in(stem: &str) -> bool {
 /// The app that walks the whole card, and runs any script on it as a port.
 pub const FILES: &str = BUILT_IN[0].0;
 
-/// The Apps shelf: the built-in apps, then the ports. A built-in one has no file; each can have
-/// a label in `Labels/APPS`, named as the shelf names it.
+/// The Apps shelf, the built-in apps, then the Ports shelf, the ports. A built-in app has no
+/// file; each can have a label in `Labels/APPS` or `Labels/PORTS`, named as the shelf names it.
 pub fn carts(root: &Path) -> Vec<Cart> {
-    let labels = root.join("Labels").join(Platform::Apps.dir_name());
-    BUILT_IN
-        .iter()
-        .map(|b| (b.0.to_string(), PathBuf::new()))
-        .chain(
-            ports::scripts(root)
-                .into_iter()
-                .map(|p| (music::name(&p), p)),
-        )
-        .map(|(stem, rom)| Cart {
-            platform: Platform::Apps,
+    let cart = |platform: Platform, stem: String, rom: PathBuf| {
+        let labels = root.join("Labels").join(platform.dir_name());
+        Cart {
+            platform,
             label: Some(labels.join(format!("{stem}.png"))).filter(|l| l.is_file()),
             stem,
             rom,
             title: String::new(),
             code: String::new(),
             shell: None,
-        })
+        }
+    };
+    BUILT_IN
+        .iter()
+        .map(|b| cart(Platform::Apps, b.0.to_string(), PathBuf::new()))
+        .chain(
+            ports::scripts(root)
+                .into_iter()
+                .map(|p| cart(Platform::Ports, music::name(&p), p)),
+        )
         .collect()
 }
 
@@ -305,7 +307,7 @@ impl Apps {
     }
 
     fn port(&mut self, script: &Path) -> Done {
-        match ports::queue(&self.root, script, None) {
+        match ports::queue(&self.root, script) {
             Ok(()) => Done::Port(script.to_path_buf()),
             Err(e) => {
                 eprintln!("slot: ports: {e}");

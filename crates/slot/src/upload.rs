@@ -275,7 +275,7 @@ pub fn decode(text: &str) -> String {
 fn page() -> String {
     let systems: String = Platform::ALL
         .iter()
-        .filter(|p| **p != Platform::Apps)
+        .filter(|p| !matches!(p, Platform::Ports | Platform::Apps))
         .map(|p| format!("<option value=\"{}\">{}</option>", p.dir_name(), p.name()))
         .collect();
     PAGE.replace("{BRAND}", BRAND)

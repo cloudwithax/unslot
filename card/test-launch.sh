@@ -161,26 +161,6 @@ launch
 [ -d "$TMP/fs/roms/ports" ] && [ ! -L "$TMP/fs/roms/ports" ] || fail "a real /roms/ports was replaced"
 [ "$(cat "$TMP/fs/bin/bash")" = mine ] || fail "a bash already there was replaced"
 
-# A DS game slot quit for goes to DraStic's script whole, spaces and all, and nothing is linked.
-setup
-mkdir -p "$TMP/card/System/drastic"
-printf '#!/bin/sh\necho "$#:$1" > ran\n' > "$TMP/card/System/drastic/launch.sh"
-printf '%s\n%s' "$TMP/card/System/drastic/launch.sh" "$TMP/card/Games/NDS/Mario 64 DS.nds" > "$TMP/card/.unslot-port"
-launch
-[ "$(cat "$TMP/card/System/drastic/ran")" = "1:$TMP/card/Games/NDS/Mario 64 DS.nds" ] || fail "DraStic was not handed the game"
-! grep -qs -- --port "$TMP/asked" || fail "DraStic's launch looked for runtimes or read the volume"
-[ ! -e "$TMP/fs/roms" ] || fail "DraStic's launch linked PortMaster's folders"
-
-# A PSP game slot quit for goes to standalone PPSSPP's script whole, spaces and all, and nothing is linked.
-setup
-mkdir -p "$TMP/card/System/ppsspp"
-printf '#!/bin/sh\necho "$#:$1" > ran\n' > "$TMP/card/System/ppsspp/launch.sh"
-printf '%s\n%s' "$TMP/card/System/ppsspp/launch.sh" "$TMP/card/Games/PSP/Crisis Core.iso" > "$TMP/card/.unslot-port"
-launch
-[ "$(cat "$TMP/card/System/ppsspp/ran")" = "1:$TMP/card/Games/PSP/Crisis Core.iso" ] || fail "PPSSPP was not handed the game"
-! grep -qs -- --port "$TMP/asked" || fail "PPSSPP's launch looked for runtimes or read the volume"
-[ ! -e "$TMP/fs/roms" ] || fail "PPSSPP's launch linked PortMaster's folders"
-
 # A firmware without /etc/ssl/certs/ca-certificates.crt gets the card's CA bundle; one with its own keeps it.
 setup
 mkdir -p "$TMP/card/System/ssl" "$TMP/card/Ports"

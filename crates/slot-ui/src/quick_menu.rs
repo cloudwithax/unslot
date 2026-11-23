@@ -96,6 +96,8 @@ pub enum QuickRow {
     Upload,
     /// Labels for the card's games, found online.
     GameArt,
+    /// Signing in to a RomM server, its games, and whether art comes from it.
+    Romm,
     /// Signing in to RetroAchievements, or out.
     Achievements,
     /// 3D Trophy Room displaying cached RetroAchievements sets and unlocks.
@@ -122,7 +124,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 72] = [
+const GENERIC: [QuickRow; 73] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -165,6 +167,7 @@ const GENERIC: [QuickRow; 72] = [
     QuickRow::Updates,
     QuickRow::Cores,
     QuickRow::GameArt,
+    QuickRow::Romm,
     QuickRow::MenuSounds,
     QuickRow::Haptics,
     QuickRow::Power,
@@ -259,6 +262,7 @@ const SCREEN_ORDER: [Platform; Platform::COUNT] = [
     Platform::Tic80,
     Platform::Psp,
     Platform::Nds,
+    Platform::Ports,
     Platform::Apps,
 ];
 
@@ -318,9 +322,10 @@ impl QuickRow {
         QuickRow::Hostname,
     ];
 
-    pub const ONLINE: [QuickRow; 8] = [
+    pub const ONLINE: [QuickRow; 9] = [
         QuickRow::Upload,
         QuickRow::GameArt,
+        QuickRow::Romm,
         QuickRow::ArtAsleep,
         QuickRow::Achievements,
         QuickRow::TrophyRoom,
@@ -385,11 +390,11 @@ impl QuickRow {
         QuickRow::PlayContrast,
     ];
 
-    /// The Screen page: one row for each platform a core runs, leaving out Apps, DS, and PSP.
+    /// The Screen page: one row for each platform a core runs, leaving out Ports and Apps.
     pub fn screen_page() -> Vec<QuickRow> {
         SCREEN_ORDER
             .into_iter()
-            .filter(|p| !matches!(p, Platform::Apps | Platform::Nds | Platform::Psp))
+            .filter(|p| !matches!(p, Platform::Ports | Platform::Apps))
             .map(QuickRow::ScreenOf)
             .collect()
     }
@@ -505,6 +510,7 @@ impl QuickRow {
             | QuickRow::Services => QuickRow::NETWORK.to_vec(),
             QuickRow::Upload
             | QuickRow::GameArt
+            | QuickRow::Romm
             | QuickRow::ArtAsleep
             | QuickRow::Achievements
             | QuickRow::TrophyRoom
@@ -654,6 +660,7 @@ impl QuickRow {
             QuickRow::ArtAsleep => "Art While Asleep",
             QuickRow::Upload => "Upload from Phone",
             QuickRow::GameArt => "Game Art",
+            QuickRow::Romm => "RomM",
             QuickRow::Achievements => "RetroAchievements",
             QuickRow::TrophyRoom => "Trophy Room",
             QuickRow::Kiosk => "Kiosk Mode",
@@ -696,6 +703,7 @@ impl QuickRow {
                 | QuickRow::Updates
                 | QuickRow::Cores
                 | QuickRow::GameArt
+                | QuickRow::Romm
                 | QuickRow::Achievements
                 | QuickRow::TrophyRoom
                 | QuickRow::Power

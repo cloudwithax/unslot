@@ -17,10 +17,14 @@ pub struct Cart {
 }
 
 impl Cart {
-    /// What the shelf calls the game: an arcade set's game, else the file's name.
+    /// What the shelf calls the game: an arcade set's game, else the file's name, without the
+    /// `.p8` of a PICO-8 cart saved as a picture.
     pub fn shelf_name(&self) -> &str {
         match self.platform.spec().header {
             Header::Arcade if !self.title.is_empty() => &self.title,
+            _ if self.platform == Platform::Pico8 => {
+                self.stem.strip_suffix(".p8").unwrap_or(&self.stem)
+            }
             _ => &self.stem,
         }
     }

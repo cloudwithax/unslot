@@ -41,6 +41,7 @@ use crate::link_screen::LinkSprites;
 use crate::link_start::{link_port, LinkFail, LinkProgress, LinkStarter, LinkStep};
 use crate::loading_mark::LoadingMark;
 use crate::persist::{self, Snapshot};
+use crate::romm::{Romm, RommView};
 use crate::scrape::{EsrbScraper, EsrbView, ScrapeView, Scraper, SsState};
 use crate::services::{Services, ServicesView, SyncProgress, Tailnet, Wanted};
 use crate::update::{Part, Stage, Track, Updates, UpdatesView};
@@ -414,12 +415,30 @@ pub enum Phase {
     },
     /// RetroAchievements 3D Trophy Room and Game Set selector.
     Trophies(crate::trophies::TrophyState),
+    /// RomM: its settings, the code to sign in with, and the library's systems and games.
+    Romm {
+        page: RommPage,
+        note: Option<String>,
+    },
     /// Typing for the network or services page, which it goes back to at `cursor`.
     Keyboard {
         keys: Keyboard,
         typing: Typing,
         cursor: usize,
     },
+}
+
+/// A page of RomM's.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum RommPage {
+    /// The server, the account, where art comes from, and the library.
+    Main { cursor: usize },
+    /// The code a phone scans to approve the sign in.
+    SignIn,
+    /// The library's systems.
+    Library { cursor: usize },
+    /// One system's games, as `shelf` in the list of systems.
+    Games { shelf: usize, cursor: usize },
 }
 
 /// What the keyboard is being typed for.
@@ -444,6 +463,8 @@ pub enum Typing {
     Search {
         again: bool,
     },
+    /// The RomM server's address.
+    RommServer,
     /// PIN or password prompt to unlock Kiosk Mode.
     KioskUnlock,
     /// Setting Kiosk PIN or password; `activate` immediately locks when confirmed.
@@ -743,6 +764,13 @@ pub struct App {
     cores_view: CoresView,
     scraper: Option<Scraper>,
     scrape_view: ScrapeView,
+    romm: Option<Romm>,
+    romm_view: RommView,
+    romm_conf: crate::romm::Conf,
+    /// The games of the RomM system open on its page that are on the card, by id.
+    romm_on_card: std::collections::HashSet<u64>,
+    /// Whether the saves are to be synced with RomM once nothing is being played.
+    romm_sync_due: bool,
     all_carts: Vec<Cart>,
     kiosk: KioskConfig,
     esrb: HashMap<(Platform, String), Esrb>,
@@ -1026,6 +1054,11 @@ impl App {
             cores_view: CoresView::default(),
             scraper: None,
             scrape_view: ScrapeView::default(),
+            romm: None,
+            romm_view: RommView::default(),
+            romm_conf: crate::romm::Conf::default(),
+            romm_on_card: std::collections::HashSet::new(),
+            romm_sync_due: true,
             all_carts,
             kiosk: KioskConfig::default(),
             esrb: HashMap::new(),
@@ -1063,6 +1096,7 @@ impl App {
     pub fn boot_marked(root: &Path, loading: Option<LoadingMark>) -> Self {
         crate::root::ensure(root);
         crate::boot_time::mark("root");
+        crate::pico8::stock_shelf(root);
         let mut carts = scan(root).unwrap_or_default();
         carts.extend(crate::apps::carts(root));
         crate::boot_time::mark("scan");
@@ -1090,6 +1124,8 @@ impl App {
         app.updates = Some(Updates::for_card(root));
         app.core_downloads = Some(CoreDownloads::for_card(root));
         app.scraper = Some(Scraper::for_card(root));
+        app.romm = Some(Romm::for_card(root));
+        app.romm_conf = crate::romm::read(root);
         app.ss_state = crate::scrape::ss_state(root);
         app.kiosk = read_kiosk_config(root);
         app.esrb = read_esrb_map(root);
@@ -1132,15 +1168,6 @@ impl App {
                     .or_else(|| self.seat_of(&stem, platform))
             })
         };
-        // Standalone DS/PSP games are left on the shelf, or slot would quit for DraStic/PPSSPP
-        // again each time the game ends.
-        let seated = seated.filter(|&(at, i)| {
-            self.shelves[at]
-                .1
-                .carts
-                .get(i)
-                .is_none_or(|c| !matches!(c.platform, Platform::Nds | Platform::Psp))
-        });
         self.phase = Phase::Shelf;
         match seated {
             Some((at, i)) => {
@@ -1506,7 +1533,7 @@ impl App {
             hidden.push(QuickRow::Palette);
         }
         // Over the whole screen there is no room left for a bezel.
-        if no_bezel || self.fills_screen(platform) {
+        if no_bezel || self.fills_panel(platform) {
             hidden.push(QuickRow::Bezel);
         }
         if platform.spec().native || !self.offers_scale(platform) {
@@ -1675,6 +1702,7 @@ impl App {
             | QuickRow::Updates
             | QuickRow::Cores
             | QuickRow::GameArt
+            | QuickRow::Romm
             | QuickRow::Achievements
             | QuickRow::TrophyRoom
             | QuickRow::Kiosk
@@ -2226,7 +2254,7 @@ impl App {
             if !self.shader_has_params(platform) {
                 hidden.push(QuickRow::ShaderParamsOf(platform));
             }
-            if self.bezel_choices(platform).len() < 2 || self.fills_screen(platform) {
+            if self.bezel_choices(platform).len() < 2 || self.fills_panel(platform) {
                 hidden.push(QuickRow::BezelOf(platform));
             }
             if platform.spec().native || !self.offers_scale(platform) {
@@ -2440,12 +2468,12 @@ impl App {
         self.shelf().carts.iter().find(|c| c.stem == *stem)
     }
 
-    /// One game on the card; the apps beside it are not games.
+    /// One game on the card; the ports and apps beside it are not games.
     pub fn single_cart(&self) -> bool {
         !self.kiosk.active
             && self
                 .carts()
-                .filter(|c| c.platform != Platform::Apps)
+                .filter(|c| !matches!(c.platform, Platform::Ports | Platform::Apps))
                 .count()
                 == 1
     }
@@ -2699,7 +2727,7 @@ impl App {
     }
 
     fn game_layout_of_mode(&self, platform: Platform, mode: VideoMode) -> GameLayout {
-        if self.fills_screen(platform) {
+        if self.fills_panel(platform) {
             return GameLayout {
                 panel: true,
                 ..GameLayout::BAND
@@ -2717,6 +2745,12 @@ impl App {
         platform.spec().native && self.resolved_stretch(platform) == Stretch::FullScreen
     }
 
+    /// Whether the game is drawn over the whole screen: stretched, or the DS, whose two screens
+    /// stacked are as large as the screen lets them be at their own shape.
+    fn fills_panel(&self, platform: Platform) -> bool {
+        self.fills_screen(platform) || platform == Platform::Nds
+    }
+
     /// Whether the playing game's picture is stretched past its own shape, so its aspect is not
     /// kept: stretched in the band, or over the whole screen.
     pub fn picture_stretched(&self) -> bool {
@@ -2724,7 +2758,9 @@ impl App {
     }
 
     pub fn picture_fills(&self) -> bool {
-        self.video_mode == VideoMode::Stretch || self.picture().0 == Sizing::Panel
+        self.video_mode == VideoMode::Stretch
+            || self.picture().0 == Sizing::Panel
+            || self.fills_panel(self.playing_platform())
     }
 
     fn shown_as(
@@ -3714,6 +3750,13 @@ impl App {
             | Phase::GameArt { cursor, .. } => (3, cursor.to_string()),
             Phase::Cores { cursor } | Phase::Search { cursor } => (1, cursor.to_string()),
             Phase::Kiosk { page } => (3, format!("{page:?}")),
+            Phase::Romm { page, .. } => (
+                match page {
+                    RommPage::Main { .. } => 3,
+                    _ => 4,
+                },
+                format!("{page:?}"),
+            ),
             Phase::Trophies(t) => (
                 3 + usize::from(
                     matches!(t.mode, crate::trophies::TrophyViewMode::Game(_))
@@ -3980,6 +4023,7 @@ impl App {
             Phase::Updates { cursor } => self.updates_input(cursor, action),
             Phase::CoreDownloads { cursor } => self.core_downloads_input(cursor, action),
             Phase::GameArt { cursor, .. } => self.game_art_input(cursor, action),
+            Phase::Romm { page, .. } => self.romm_input(page, action),
             Phase::Cores { cursor } => self.cores_input(cursor, action),
             Phase::Search { cursor } => self.search_input(cursor, action),
             Phase::Kiosk { page } => self.kiosk_input(page, action),
@@ -4071,7 +4115,14 @@ impl App {
                 self.phase = password(Some(row));
                 return None;
             }
-            ServiceRow::Syncthing => self.state.syncthing = !self.state.syncthing,
+            ServiceRow::Syncthing => {
+                self.state.syncthing = !self.state.syncthing;
+                if self.state.syncthing {
+                    let note = self.stop_romm_saves();
+                    self.services_changed();
+                    return Some(note);
+                }
+            }
             ServiceRow::Tailscale => match (self.state.tailscale, &self.services_view.tailnet) {
                 (true, Tailnet::SignIn(_)) => {
                     self.phase = Phase::TailscaleLogin;
@@ -4202,7 +4253,12 @@ impl App {
         self.shelves
             .iter()
             .filter_map(|(rack, shelf)| match rack {
-                Rack::Of(p) if *p != Platform::Apps && !shelf.carts.is_empty() => Some(*p),
+                Rack::Of(p)
+                    if !matches!(p, Platform::Ports | Platform::Apps)
+                        && !shelf.carts.is_empty() =>
+                {
+                    Some(*p)
+                }
                 _ => None,
             })
             .collect()
@@ -4216,7 +4272,7 @@ impl App {
             .iter()
             .filter(|(rack, _)| match (rack, platform) {
                 (Rack::Of(p), Some(want)) => *p == want,
-                (Rack::Of(p), None) => *p != Platform::Apps,
+                (Rack::Of(p), None) => !matches!(p, Platform::Ports | Platform::Apps),
                 _ => false,
             })
             .flat_map(|(_, shelf)| shelf.carts.iter())
@@ -4373,6 +4429,7 @@ impl App {
                 v.missed,
                 if v.missed == 1 { "" } else { "s" }
             ),
+            _ if self.romm_conf.art_from_romm() => "Art from RomM".into(),
             _ => match &self.ss_state {
                 SsState::On(_) => "Art from ScreenScraper and libretro".into(),
                 SsState::NoDevId(_) => {
@@ -4401,6 +4458,417 @@ impl App {
             cursor: cursor.min(rows.len() - 1),
             rows,
             legends: with_action(action),
+        }
+    }
+
+    /// Keeps a RomM server typed in, signing out of the last when it is another. A note if it
+    /// could not be kept.
+    fn set_romm_server(&mut self, server: String) -> Option<String> {
+        let root = self.root.clone()?;
+        let mut conf = crate::romm::read(&root);
+        if conf.server != server {
+            conf = crate::romm::Conf {
+                server,
+                art: conf.art,
+                ..crate::romm::Conf::default()
+            };
+            if let Some(romm) = &self.romm {
+                romm.forget();
+            }
+        }
+        let saved = crate::romm::write(&root, &conf);
+        self.romm_conf = conf;
+        saved
+            .err()
+            .map(|e| format!("Could not save the server: {e}"))
+    }
+
+    fn romm_input(&mut self, page: RommPage, action: Action) {
+        let back = matches!(action, Action::GbaDown(Btn::B) | Action::QuickMenu);
+        let step = |cursor: usize, n: usize| match action {
+            Action::GbaDown(Btn::Up) => Some((cursor + n - 1) % n),
+            Action::GbaDown(Btn::Down) => Some((cursor + 1) % n),
+            _ => None,
+        };
+        let shelves = self.romm_view.shelves.clone().unwrap_or_default();
+        let (page, note) = match page {
+            RommPage::Main { .. } if back => {
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::Romm,
+                };
+                return;
+            }
+            RommPage::Main { cursor } => match (cursor, action) {
+                _ if step(cursor, 5).is_some() => (
+                    RommPage::Main {
+                        cursor: step(cursor, 5).unwrap_or(0),
+                    },
+                    None,
+                ),
+                (0, Action::GbaDown(Btn::A)) => {
+                    let server = self.romm_conf.server.clone();
+                    self.phase = Phase::Keyboard {
+                        keys: Keyboard::new(
+                            KeyLayout::General,
+                            "RomM Server",
+                            Some("Its address, as host:port"),
+                            crate::romm::host(&server),
+                        ),
+                        typing: Typing::RommServer,
+                        cursor: 0,
+                    };
+                    return;
+                }
+                (1, Action::GbaDown(Btn::A)) if self.romm_conf.signed_in() => {
+                    let note = match self.root.as_deref().map(crate::romm::sign_out) {
+                        Some(Ok(())) => "Signed out of RomM".to_string(),
+                        Some(Err(e)) => format!("Could not sign out: {e}"),
+                        None => "No card to sign out on".to_string(),
+                    };
+                    if let Some(root) = &self.root {
+                        self.romm_conf = crate::romm::read(root);
+                    }
+                    if let Some(romm) = &self.romm {
+                        romm.forget();
+                    }
+                    (RommPage::Main { cursor }, Some(note))
+                }
+                (1, Action::GbaDown(Btn::A)) if self.romm_conf.server.is_empty() => (
+                    RommPage::Main { cursor },
+                    Some("Set the server first".into()),
+                ),
+                (1, Action::GbaDown(Btn::A)) => {
+                    if let Some(romm) = &self.romm {
+                        romm.pair(&self.romm_conf.server, &self.hostname);
+                    }
+                    (RommPage::SignIn, None)
+                }
+                (2, Action::GbaDown(Btn::A | Btn::Left | Btn::Right)) => {
+                    let Some(root) = self.root.clone() else {
+                        return;
+                    };
+                    let mut conf = crate::romm::read(&root);
+                    conf.art = match conf.art {
+                        crate::romm::Source::Unslot => crate::romm::Source::Romm,
+                        crate::romm::Source::Romm => crate::romm::Source::Unslot,
+                    };
+                    let note = crate::romm::write(&root, &conf)
+                        .err()
+                        .map(|e| format!("Could not save the choice: {e}"));
+                    self.romm_conf = conf;
+                    (RommPage::Main { cursor }, note)
+                }
+                (3 | 4, Action::GbaDown(Btn::A)) if !self.romm_conf.signed_in() => {
+                    (RommPage::Main { cursor }, Some("Sign in first".into()))
+                }
+                (3, Action::GbaDown(Btn::A | Btn::Left | Btn::Right)) => {
+                    (RommPage::Main { cursor }, self.toggle_romm_saves())
+                }
+                (3, Action::GbaDown(Btn::X)) if self.romm_conf.syncs_saves() => {
+                    self.romm_sync_due = true;
+                    (RommPage::Main { cursor }, None)
+                }
+                (4, Action::GbaDown(Btn::A)) => {
+                    if let Some(romm) = &self.romm {
+                        romm.list_shelves();
+                    }
+                    (RommPage::Library { cursor: 0 }, None)
+                }
+                _ => return,
+            },
+            RommPage::SignIn if back => {
+                if let Some(romm) = &self.romm {
+                    romm.stop_pairing();
+                }
+                (RommPage::Main { cursor: 1 }, None)
+            }
+            RommPage::SignIn => return,
+            RommPage::Library { .. } if back => (RommPage::Main { cursor: 4 }, None),
+            RommPage::Library { cursor } => match action {
+                _ if shelves.is_empty() => return,
+                Action::GbaDown(Btn::A) => {
+                    let cursor = cursor.min(shelves.len() - 1);
+                    if let Some(romm) = &self.romm {
+                        romm.list_games(shelves[cursor].clone());
+                    }
+                    (
+                        RommPage::Games {
+                            shelf: cursor,
+                            cursor: 0,
+                        },
+                        None,
+                    )
+                }
+                _ => match step(cursor, shelves.len()) {
+                    Some(cursor) => (RommPage::Library { cursor }, None),
+                    None => return,
+                },
+            },
+            RommPage::Games { shelf, .. } if back => (RommPage::Library { cursor: shelf }, None),
+            RommPage::Games { shelf, cursor } => {
+                let games = self.romm_games(shelf);
+                match action {
+                    _ if games.is_empty() => return,
+                    Action::GbaDown(Btn::A) => {
+                        let game = &games[cursor.min(games.len() - 1)];
+                        let note = match () {
+                            _ if self.romm_on_card.contains(&game.id) => {
+                                Some(format!("{} is on the card already", game.name))
+                            }
+                            _ if self.romm_view.getting.is_some() => {
+                                Some("Wait for the last game to come".into())
+                            }
+                            _ => {
+                                if let Some(romm) = &self.romm {
+                                    romm.get(game.clone());
+                                }
+                                None
+                            }
+                        };
+                        (RommPage::Games { shelf, cursor }, note)
+                    }
+                    Action::GbaDown(Btn::L1 | Btn::R1) => {
+                        let n = games.len();
+                        let jump = 10.min(n);
+                        let cursor = match action {
+                            Action::GbaDown(Btn::L1) => cursor.saturating_sub(jump),
+                            _ => (cursor + jump).min(n - 1),
+                        };
+                        (RommPage::Games { shelf, cursor }, None)
+                    }
+                    _ => match step(cursor, games.len()) {
+                        Some(cursor) => (RommPage::Games { shelf, cursor }, None),
+                        None => return,
+                    },
+                }
+            }
+        };
+        self.phase = Phase::Romm { page, note };
+    }
+
+    /// Turns syncing saves with RomM on or off. Syncthing goes off as it comes on, as the two
+    /// would both change the same saves. A note to show, if any.
+    fn toggle_romm_saves(&mut self) -> Option<String> {
+        let root = self.root.clone()?;
+        let mut conf = crate::romm::read(&root);
+        if !conf.saves && conf.device.is_empty() {
+            return Some("Sign in again for RomM to know this device".into());
+        }
+        conf.saves = !conf.saves;
+        if let Err(e) = crate::romm::write(&root, &conf) {
+            return Some(format!("Could not save the choice: {e}"));
+        }
+        self.romm_conf = conf;
+        if !self.romm_conf.saves {
+            return None;
+        }
+        self.romm_sync_due = true;
+        if !self.state.syncthing {
+            return None;
+        }
+        self.state.syncthing = false;
+        self.services_changed();
+        Some("Syncthing is off now: it and RomM would both change saves".into())
+    }
+
+    /// Turns syncing saves with RomM off, as Syncthing comes on. A note to show, if it was on.
+    fn stop_romm_saves(&mut self) -> Option<String> {
+        let root = self.root.clone()?;
+        let mut conf = crate::romm::read(&root);
+        if !conf.saves {
+            return None;
+        }
+        conf.saves = false;
+        let saved = crate::romm::write(&root, &conf);
+        self.romm_conf = conf;
+        Some(match saved {
+            Ok(()) => {
+                "RomM's save sync is off now: it and Syncthing would both change saves".into()
+            }
+            Err(e) => format!("Could not turn RomM's save sync off: {e}"),
+        })
+    }
+
+    /// The games of the library's system `shelf`, once they have come.
+    fn romm_games(&self, shelf: usize) -> Vec<crate::romm::Game> {
+        let id = self
+            .romm_view
+            .shelves
+            .as_ref()
+            .and_then(|s| s.get(shelf))
+            .map(|s| s.id);
+        match &self.romm_view.games {
+            Some((of, games)) if Some(*of) == id => games.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// What the RomM worker last came to, or what it is busy with, for a page's status.
+    fn romm_status(&self, note: Option<&str>) -> Option<String> {
+        let v = &self.romm_view;
+        if let Some((game, part)) = &v.getting {
+            let have = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
+            return Some(match (game.multi, game.size) {
+                (false, size) if size > 0 => {
+                    format!("Fetching {} ({}%)", game.name, (have * 100 / size).min(99))
+                }
+                _ => format!("Fetching {}", game.name),
+            });
+        }
+        v.busy
+            .clone()
+            .or_else(|| note.map(str::to_string))
+            .or_else(|| v.error.clone())
+            .or_else(|| v.note.clone())
+    }
+
+    fn romm_page(&self, page: RommPage, note: Option<&str>) -> ListPage {
+        let row = |label: &str, detail: String| ListRow {
+            label: label.into(),
+            detail,
+            bars: None,
+            icon: None,
+        };
+        let conf = &self.romm_conf;
+        let (title, rows, cursor, status, action) = match page {
+            RommPage::SignIn => return self.romm_page(RommPage::Main { cursor: 1 }, note),
+            RommPage::Main { cursor } => {
+                let rows = vec![
+                    row(
+                        "Server",
+                        match conf.server.is_empty() {
+                            true => "Not set".into(),
+                            false => crate::romm::host(&conf.server).into(),
+                        },
+                    ),
+                    row(
+                        "Account",
+                        match (conf.signed_in(), conf.user.is_empty()) {
+                            (true, false) => conf.user.clone(),
+                            (true, true) => "Signed in".into(),
+                            (false, _) => "Sign in".into(),
+                        },
+                    ),
+                    row(
+                        "Game Art",
+                        match conf.art {
+                            crate::romm::Source::Unslot => "unslot".into(),
+                            crate::romm::Source::Romm => "RomM".into(),
+                        },
+                    ),
+                    row(
+                        "Save Sync",
+                        match conf.saves && conf.signed_in() {
+                            true => "On".into(),
+                            false => "Off".into(),
+                        },
+                    ),
+                    row("Library", String::new()),
+                ];
+                let status = self
+                    .romm_status(note)
+                    .unwrap_or_else(|| match conf.signed_in() {
+                        true => "Fetch games and their art from your RomM server".into(),
+                        false => "Sign in to a RomM server to fetch its games".into(),
+                    });
+                let action = match cursor {
+                    0 => Some("Change"),
+                    1 if conf.signed_in() => Some("Sign Out"),
+                    1 => Some("Sign In"),
+                    2 | 3 => Some("Change"),
+                    _ => conf.signed_in().then_some("Open"),
+                };
+                if cursor == 3 && conf.syncs_saves() {
+                    let mut legends = with_action(action);
+                    legends.push(Legend::new(ButtonLegend::X, "Sync Now"));
+                    return ListPage {
+                        title: "RomM".into(),
+                        status,
+                        cursor,
+                        rows,
+                        legends,
+                    };
+                }
+                ("RomM".to_string(), rows, cursor, status, action)
+            }
+            RommPage::Library { cursor } => {
+                let shelves = self.romm_view.shelves.as_deref().unwrap_or_default();
+                let rows: Vec<ListRow> = shelves
+                    .iter()
+                    .map(|s| {
+                        let games = if s.count == 1 { "game" } else { "games" };
+                        row(&s.name, format!("{} {games}", s.count))
+                    })
+                    .collect();
+                let status = self
+                    .romm_status(note)
+                    .unwrap_or_else(|| match shelves.len() {
+                        0 if self.romm_view.shelves.is_some() => {
+                            "The library has no games unslot plays".into()
+                        }
+                        0 => "Looking through the library".into(),
+                        n => format!("{n} systems in the library"),
+                    });
+                let action = (!rows.is_empty()).then_some("Open");
+                ("RomM Library".to_string(), rows, cursor, status, action)
+            }
+            RommPage::Games { shelf, cursor } => {
+                let games = self.romm_games(shelf);
+                let rows: Vec<ListRow> = games
+                    .iter()
+                    .map(|g| {
+                        let detail = match self.romm_on_card.contains(&g.id) {
+                            true => "On card".into(),
+                            false => size_label(g.size),
+                        };
+                        row(&g.name, detail)
+                    })
+                    .collect();
+                let name = self
+                    .romm_view
+                    .shelves
+                    .as_ref()
+                    .and_then(|s| s.get(shelf))
+                    .map_or("RomM", |s| s.name.as_str())
+                    .to_string();
+                let status = self
+                    .romm_status(note)
+                    .unwrap_or_else(|| format!("{} games", rows.len()));
+                let action = games
+                    .get(cursor.min(games.len().saturating_sub(1)))
+                    .filter(|g| !self.romm_on_card.contains(&g.id))
+                    .filter(|_| self.romm_view.getting.is_none())
+                    .map(|_| "Fetch");
+                (name, rows, cursor, status, action)
+            }
+        };
+        ListPage {
+            title,
+            status,
+            cursor: cursor.min(rows.len().saturating_sub(1)),
+            rows,
+            legends: with_action(action),
+        }
+    }
+
+    fn romm_sign_in_page(&self) -> QrPage {
+        let v = &self.romm_view;
+        let (status, url) = match &v.pairing {
+            Some(p) => (
+                format!("Scan to approve, or enter {} in RomM", p.user_code),
+                p.url.clone(),
+            ),
+            None => (
+                self.romm_status(None)
+                    .unwrap_or_else(|| "Asking RomM for a code".into()),
+                String::new(),
+            ),
+        };
+        QrPage {
+            title: "Sign In to RomM".into(),
+            status,
+            url,
+            legends: vec![back_legend()],
         }
     }
 
@@ -4648,28 +5116,6 @@ impl App {
         self.apps = Some(apps);
         self.phase = Phase::Apps;
         self.apps_done(done);
-    }
-
-    /// Leaves the DS/PSP game at `at` for DraStic or PPSSPP-SDL, which runs it with slot gone.
-    fn hand_to_standalone(&mut self, at: usize, relative_script: &str, name: &str) {
-        let Some(root) = self.root.clone() else {
-            return;
-        };
-        let Some(rom) = self.shelf().carts.get(at).map(|c| c.rom.clone()) else {
-            return;
-        };
-        let script = root.join(relative_script);
-        if !script.is_file() {
-            eprintln!("slot: launch: {} is not on the card", script.display());
-            return self.refuse();
-        }
-        if let Err(e) = crate::apps::ports::queue(&root, &script, Some(&rom)) {
-            eprintln!("slot: launch: {name}: {e}");
-            return self.refuse();
-        }
-        eprintln!("slot: launch: {name} {}", rom.display());
-        self.music = None;
-        self.begin_reload();
     }
 
     fn apps_input(&mut self, action: Action) {
@@ -5143,6 +5589,10 @@ impl App {
                     Typing::RaUser | Typing::RaPassword(_) => Phase::QuickMenu {
                         row: QuickRow::Achievements,
                     },
+                    Typing::RommServer => Phase::Romm {
+                        page: RommPage::Main { cursor: 0 },
+                        note: None,
+                    },
                     Typing::KioskUnlock => Phase::Shelf,
                     Typing::KioskSetSecret { .. } => Phase::Kiosk {
                         page: KioskPage::Main { cursor },
@@ -5179,6 +5629,18 @@ impl App {
                     }
                     self.held_dir = None;
                     self.search_for(&text);
+                }
+                Typing::RommServer => {
+                    let Some(server) = crate::romm::normalise(&text) else {
+                        self.refuse_keyboard("Type the server's address, as host:port");
+                        return;
+                    };
+                    self.held_dir = None;
+                    let note = self.set_romm_server(server);
+                    self.phase = Phase::Romm {
+                        page: RommPage::Main { cursor: 0 },
+                        note,
+                    };
                 }
                 Typing::KioskUnlock => {
                     if text != self.kiosk.secret {
@@ -5293,13 +5755,17 @@ impl App {
                     }
                     self.held_dir = None;
                     self.state.password = Some(text);
+                    let mut note = None;
                     match then {
                         Some(ServiceRow::Sharing) => self.state.samba = true,
-                        Some(ServiceRow::Syncthing) => self.state.syncthing = true,
+                        Some(ServiceRow::Syncthing) => {
+                            self.state.syncthing = true;
+                            note = self.stop_romm_saves();
+                        }
                         _ => {}
                     }
                     self.services_changed();
-                    self.phase = Phase::Services { cursor, note: None };
+                    self.phase = Phase::Services { cursor, note };
                 }
                 Typing::Password(ssid) => {
                     if !(8..=63).contains(&text.chars().count()) {
@@ -5379,6 +5845,13 @@ impl App {
             Phase::GameArt { cursor, note } => Some(PageModel::List(
                 self.game_art_page(*cursor, note.as_deref()),
             )),
+            Phase::Romm {
+                page: RommPage::SignIn,
+                ..
+            } => Some(PageModel::Qr(self.romm_sign_in_page())),
+            Phase::Romm { page, note } => {
+                Some(PageModel::List(self.romm_page(*page, note.as_deref())))
+            }
             Phase::TailscaleLogin => match &self.services_view.tailnet {
                 Tailnet::SignIn(url) => Some(PageModel::Qr(QrPage {
                     title: "Tailscale".into(),
@@ -5629,6 +6102,12 @@ impl App {
             QuickRow::GameArt => {
                 self.phase = Phase::GameArt {
                     cursor: 0,
+                    note: None,
+                }
+            }
+            QuickRow::Romm => {
+                self.phase = Phase::Romm {
+                    page: RommPage::Main { cursor: 0 },
                     note: None,
                 }
             }
@@ -5980,6 +6459,7 @@ impl App {
             | QuickRow::Updates
             | QuickRow::Cores
             | QuickRow::GameArt
+            | QuickRow::Romm
             | QuickRow::Achievements
             | QuickRow::TrophyRoom
             | QuickRow::Kiosk
@@ -6596,6 +7076,71 @@ impl App {
         if let Some(scraper) = &self.scraper {
             self.scrape_view = scraper.view();
             self.show_scraped();
+        }
+        if let Some(romm) = &self.romm {
+            let next = romm.view();
+            let (signed, got) = (
+                next.signed != self.romm_view.signed,
+                next.got != self.romm_view.got,
+            );
+            let listed = next.games != self.romm_view.games;
+            let failed = next.error.is_some() && next.error != self.romm_view.error;
+            self.romm_view = next;
+            if signed {
+                if let Some(root) = &self.root {
+                    self.romm_conf = crate::romm::read(root);
+                }
+            }
+            // The code goes once it has been used, or when it can no longer be.
+            if (signed || failed)
+                && matches!(
+                    self.phase,
+                    Phase::Romm {
+                        page: RommPage::SignIn,
+                        ..
+                    }
+                )
+            {
+                self.phase = Phase::Romm {
+                    page: RommPage::Main { cursor: 1 },
+                    note: None,
+                };
+            }
+            if listed || got {
+                self.romm_on_card = match (&self.root, &self.romm_view.games) {
+                    (Some(root), Some((_, games))) => games
+                        .iter()
+                        .filter(|g| g.on_card(root))
+                        .map(|g| g.id)
+                        .collect(),
+                    _ => Default::default(),
+                };
+            }
+            // Games fetched from RomM go on the shelves as they land, with any art they came with.
+            if got {
+                self.rescan();
+            }
+            let awake = !matches!(self.phase, Phase::Doze { .. }) && self.wifi_view.ip.is_some();
+            if let Some(romm) = &self.romm {
+                romm.set_awake(awake);
+            }
+            // Never while a game is out, as it would write its save over the one fetched.
+            let idle = !matches!(
+                self.phase,
+                Phase::Inserting { .. }
+                    | Phase::Playing { .. }
+                    | Phase::Ejecting { .. }
+                    | Phase::Polaroids { .. }
+                    | Phase::Doze { .. }
+            ) && self.pending_save.as_ref().is_none_or(|h| h.is_finished());
+            if !self.romm_conf.syncs_saves() || self.state.syncthing {
+                self.romm_sync_due = false;
+            } else if self.romm_sync_due && awake && idle {
+                self.romm_sync_due = false;
+                if let Some(romm) = &self.romm {
+                    romm.sync();
+                }
+            }
         }
         if let Some(scraper) = &self.esrb_scraper {
             let next = scraper.view();
@@ -7909,6 +8454,7 @@ impl App {
             | Phase::Updates { .. }
             | Phase::CoreDownloads { .. }
             | Phase::GameArt { .. }
+            | Phase::Romm { .. }
             | Phase::Cores { .. }
             | Phase::Search { .. }
             | Phase::Kiosk { .. } => {
@@ -8723,14 +9269,23 @@ impl App {
         }) else {
             return;
         };
-        if platform == Platform::Apps {
+        if matches!(platform, Platform::Ports | Platform::Apps) {
             return self.open_app(at);
         }
-        if platform == Platform::Nds {
-            return self.hand_to_standalone(at, crate::apps::ports::DRASTIC, "drastic");
-        }
-        if platform == Platform::Psp {
-            return self.hand_to_standalone(at, crate::apps::ports::PPSSPP, "ppsspp");
+        let native = self
+            .root
+            .as_deref()
+            .is_some_and(|root| crate::pico8::runs_native(root, &self.shelf().carts[at]));
+        if !native
+            && platform == Platform::Pico8
+            && crate::pico8::is_splore(&self.shelf().carts[at].rom)
+        {
+            eprintln!(
+                "slot: launch: Splore needs PICO-8 in {}",
+                slot_store::PICO8_DIR
+            );
+            self.hud.toast(Toast::NoBios, self.now());
+            return self.refuse();
         }
         if let Some(missing) = self.missing_bios(platform) {
             eprintln!("slot: launch: {cart} needs BIOS/{missing}, which is not on the card");
@@ -8807,6 +9362,7 @@ impl App {
         self.end_link();
         self.close_game_menu();
         self.flush_eject(&cart);
+        self.romm_sync_due = true;
         self.pending = None;
         self.refusal = None;
         self.refused_from = None;
@@ -8997,6 +9553,14 @@ impl App {
             Action::GbaDown(Btn::Down) => Phase::Cores {
                 cursor: (cursor + 1) % n,
             },
+            // The owner's PICO-8 is theirs to copy to the card; there is nothing to download.
+            Action::GbaDown(Btn::A | Btn::Y)
+                if cores[cursor].runs_outside() && !self.core_on_card(cores[cursor]) =>
+            {
+                self.hud.toast(Toast::NoBios, self.now());
+                self.refuse();
+                Phase::Cores { cursor }
+            }
             Action::GbaDown(Btn::A) if !self.core_on_card(cores[cursor]) => {
                 self.with_cores(|c| c.download(cores[cursor]));
                 Phase::Cores { cursor }
@@ -9031,6 +9595,7 @@ impl App {
                 detail: match () {
                     _ if *c == chosen => "In use".into(),
                     _ if *c == system => "Default".into(),
+                    _ if c.runs_outside() && !self.core_on_card(*c) => "Not on card".into(),
                     _ if !self.core_on_card(*c) => {
                         core_state(&self.cores_view, *c).unwrap_or_else(|| "Download".into())
                     }
@@ -9041,6 +9606,15 @@ impl App {
             })
             .collect();
         let core = cores[cursor];
+        if core.runs_outside() && !self.core_on_card(core) {
+            return Some(ListPage {
+                title: "Core".into(),
+                status: slot_ui::label_text(cart),
+                cursor,
+                rows,
+                legends: with_action(None),
+            });
+        }
         if !self.core_on_card(core) {
             let pending = self.cores_view.pending(core);
             return Some(ListPage {
@@ -10037,6 +10611,15 @@ fn core_state(v: &CoresView, core: Core) -> Option<String> {
 
 fn back_legend() -> Legend {
     Legend::new(ButtonLegend::B, "Back")
+}
+
+/// A game's size, as the RomM library lists it.
+fn size_label(bytes: u64) -> String {
+    match bytes {
+        0 => String::new(),
+        b if b < 1_000_000 => format!("{} KB", b.div_ceil(1000)),
+        b => format!("{:.1} MB", b as f64 / 1e6),
+    }
 }
 
 /// Back, and A for `action` when there is one.

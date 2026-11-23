@@ -169,9 +169,9 @@ fi
 cmake -S "$src" -B "$build" -U 'FFmpeg_*' -DFFMPEG_DIR="$ffprefix"
 cmake --build "$build" --target PPSSPPSDL -j"$jobs"
 shim="$state/libunslot-ppsspp.so"
-shim_key=$({ cat "$root/tools/ppsspp/volume.c" "$cc" "$inc/SDL_config.h"; printf '%s\n' '-Wl,-z,lazy -DUNSLOT_OPAQUE_SWAP'; } | sha256sum | cut -d' ' -f1)
+shim_key=$({ cat "$root/tools/ppsspp/volume.c" "$root/tools/bridge/bridge.h" "$cc" "$inc/SDL_config.h"; printf '%s\n' '-Wl,-z,lazy'; } | sha256sum | cut -d' ' -f1)
 if [ ! -f "$shim" ] || [ "$(cat "$state/.shim-recipe" 2>/dev/null || true)" != "$shim_key" ]; then
-    "$cc" -O2 -Wall -Wextra -shared -fPIC -mcpu=cortex_a53 -Wl,-z,lazy -DUNSLOT_OPAQUE_SWAP -I"$inc" -I"$work/khronos" \
+    "$cc" -O2 -Wall -Wextra -shared -fPIC -mcpu=cortex_a53 -Wl,-z,lazy -I"$inc" -I"$work/khronos" -I"$root/tools/bridge" \
         -o "$shim" "$root/tools/ppsspp/volume.c" -L"$gpu" -ldl -lpthread -lGLESv2
     echo "$shim_key" > "$state/.shim-recipe"
 fi
@@ -202,8 +202,7 @@ sh "$root/tools/a133p/check-glibc.sh" "$out/PPSSPPSDL" "$out/libs/libSDL2-2.0.so
     echo "gles_fix_evidence=requester verified equivalent preload fallback boots Bomberman (USA).iso and draws its first frame with the H700 binary; staged A133P device proof below"
     echo "runtime_proof=Brick Pro firmware 1.1.1: boots and plays Bomberman (USA) at 30/30 (100%) on the PowerVR, sound on the codec, volume keys and Menu/Exit via slot's supervisor, second launch reads the pad; Smart Pro and Brick untested"
     echo "patch=tools/a133p/drastic-sdl-display.patch sha256=$(sha256sum "$patch" | cut -d' ' -f1)"
-    echo "shim=tools/ppsspp/volume.c sha256=$(sha256sum "$root/tools/ppsspp/volume.c" | cut -d' ' -f1) flags=-O2 -shared -fPIC -mcpu=cortex_a53 -Wl,-z,lazy -DUNSLOT_OPAQUE_SWAP -ldl -lpthread -lGLESv2"
-    echo "shim_opaque_swap=-DUNSLOT_OPAQUE_SWAP fills the frame's alpha with 1 before each swap: the A133P display layer blends by per-pixel alpha and PPSSPP leaves it at 0, which showed a black panel while the game played"
+    echo "shim=tools/ppsspp/volume.c sha256=$(sha256sum "$root/tools/ppsspp/volume.c" | cut -d' ' -f1) flags=-O2 -shared -fPIC -mcpu=cortex_a53 -Wl,-z,lazy -ldl -lpthread -lGLESv2"
     echo "shim_binding=lazy PLT resolution lets preloaded SDL interposition resolve SDL imports after executable dependencies load; override lld's eager-binding default"
     echo "sdl_configure:"
     (cd "$sdl_build" && ./config.status --config)

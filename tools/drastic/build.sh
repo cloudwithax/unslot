@@ -125,7 +125,7 @@ note libs/libSDL2-2.0.so.0 "$OUT/libs/libSDL2-2.0.so.0" "https://github.com/trng
 cp "$src/LICENSE.txt" "$OUT/SDL-LICENSE.txt"
 
 # slot's volume, against the same SDL's headers.
-cc -O2 -Wall -shared -fPIC -I"$src/include" -o "$OUT/libs/libunslot-drastic.so" "$here/volume.c" -ldl -lpthread
+cc -O2 -Wall -shared -fPIC -I"$src/include" -I"$here/../bridge" -o "$OUT/libs/libunslot-drastic.so" "$here/volume.c" -ldl -lpthread
 strip "$OUT/libs/libunslot-drastic.so"
 note libs/libunslot-drastic.so "$OUT/libs/libunslot-drastic.so" tools/drastic/volume.c
 

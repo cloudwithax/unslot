@@ -48,7 +48,7 @@ mkdir -p "$build"
     make -j2 build/libSDL2.la)
 out="$work/drastic"
 cp "$build/build/.libs/libSDL2-2.0.so.0" "$out/libs/libSDL2-2.0.so.0"
-"$root/tools/a133p/zcc" -O2 -Wall -shared -fPIC -I"$src/include" -I"$build/include" \
+"$root/tools/a133p/zcc" -O2 -Wall -shared -fPIC -I"$src/include" -I"$build/include" -I"$root/tools/bridge" \
     -o "$out/libs/libunslot-drastic.so" "$root/tools/drastic/volume.c" -ldl -lpthread
 sh "$root/tools/a133p/check-glibc.sh" "$out/libs/libSDL2-2.0.so.0" "$out/libs/libunslot-drastic.so"
 raw="https://raw.githubusercontent.com/trngaje/advanced_drastic/$drastic_commit"

@@ -294,6 +294,7 @@ pub fn has_real_media(platform: Platform) -> bool {
             | Platform::ScummVm
             | Platform::Pico8
             | Platform::Tic80
+            | Platform::Ports
             | Platform::Apps
     )
 }
@@ -347,6 +348,9 @@ pub fn cart_face_with(cart: &Cart, art: Option<Vec<u8>>) -> CartFace {
         None => generated_label(&s, &label_text(cart)),
     };
     paste_label(&s, &mut face, &label);
+    if cart.platform == Platform::Pico8 {
+        crate::pico8_strip::print_strip(&mut face.rgba, face.w, &label_text(cart));
+    }
     clip_to_silhouette(&s, &mut face);
     face
 }
@@ -699,15 +703,27 @@ fn generated_label(s: &Spec, title: &str) -> Vec<u8> {
                 (room / MAX_LINES as f32, room)
             }
         };
-        let layout = text::fit_box(
-            font,
-            title,
-            (lw - 2 * PAD) as f32,
-            max_h,
-            MAX_LINES,
-            max_px,
-            MIN_PX,
-        );
+        // The band above a disc's hub narrows to its rim, so a disc's title is made narrower
+        // until none of it falls off the print.
+        let mut max_w = (lw - 2 * PAD) as f32;
+        let layout = loop {
+            let layout = text::fit_box(font, title, max_w, max_h, MAX_LINES, max_px, MIN_PX);
+            let off_print = |mask: &[u8]| {
+                let inked = text::coverage(lw, lh, &layout);
+                let print = &mask[(top * lw) as usize..];
+                inked.iter().zip(print).any(|(a, p)| *a > 0 && *p < 128)
+            };
+            match s.label_mask {
+                Some(mask)
+                    if s.mould == Mould::Media(Media::Disc)
+                        && max_w > lw as f32 / 4.0
+                        && off_print(mask) =>
+                {
+                    max_w *= 0.9
+                }
+                _ => break layout,
+            }
+        };
         let band = (top * lw * 4) as usize..((top + lh) * lw * 4) as usize;
         text::draw_centred(&mut rgba[band], lw, lh, &layout, ink(bg));
     }
@@ -760,4 +776,24 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
         ((g + m) * 255.0).round() as u8,
         ((b + m) * 255.0).round() as u8,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_long_title_stays_on_the_discs_print() {
+        let s = spec(Mould::Media(Media::Disc));
+        let title = "TOUHOU 6 EMBODIMENT OF SCARLET DEVIL";
+        let bg = label_colour(title);
+        let label = generated_label(&s, title);
+        let mask = s.label_mask.expect("the disc has a ring");
+        let off = label
+            .chunks(4)
+            .zip(mask)
+            .filter(|(px, p)| **p < 128 && px[..3] != bg)
+            .count();
+        assert_eq!(off, 0, "{off} pixels of the title are off the disc");
+    }
 }

@@ -1,0 +1,26 @@
+--- a/platform/libretro/libretro.cpp
++++ b/platform/libretro/libretro.cpp
+@@ -758,13 +758,21 @@
+         setCartDirectory(containingDir);
+     }
+ 
++    // Load the cart now rather than queueing it for the first retro_run, so a state the
++    // frontend restores straight after loading lands on the running cart instead of being
++    // wiped by the queued load (or meeting a Lua state that does not exist yet).
++    bool loaded;
+     if (info->size > 0) {
+         const unsigned char* data = reinterpret_cast<const unsigned char*>(info->data);
+-        _vm->QueueCartChange(data, info->size);
++        loaded = _vm->LoadCart(data, info->size, false);
+     }
+     else {
+-        _vm->QueueCartChange(info->path);
++        loaded = _vm->LoadCart(info->path, false);
+     }
++    if (!loaded) {
++        return false;
++    }
++    _vm->vm_run();
+ 
+     return true;
+ }

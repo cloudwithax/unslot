@@ -107,9 +107,8 @@ echo "|/bin/sh $SYS/coresave.sh %p %s %e %t" > /proc/sys/kernel/core_pattern 2>/
 scene=/sys/class/devfreq/gpu/device/scenectrl/command
 [ -w "$scene" ] && echo 1 > "$scene" 2> /dev/null
 
-# A port slot quit for, from the Apps page, or DraStic for a DS game: it runs from its own folder
-# with slot gone, and slot starts once it ends. The note's second line, when it has one, is what
-# to hand it. The note goes first, so a port that hangs the device is not run again.
+# A port slot quit for, from the Apps page: it runs from its own folder with slot gone, and slot
+# starts once it ends. The note goes first, so a port that hangs the device is not run again.
 #
 # A port's script from PortMaster looks for PortMaster at /opt/tools/PortMaster and for its own
 # files under /roms/ports, and is written for bash, whose >(tee log.txt) needs /dev/fd; BaseOS
@@ -136,8 +135,7 @@ link() {
 }
 
 if [ -f "$SD/.unslot-port" ]; then
-	port="$(sed -n 1p "$SD/.unslot-port")"
-	arg="$(sed -n 2p "$SD/.unslot-port")"
+	port="$(cat "$SD/.unslot-port")"
 	rm -f "$SD/.unslot-port"
 	sync
 	if [ -f "$port" ]; then
@@ -156,9 +154,7 @@ if [ -f "$SD/.unslot-port" ]; then
 		esac
 		run=sh
 		head -n 1 "$port" | grep -q bash && command -v bash > /dev/null && run=bash
-		set --
-		[ -n "$arg" ] && set -- "$arg"
-		log "port $port $*"
+		log "port $port"
 		if [ -n "${portmaster:-}" ] && ! $SLOT_BIN --port-runtimes "$port" >> "$LOGS/ports.log" 2>&1; then
 			log "port not run: a runtime it needs is not on the card"
 		else
@@ -166,9 +162,9 @@ if [ -f "$SD/.unslot-port" ]; then
 				cd "$(dirname "$port")" || exit
 				# The foreground supervisor owns the port and restores the mixer before returning.
 				if [ -n "${portmaster:-}" ]; then
-					$SLOT_BIN --port-volume "$run" "$port" "$@"
+					$SLOT_BIN --port-volume "$run" "$port"
 				else
-					$run "$port" "$@"
+					$run "$port"
 				fi
 			) >> "$LOGS/ports.log" 2>&1
 			log "port ended $?"

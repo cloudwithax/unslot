@@ -181,7 +181,7 @@ jobs=$(nproc 2>/dev/null || echo 4)
 cmake --build "$BUILD" --target PPSSPPSDL -j"$jobs"
 
 "${cross}gcc" -O2 -Wall -Wextra -shared -fPIC -mcpu=cortex-a53 \
-    -I"$SDL_INC" \
+    -I"$SDL_INC" -I"$HERE/../bridge" \
     -o "$tmp/libunslot-ppsspp.so" \
     "$HERE/volume.c" \
     -ldl -lpthread -lGLESv2

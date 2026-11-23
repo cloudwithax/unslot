@@ -1,7 +1,7 @@
 #!/bin/sh
-# Runs the PSP game $1 in standalone PPSSPPSDL, for launch_frontend.sh once slot has quit for it;
-# slot starts again when the game is exited. Saves and PPSSPP settings live under Saves/PSP, and
-# savestates live under States/PSP, which an update leaves alone.
+# Runs the PSP game $1 in standalone PPSSPPSDL, for slot to drive as one of its cores. Saves and
+# PPSSPP settings live under Saves/PSP, and savestates live under States/PSP, which an update
+# leaves alone.
 here="$(cd "$(dirname "$0")" && pwd)"
 SD="${SLOT_ROOT:-/mnt/sdcard}"
 home="$SD/Saves/PSP"
@@ -106,7 +106,7 @@ END {
 }' "$sys/ppsspp.ini" > "$sys/ppsspp.ini.tmp" && mv "$sys/ppsspp.ini.tmp" "$sys/ppsspp.ini"
 
 # Derive SDL_GAMECONTROLLERCONFIG for ANBERNIC-keys from /sys/class/input without mapping guide
-# to hardware Menu (0x138), leaving Menu exclusively to slot --ppsspp.
+# to hardware Menu (0x138), leaving Menu exclusively to slot.
 dpad_stick=0
 grep -q '^dpad_stick=1$' "$slot_state" 2>/dev/null && dpad_stick=1
 
@@ -191,17 +191,21 @@ unslot_pad_mapping() {
 pad_cfg="$(unslot_pad_mapping)"
 [ -n "$pad_cfg" ] && export SDL_GAMECONTROLLERCONFIG="$pad_cfg"
 
-export UNSLOT_VOLUME=/run/unslot-ppsspp-volume
-/lib/ld-linux-aarch64.so.1 "$here/../slot" --ppsspp &
-volume=$!
-
+# slot drives PPSSPP itself (crates/slot/src/standalone.rs): libunslot-ppsspp.so hands it each
+# frame, its sound and the pad over UNSLOT_BRIDGE, so slot's volume and menu are its own, and
+# presses F2 and F4 for slot's saves and loads, which controls.ini binds alongside any of the
+# player's own.
+awk '
+/^Save State[[:space:]]*=/ { s = 1; if ($0 !~ /[= ,]1-132(,|$)/) $0 = $0 ",1-132" }
+/^Load State[[:space:]]*=/ { l = 1; if ($0 !~ /[= ,]1-134(,|$)/) $0 = $0 ",1-134" }
+{ print }
+END {
+	if (!s) print "Save State = 1-132"
+	if (!l) print "Load State = 1-134"
+}' "$sys/controls.ini" > "$sys/controls.ini.tmp" && mv "$sys/controls.ini.tmp" "$sys/controls.ini"
 cd "$here"
 LD_LIBRARY_PATH="$here/libs" LD_PRELOAD="$here/libs/libunslot-ppsspp.so" SDL_LINUX_JOYSTICK_CLASSIC=1 \
-	"$here/PPSSPPSDL" --fullscreen --pause-menu-exit "$1"
+	"$here/PPSSPPSDL" --fullscreen "$1"
 status=$?
-
-kill "$volume" 2>/dev/null
-wait "$volume" 2>/dev/null || true
-rm -f "$UNSLOT_VOLUME"
 [ -d /tmp/unslot-ppsspp-home ] && rm -rf /tmp/unslot-ppsspp-home
 exit "$status"

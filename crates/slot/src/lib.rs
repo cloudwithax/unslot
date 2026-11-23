@@ -22,7 +22,6 @@ pub mod crash;
 pub mod crash {
     pub fn install() {}
 }
-pub mod drastic;
 pub mod drc;
 pub mod emu;
 pub mod face_builder;
@@ -46,19 +45,23 @@ pub mod loading_mark;
 pub mod pak;
 pub mod panel_turn;
 pub mod persist;
+pub mod pico8;
 pub mod port_runtime;
 pub mod port_volume;
 pub mod prefetch;
 pub mod resample;
 pub mod rewind;
+pub mod romm;
 pub mod root;
 pub mod scrape;
 pub mod search;
+#[cfg(any(feature = "device", test))]
 mod self_exec;
 pub mod services;
 pub mod session;
 pub mod shader;
 pub mod slot_skin;
+pub mod standalone;
 pub mod state_writer;
 pub mod thermal;
 pub mod thumb;

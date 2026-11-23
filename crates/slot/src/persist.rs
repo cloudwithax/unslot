@@ -85,6 +85,16 @@ pub fn read_sav(root: &Path, platform: Platform, stem: &str) -> std::io::Result<
     Ok(None)
 }
 
+/// The file the game's save is in, whichever of `.sav` or `.srm` it is.
+pub fn sav_file(root: &Path, platform: Platform, stem: &str) -> Option<PathBuf> {
+    let srm = crate::root::saves_dir(root)
+        .join(platform.dir_name())
+        .join(format!("{stem}.srm"));
+    [sav_path(root, platform, stem), srm]
+        .into_iter()
+        .find(|p| p.is_file())
+}
+
 const RZIP_MAGIC: &[u8] = b"#RZIPv\x01#";
 
 /// RetroArch's compressed save: a header with the whole length, then zlib chunks each after

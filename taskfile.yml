@@ -12,6 +12,10 @@ vars:
     mednafen_supergrafx mednafen_pcfx stella2014 a5200 prosystem gearcoleco freeintv o2em
     freechaf potator sameduck fmsx bluemsx vice_x64 puae2021 fuse cap32 hatarib atari800 dosbox_pure
     np2kai px68k scummvm retro8 tic80
+  # fake-08, the PICO-8 core, and its Lua, a git submodule GitHub's archives leave out; built from
+  # source by core:fake08 with cores/fake08's patches.
+  FAKE08_COMMIT: 814991a2571ad3970e386cef48f3b148aa1c27b9
+  Z8LUA_COMMIT: e6928578d46b61fd5ea30cfcf547e855a30a0553
   # The cores built from source against OpenGL ES, as core:commit: the GPU cores, whose buildbot
   # builds want desktop GL, and vecx, whose buildbot build links it. Nodosumi is not among them:
   # core:nodosumi fetches its latest release.
@@ -392,6 +396,72 @@ tasks:
     cmds:
       - sh tools/portmaster/fetch.sh vendor/portmaster
 
+  core:fake08:
+    desc: >-
+      Build the aarch64 linux fake-08 core, which plays PICO-8 carts, from its pinned source
+      archive and the pinned archive of its Lua (a git submodule GitHub's archives leave out)
+    status:
+      - test -f vendor/fake08_libretro.so
+      - test "$(cat vendor/fake08_libretro.so.meta 2>/dev/null)" = "$(sh cores/fake08/build.sh stamp {{.FAKE08_COMMIT}} {{.Z8LUA_COMMIT}})"
+    cmds:
+      - |
+        set -euo pipefail
+        mkdir -p vendor
+        rm -f vendor/fake08_libretro.so vendor/fake08_libretro.so.meta vendor/fake08-src.tar.gz vendor/z8lua-src.tar.gz
+        curl -fsSL -o vendor/fake08-src.tar.gz "https://github.com/jtothebell/fake-08/archive/{{.FAKE08_COMMIT}}.tar.gz"
+        curl -fsSL -o vendor/z8lua-src.tar.gz "https://github.com/jtothebell/z8lua/archive/{{.Z8LUA_COMMIT}}.tar.gz"
+        tar -tzf vendor/fake08-src.tar.gz | grep "^fake-08-{{.FAKE08_COMMIT}}/platform/libretro/Makefile$" > /dev/null
+        tar -tzf vendor/z8lua-src.tar.gz | grep "^z8lua-{{.Z8LUA_COMMIT}}/eris.c$" > /dev/null
+      - task: device:sh
+        vars:
+          CMD: >-
+            sh cores/fake08/build.sh build {{.FAKE08_COMMIT}} {{.Z8LUA_COMMIT}}
+            vendor/fake08-src.tar.gz vendor/z8lua-src.tar.gz
+            target-device/fake08 vendor/fake08_libretro.so
+            && chown {{.UID}}:{{.GID}} vendor/fake08_libretro.so vendor/fake08_libretro.so.meta
+      - file vendor/fake08_libretro.so | grep -q aarch64
+      - 'echo "built vendor/fake08_libretro.so @ {{.FAKE08_COMMIT}}"'
+    vars:
+      UID: {sh: id -u}
+      GID: {sh: id -g}
+
+  pico8:
+    desc: >-
+      Build libunslot-pico8.so and libunslot-pico8-64.so, the 32-bit and 64-bit ARM shims slot
+      preloads into the owner's PICO-8, against BaseOS's glibc in Ubuntu 22.04 boxes, or with ARM
+      compilers on this one
+    status:
+      - test -f vendor/pico8/libunslot-pico8.so
+      - test vendor/pico8/libunslot-pico8.so -nt tools/pico8/sdl.c
+      - test vendor/pico8/libunslot-pico8.so -nt tools/bridge/bridge.h
+      - test -f vendor/pico8/libunslot-pico8-64.so
+      - test vendor/pico8/libunslot-pico8-64.so -nt tools/pico8/sdl.c
+      - test vendor/pico8/libunslot-pico8-64.so -nt tools/bridge/bridge.h
+    cmds:
+      - |
+        set -eu
+        if command -v arm-linux-gnueabihf-gcc >/dev/null 2>&1 || command -v zig >/dev/null 2>&1; then
+          sh tools/pico8/build.sh vendor/pico8/libunslot-pico8.so
+        else
+          docker run --rm --platform linux/arm/v7 -v "$PWD":/src -w /src ubuntu:22.04 sh -c \
+            'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gcc libc6-dev >/dev/null &&
+            sh tools/pico8/build.sh vendor/pico8/libunslot-pico8.so && chown -R {{.UID}}:{{.GID}} vendor/pico8'
+        fi
+      - |
+        set -eu
+        if command -v aarch64-linux-gnu-gcc >/dev/null 2>&1 || command -v zig >/dev/null 2>&1; then
+          sh tools/pico8/build.sh vendor/pico8/libunslot-pico8-64.so aarch64
+        else
+          docker run --rm --platform linux/arm64 -v "$PWD":/src -w /src ubuntu:22.04 sh -c \
+            'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gcc libc6-dev >/dev/null &&
+            sh tools/pico8/build.sh vendor/pico8/libunslot-pico8-64.so aarch64 && chown -R {{.UID}}:{{.GID}} vendor/pico8'
+        fi
+      - file vendor/pico8/libunslot-pico8.so | grep -q 'ARM, EABI5'
+      - file vendor/pico8/libunslot-pico8-64.so | grep -q 'ARM aarch64'
+    vars:
+      UID: {sh: id -u}
+      GID: {sh: id -g}
+
   core:fetch:update:
     desc: Re-fetch the buildbot cores even if every one is already in vendor/
     cmds:
@@ -643,7 +713,7 @@ tasks:
 
   dist:device:
     desc: Build the SD2 tree for an H700 device, OUT defaults to ./dist-device
-    deps: [core:device, core:gpsp, core:fetch, core:gles, core:nodosumi, cast:lib, services, media, overlays, drastic, ppsspp, portmaster, glshim, build:device]
+    deps: [core:device, core:gpsp, core:fetch, core:gles, core:nodosumi, core:fake08, pico8, cast:lib, services, media, overlays, drastic, ppsspp, portmaster, glshim, build:device]
     vars:
       OUT: '{{.OUT | default "dist-device"}}'
       UID: {sh: id -u}
@@ -676,6 +746,12 @@ tasks:
         cp vendor/nodosumi_libretro.so "{{.OUT}}/System/"
         commit="$(grep '^commit=' vendor/nodosumi_libretro.so.meta | cut -d= -f2)"
         cp vendor/nodosumi_libretro.so.meta "{{.OUT}}/System/licenses/nodosumi-$commit.meta"
+        file vendor/fake08_libretro.so | grep -q aarch64
+        cp vendor/fake08_libretro.so "{{.OUT}}/System/"
+        cp vendor/fake08_libretro.so.meta "{{.OUT}}/System/licenses/fake-08-{{.FAKE08_COMMIT}}.meta"
+        for p in cores/fake08/*.patch; do
+          cp "$p" "{{.OUT}}/System/licenses/fake-08-$(basename "$p")"
+        done
       - cp vendor/cores.manifest {{.OUT}}/System/licenses/cores.manifest
       - |
         set -eu
@@ -692,6 +768,8 @@ tasks:
         mkdir -p "{{.OUT}}/System/drastic"
         cp -R vendor/drastic/drastic vendor/drastic/libs vendor/drastic/system vendor/drastic/game_database.xml "{{.OUT}}/System/drastic/"
         cp vendor/drastic/drastic.manifest vendor/drastic/drastic_readme.txt vendor/drastic/SDL-LICENSE.txt "{{.OUT}}/System/licenses/"
+      # The shims the owner's PICO-8 runs with, beside card/System/pico8's launcher.
+      - cp vendor/pico8/libunslot-pico8.so vendor/pico8/libunslot-pico8-64.so {{.OUT}}/System/pico8/
       - |
         set -eu
         # Standalone PPSSPP-SDL beside card/System/ppsspp's launcher and tuned configs, with its

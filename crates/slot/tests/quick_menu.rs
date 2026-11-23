@@ -867,7 +867,7 @@ fn fake_faces(a: &mut App) {
     let id = TexId::from_raw;
     a.set_quick_menu_faces(QuickMenuFaces {
         labels: (0..QuickRow::ALL.len())
-            .map(|i| [(id(100 + i), 200, 40), (id(130 + i), 200, 40)])
+            .map(|i| [(id(10_000 + i), 200, 40), (id(20_000 + i), 200, 40)])
             .collect(),
         pointer: (id(700), 32, 48),
         values: (0..QuickValue::ALL.len())
@@ -894,9 +894,9 @@ fn fake_faces(a: &mut App) {
 
 fn label(row: QuickRow, lit: bool) -> usize {
     if lit {
-        130 + row.index()
+        20_000 + row.index()
     } else {
-        100 + row.index()
+        10_000 + row.index()
     }
 }
 
@@ -1655,4 +1655,17 @@ fn a_console_drawn_at_its_own_shape_can_be_stretched_over_the_whole_screen() {
         saved.stretches[Platform::Genesis.index()],
         slot_store::Stretch::Classic
     );
+}
+
+#[test]
+fn the_ds_fills_the_whole_screen_at_its_own_shape() {
+    let d = tmp_root_with_carts(&["Emerald"]);
+    std::fs::create_dir_all(d.path().join("Games/NDS")).unwrap();
+    std::fs::write(d.path().join("Games/NDS/Mario 64 DS.nds"), [0u8; 64]).unwrap();
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    a.set_panel((720, 720));
+    // Over the whole screen, its shape kept, with no bezel round it.
+    assert!(a.game_layout_of(Platform::Nds).panel);
+    assert!(a.hidden_rows().contains(&QuickRow::BezelOf(Platform::Nds)));
+    assert!(!a.game_layout_of(Platform::Nes).panel);
 }

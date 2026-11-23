@@ -64,7 +64,9 @@ pub enum Platform {
     Psp,
     /// Run by DraStic, which slot quits for as it does for a port, rather than by a core.
     Nds,
-    /// The built-in apps and the ports in `Ports`, which slot opens itself rather than a core.
+    /// The ports in `Ports`, which slot quits for rather than run a core.
+    Ports,
+    /// The built-in apps, which slot opens itself rather than a core.
     Apps,
 }
 
@@ -677,7 +679,7 @@ const SPECS: [Spec; Platform::COUNT] = [
         name: "PICO-8",
         dir: "PICO8",
         extensions: &["p8", "png"],
-        cores: &[Core::Retro8],
+        cores: &[Core::Fake08, Core::Retro8, Core::Pico8],
         turbo: false,
         ..CONSOLE
     },
@@ -694,6 +696,7 @@ const SPECS: [Spec; Platform::COUNT] = [
         short: "PSP",
         dir: "PSP",
         extensions: &["iso", "cso", "pbp", "chd", "elf", "prx"],
+        cores: &[Core::Ppsspp],
         shoulders: true,
         turbo: false,
         rewind: false,
@@ -704,9 +707,17 @@ const SPECS: [Spec; Platform::COUNT] = [
         short: "DS",
         dir: "NDS",
         extensions: &["nds"],
+        cores: &[Core::Drastic],
         turbo: false,
         rewind: false,
         ..HANDHELD
+    },
+    Spec {
+        name: "Ports",
+        dir: "PORTS",
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
     },
     Spec {
         name: "Apps",
@@ -718,7 +729,7 @@ const SPECS: [Spec; Platform::COUNT] = [
 ];
 
 impl Platform {
-    pub const COUNT: usize = 57;
+    pub const COUNT: usize = 58;
     pub const ALL: [Platform; Platform::COUNT] = [
         Platform::Gba,
         Platform::Gb,
@@ -776,6 +787,7 @@ impl Platform {
         Platform::Tic80,
         Platform::Psp,
         Platform::Nds,
+        Platform::Ports,
         Platform::Apps,
     ];
 
@@ -847,15 +859,14 @@ mod tests {
 
     #[test]
     fn every_spec_is_complete() {
-        // The apps are opened by slot itself: no core, no files. DS and PSP games are run by
-        // standalone DraStic and PPSSPP-SDL.
-        for p in Platform::ALL.into_iter().filter(|p| *p != Platform::Apps) {
+        // The apps and ports are run by slot itself: no core, no files.
+        for p in Platform::ALL
+            .into_iter()
+            .filter(|p| !matches!(p, Platform::Ports | Platform::Apps))
+        {
             let s = p.spec();
             assert!(!s.name.is_empty() && !s.dir.is_empty(), "{p:?} has no name");
-            assert!(
-                matches!(p, Platform::Nds | Platform::Psp) || !s.cores.is_empty(),
-                "{p:?} has no core"
-            );
+            assert!(!s.cores.is_empty(), "{p:?} has no core");
             assert!(
                 s.shaders.contains(&s.shader),
                 "{p:?} defaults to a shader it does not offer"
