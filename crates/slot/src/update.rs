@@ -427,7 +427,7 @@ pub(crate) fn backend(root: &Path) -> (Box<dyn UpdateBackend>, Option<BaseOs>) {
 pub struct SimUpdates;
 
 impl SimUpdates {
-    pub const UNSLOT: &'static str = "v2.1.0";
+    pub const UNSLOT: &'static str = "v2.17.0";
     pub const BASEOS: &'static str = "v1.5.0";
     pub const TARGET: &'static str = "rg35xxsp";
 
