@@ -24,7 +24,8 @@ jobs:
           set -eu
           sed -i '/bullseye-security/d' /etc/apt/sources.list
           apt-get -o Acquire::Check-Valid-Until=false update
-          apt-get install -y --no-install-recommends zip unzip zstd python3-pip             libgles-dev libegl-dev zlib1g-dev libpng-dev pkg-config
+          # The owner's PICO-8 is 32-bit ARM, so its shim needs armhf's gcc beside the box's own.
+          apt-get install -y --no-install-recommends zip unzip zstd python3-pip             libgles-dev libegl-dev zlib1g-dev libpng-dev pkg-config             gcc-arm-linux-gnueabihf libc6-dev-armhf-cross
           # Flycast wants a newer CMake than bullseye's.
           pip3 install --no-cache-dir 'cmake>=3.27,<3.31'
           curl -fsSL https://taskfile.dev/install.sh | sh -s -- -b /usr/local/bin
