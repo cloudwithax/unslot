@@ -1698,11 +1698,19 @@ fn sync_page(app: &mut App, compositor: &mut Compositor, state: &mut PageSync) {
             crate::app::PageModel::Qr(qr) => qr.face(),
             crate::app::PageModel::Text(text) => text.face(),
             crate::app::PageModel::Picture(picture) => picture.face(),
+            crate::app::PageModel::App(app) => app.face(),
             crate::app::PageModel::Video(video) => {
                 let (w, h) = (crate::apps::video::W, crate::apps::video::H);
                 // Nothing to show until the first picture is in.
                 if video.frame.rgba.len() == (w * h * 4) as usize {
-                    let tex = upload_rgba(compositor, &mut state.tex, w, h, &video.frame.rgba);
+                    let tex = match &video.osd {
+                        Some(osd) => upload(
+                            compositor,
+                            &mut state.tex,
+                            slot_ui::video_osd(&video.frame.rgba, osd),
+                        ),
+                        None => upload_rgba(compositor, &mut state.tex, w, h, &video.frame.rgba),
+                    };
                     app.set_page_face(tex, w, h);
                 }
                 state.shown = model;

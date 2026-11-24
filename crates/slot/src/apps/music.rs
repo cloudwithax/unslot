@@ -14,8 +14,10 @@ use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
+use symphonia::core::meta::{MetadataOptions, MetadataRevision, StandardTagKey};
 use symphonia::core::probe::Hint;
+
+use slot_ui::Cover;
 
 use super::files::Kind;
 
@@ -33,6 +35,14 @@ pub struct MusicView {
     pub paused: bool,
     /// How far into the track, in seconds.
     pub secs: u32,
+    /// How long the track is, in seconds, when the file says.
+    pub total: Option<u32>,
+    /// What the track calls itself, from its tags or its file name.
+    pub title: String,
+    /// Its artist and album, from its tags.
+    pub artist: String,
+    /// Its cover, embedded or a picture beside it.
+    pub cover: Option<Cover>,
     pub error: Option<String>,
 }
 
@@ -212,7 +222,7 @@ fn work(rx: Receiver<Cmd>, view: &Mutex<MusicView>, shared: &Shared) {
             }
             Cmd::Stop => {
                 shared.buf.lock().unwrap_or_else(|e| e.into_inner()).clear();
-                set(&|v| v.at = None);
+                set(&clear_track);
                 continue;
             }
         };
@@ -223,12 +233,18 @@ fn work(rx: Receiver<Cmd>, view: &Mutex<MusicView>, shared: &Shared) {
         });
         loop {
             let Some(track) = queue.get(at) else {
-                set(&|v| v.at = None);
+                set(&clear_track);
                 break;
             };
+            let fallback_title = name(track);
+            let fallback_cover = folder_cover(track);
             set(&|v| {
                 v.at = Some(at);
                 v.secs = 0;
+                v.total = None;
+                v.title = fallback_title.clone();
+                v.artist.clear();
+                v.cover = fallback_cover.clone();
             });
             match play(track, &rx, view, shared) {
                 Ok(After::Next) => at += 1,
@@ -254,6 +270,93 @@ pub fn name(path: &Path) -> String {
         .to_string()
 }
 
+fn clear_track(v: &mut MusicView) {
+    v.at = None;
+    v.secs = 0;
+    v.total = None;
+    v.title.clear();
+    v.artist.clear();
+    v.cover = None;
+}
+
+/// Reads a track's title, artist/album and cover art from its tags, falling back to its file
+/// name and a cover picture beside it.
+fn read_meta(
+    path: &Path,
+    probed: Option<&MetadataRevision>,
+    format: Option<&MetadataRevision>,
+) -> (String, String, Option<Cover>) {
+    let mut title = None;
+    let mut artist = None;
+    let mut album_artist = None;
+    let mut album = None;
+    let mut art = None;
+    for rev in [format, probed].into_iter().flatten() {
+        for tag in rev.tags() {
+            let val = tag.value.to_string();
+            let val = val.trim();
+            if val.is_empty() {
+                continue;
+            }
+            match tag.std_key {
+                Some(StandardTagKey::TrackTitle) if title.is_none() => title = Some(val.to_string()),
+                Some(StandardTagKey::Artist) if artist.is_none() => artist = Some(val.to_string()),
+                Some(StandardTagKey::AlbumArtist) if album_artist.is_none() => {
+                    album_artist = Some(val.to_string())
+                }
+                Some(StandardTagKey::Album) if album.is_none() => album = Some(val.to_string()),
+                _ => {}
+            }
+        }
+        if art.is_none() {
+            if let Some(vis) = rev.visuals().iter().find(|v| !v.data.is_empty()) {
+                art = Some(Cover::Bytes(Arc::new(vis.data.to_vec())));
+            }
+        }
+    }
+    let title = title.unwrap_or_else(|| name(path));
+    let by = artist.or(album_artist);
+    let artist = match (by, album) {
+        (Some(a), Some(b)) => format!("{a} · {b}"),
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        (None, None) => String::new(),
+    };
+    let cover = art.or_else(|| folder_cover(path));
+    (title, artist, cover)
+}
+
+/// A cover picture sitting beside a track in its folder.
+fn folder_cover(path: &Path) -> Option<Cover> {
+    const NAMES: &[&str] = &[
+        "cover.jpg",
+        "cover.jpeg",
+        "cover.png",
+        "folder.jpg",
+        "folder.jpeg",
+        "folder.png",
+        "front.jpg",
+        "front.jpeg",
+        "front.png",
+    ];
+    let dir = path.parent()?;
+    let entries: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    for want in NAMES {
+        if let Some(hit) = entries.iter().find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.eq_ignore_ascii_case(want))
+        }) {
+            return Some(Cover::File(hit.clone()));
+        }
+    }
+    None
+}
+
 /// Decodes one track into the buffer, at the output's rate.
 fn play(
     path: &Path,
@@ -267,7 +370,7 @@ fn play(
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         hint.with_extension(ext);
     }
-    let probed = symphonia::default::get_probe()
+    let mut probed = symphonia::default::get_probe()
         .format(
             &hint,
             stream,
@@ -276,11 +379,29 @@ fn play(
         )
         .map_err(|e| e.to_string())?;
     let mut format = probed.format;
+    let probed_meta = probed.metadata.get();
+    let format_meta = format.metadata();
+    let (title, artist, cover) = read_meta(
+        path,
+        probed_meta.as_ref().and_then(|m| m.current()),
+        format_meta.current(),
+    );
     let track = format
         .tracks()
         .iter()
         .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
         .ok_or("no audio in it")?;
+    let total = track.codec_params.n_frames.and_then(|n| {
+        let rate = track.codec_params.sample_rate?;
+        (rate > 0).then(|| (n / u64::from(rate)) as u32)
+    });
+    {
+        let mut v = view.lock().unwrap_or_else(|e| e.into_inner());
+        v.title = title;
+        v.artist = artist;
+        v.total = total;
+        v.cover = cover;
+    }
     let id = track.id;
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())

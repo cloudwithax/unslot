@@ -471,6 +471,8 @@ pub enum Typing {
     KioskSetSecret {
         activate: bool,
     },
+    /// Naming a file or folder in the file manager.
+    AppName,
 }
 
 /// A row on the services page.
@@ -503,6 +505,7 @@ pub enum PageModel {
     Text(TextPage),
     Picture(PicturePage),
     Video(crate::apps::VideoModel),
+    App(slot_ui::AppPage),
 }
 
 /// The random wallpaper, once one has been looked for.
@@ -5143,6 +5146,13 @@ impl App {
                 self.music = None;
                 self.begin_reload();
             }
+            AppDone::Type { title, text } => {
+                self.phase = Phase::Keyboard {
+                    keys: Keyboard::new(KeyLayout::General, &title, None, &text),
+                    typing: Typing::AppName,
+                    cursor: 0,
+                };
+            }
         }
     }
 
@@ -5606,10 +5616,23 @@ impl App {
                     Typing::KioskSetSecret { .. } => Phase::Kiosk {
                         page: KioskPage::Main { cursor },
                     },
+                    Typing::AppName => {
+                        if let Some(apps) = &mut self.apps {
+                            apps.cancel_typing();
+                        }
+                        Phase::Apps
+                    }
                     _ => Phase::Networks { cursor, note: None },
                 };
             }
             Typed::Done(text) => match typing {
+                Typing::AppName => {
+                    self.held_dir = None;
+                    if let Some(apps) = &mut self.apps {
+                        apps.typed(text);
+                    }
+                    self.phase = Phase::Apps;
+                }
                 Typing::Hostname => {
                     if !crate::baseos::valid_hostname(&text) {
                         self.refuse_keyboard(crate::baseos::HOSTNAME_HINT);

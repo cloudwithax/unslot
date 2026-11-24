@@ -3,7 +3,7 @@
 //! into the output. Skipping starts both again from the new place.
 
 use std::collections::VecDeque;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +16,8 @@ pub const H: u32 = slot_ui::LIST_H;
 const FPS: u32 = 30;
 /// Sound decoded ahead, in samples: a fifth of a second.
 const AHEAD: usize = crate::audio::OUTPUT_HZ as usize * 2 / 5;
+/// How long the on-screen controls stay up after a button is pressed.
+const OSD_FOR: Duration = Duration::from_secs(3);
 
 /// The picture showing, `serial` counting each new one.
 #[derive(Clone, Debug, Default)]
@@ -27,6 +29,7 @@ pub struct Frame {
 struct Shared {
     frame: Mutex<Frame>,
     sound: Mutex<VecDeque<i16>>,
+    total: Mutex<Option<u32>>,
     paused: AtomicBool,
     stop: AtomicBool,
     ended: AtomicBool,
@@ -40,6 +43,7 @@ pub struct Video {
     from: f64,
     began: Instant,
     paused_at: Option<Instant>,
+    osd_until: Instant,
     shared: Arc<Shared>,
     children: Vec<Child>,
     pub error: Option<String>,
@@ -60,17 +64,20 @@ impl Video {
         let shared = Arc::new(Shared {
             frame: Mutex::new(Frame::default()),
             sound: Mutex::new(VecDeque::new()),
+            total: Mutex::new(None),
             paused: AtomicBool::new(false),
             stop: AtomicBool::new(false),
             ended: AtomicBool::new(false),
             volume: std::sync::atomic::AtomicU8::new(volume),
         });
+        let now = Instant::now();
         let mut video = Video {
             path: path.to_path_buf(),
             title,
             from,
-            began: Instant::now(),
+            began: now,
             paused_at: None,
+            osd_until: now + OSD_FOR,
             shared,
             children: Vec::new(),
             error: None,
@@ -82,20 +89,27 @@ impl Video {
         let pictures = video.spawn(
             root,
             &["-an", "-vf", &picture, "-pix_fmt", "rgba", "-f", "rawvideo"],
+            true,
         );
         let rate = crate::audio::OUTPUT_HZ.to_string();
-        let sound = video.spawn(root, &["-vn", "-ac", "2", "-ar", &rate, "-f", "s16le"]);
+        let sound = video.spawn(root, &["-vn", "-ac", "2", "-ar", &rate, "-f", "s16le"], false);
         match pictures {
-            Some(out) => {
+            Some((out, err)) => {
                 let s = video.shared.clone();
                 let began = video.began;
                 let _ = std::thread::Builder::new()
                     .name("slot-video".into())
                     .spawn(move || show(out, &s, began));
+                if let Some(err) = err {
+                    let s = video.shared.clone();
+                    let _ = std::thread::Builder::new()
+                        .name("slot-video-meta".into())
+                        .spawn(move || read_duration(err, &s));
+                }
             }
             None => video.error = Some("Videos need ffmpeg in System/bin".into()),
         }
-        if let Some(out) = sound {
+        if let Some((out, _)) = sound {
             let s = video.shared.clone();
             let _ = std::thread::Builder::new()
                 .name("slot-video-sound".into())
@@ -109,9 +123,14 @@ impl Video {
         video
     }
 
-    fn spawn(&mut self, root: &Path, args: &[&str]) -> Option<std::process::ChildStdout> {
+    fn spawn(
+        &mut self,
+        root: &Path,
+        args: &[&str],
+        info: bool,
+    ) -> Option<(std::process::ChildStdout, Option<std::process::ChildStderr>)> {
         let mut child = Command::new(ffmpeg(root))
-            .args(["-nostdin", "-loglevel", "error", "-ss"])
+            .args(["-nostdin", "-loglevel", if info { "info" } else { "error" }, "-ss"])
             .arg(format!("{:.2}", self.from))
             .arg("-i")
             .arg(&self.path)
@@ -119,12 +138,34 @@ impl Video {
             .arg("pipe:1")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(if info { Stdio::piped() } else { Stdio::null() })
             .spawn()
             .ok()?;
-        let out = child.stdout.take();
+        let out = child.stdout.take()?;
+        let err = child.stderr.take();
         self.children.push(child);
-        out
+        Some((out, err))
+    }
+
+    pub fn total(&self) -> Option<u32> {
+        *self.shared.total.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn set_total(&self, total: Option<u32>) {
+        if let Some(t) = total {
+            let mut slot = self.shared.total.lock().unwrap_or_else(|e| e.into_inner());
+            if slot.is_none() {
+                *slot = Some(t);
+            }
+        }
+    }
+
+    pub fn poke_osd(&mut self) {
+        self.osd_until = Instant::now() + OSD_FOR;
+    }
+
+    pub fn osd_shown(&self) -> bool {
+        self.paused() || Instant::now() < self.osd_until
     }
 
     pub fn frame(&self) -> Frame {
@@ -245,5 +286,50 @@ fn mix(shared: &Shared, out: &mut [i16]) {
             break;
         };
         *s = s.saturating_add((f32::from(v) * gain) as i16);
+    }
+}
+
+/// Reads ffmpeg's stderr for the file's length and drains the rest so ffmpeg never blocks on it.
+fn read_duration(err: impl Read, shared: &Shared) {
+    let mut reader = BufReader::new(err);
+    let mut line = String::new();
+    let mut found = false;
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {
+                if !found {
+                    if let Some(secs) = parse_duration_line(&line) {
+                        *shared.total.lock().unwrap_or_else(|e| e.into_inner()) = Some(secs);
+                        found = true;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn parse_duration_line(line: &str) -> Option<u32> {
+    let rest = line.split_once("Duration:")?.1.trim_start();
+    let stamp = rest.split(',').next()?.trim();
+    let mut parts = stamp.split(':');
+    let h: u32 = parts.next()?.parse().ok()?;
+    let m: u32 = parts.next()?.parse().ok()?;
+    let s: f64 = parts.next()?.parse().ok()?;
+    Some(h * 3600 + m * 60 + s.round() as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ffmpeg_duration_line_is_parsed_into_seconds() {
+        assert_eq!(
+            parse_duration_line("  Duration: 01:02:03.45, start: 0.000000, bitrate: 1234 kb/s\n"),
+            Some(3723)
+        );
+        assert_eq!(parse_duration_line("  Duration: N/A, start: 0.0\n"), None);
     }
 }

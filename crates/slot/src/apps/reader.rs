@@ -1,6 +1,7 @@
 //! Books and manuals: text and EPUBs laid out in pages, PDFs drawn a page at a time by MuPDF's
 //! mutool, which a build ships in System/bin. Where each book was left is kept in Config.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -46,14 +47,14 @@ impl Reader {
                 let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
                 (
                     stem,
-                    Pages::Text(slot_ui::wrap_text(&String::from_utf8_lossy(&bytes))),
+                    Pages::Text(slot_ui::wrap_reader(&String::from_utf8_lossy(&bytes))),
                 )
             }
             Kind::Epub => {
                 let (title, text) = super::epub::read(path).ok_or("This book will not open")?;
                 (
                     title.unwrap_or(stem),
-                    Pages::Text(slot_ui::wrap_text(&text)),
+                    Pages::Text(slot_ui::wrap_reader(&text)),
                 )
             }
             Kind::Pdf => (
@@ -78,7 +79,7 @@ impl Reader {
 
     pub fn count(&self) -> usize {
         match &self.pages {
-            Pages::Text(lines) => lines.len().div_ceil(slot_ui::TEXT_LINES).max(1),
+            Pages::Text(lines) => lines.len().div_ceil(slot_ui::READER_LINES).max(1),
             Pages::Pdf { count } => *count,
         }
     }
@@ -88,8 +89,8 @@ impl Reader {
         match &self.pages {
             Pages::Text(lines) => lines
                 .iter()
-                .skip(self.page * slot_ui::TEXT_LINES)
-                .take(slot_ui::TEXT_LINES)
+                .skip(self.page * slot_ui::READER_LINES)
+                .take(slot_ui::READER_LINES)
                 .cloned()
                 .collect(),
             Pages::Pdf { .. } => Vec::new(),
@@ -104,7 +105,7 @@ impl Reader {
         }
         self.page = to;
         self.draw(root);
-        keep_place(root, &self.path, self.page);
+        keep_place(root, &self.path, self.page, self.count());
         true
     }
 
@@ -116,9 +117,9 @@ impl Reader {
         let drawn = Command::new(mutool(root))
             .args(["draw", "-q", "-F", "png"])
             .arg("-w")
-            .arg(slot_ui::PICTURE_W.to_string())
+            .arg(slot_ui::READER_PAGE_W.to_string())
             .arg("-h")
-            .arg(slot_ui::PICTURE_H.to_string())
+            .arg(slot_ui::READER_PAGE_H.to_string())
             .arg("-o")
             .arg(&out)
             .arg(&self.path)
@@ -149,13 +150,17 @@ fn pdf_pages(root: &Path, path: &Path) -> Result<usize, String> {
         .ok_or("This PDF will not open".into())
 }
 
-fn places(root: &Path) -> Vec<(usize, String)> {
+fn places(root: &Path) -> Vec<(usize, Option<usize>, String)> {
     std::fs::read_to_string(root.join(PLACES))
         .unwrap_or_default()
         .lines()
         .filter_map(|l| {
-            let (page, path) = l.split_once('\t')?;
-            Some((page.parse().ok()?, path.to_string()))
+            let (left, path) = l.split_once('\t')?;
+            let (page, count) = match left.split_once('/') {
+                Some((p, c)) => (p.parse().ok()?, c.parse().ok()),
+                None => (left.parse().ok()?, None),
+            };
+            Some((page, count, path.to_string()))
         })
         .collect()
 }
@@ -172,17 +177,38 @@ pub fn place(root: &Path, path: &Path) -> usize {
     let key = key(root, path);
     places(root)
         .into_iter()
-        .find(|(_, p)| *p == key)
-        .map_or(0, |(page, _)| page)
+        .find(|(_, _, p)| *p == key)
+        .map_or(0, |(page, _, _)| page)
 }
 
-fn keep_place(root: &Path, path: &Path, page: usize) {
+/// How far through each bookmarked book the reader got, as a percentage from 1 to 100.
+pub fn progress(root: &Path) -> HashMap<PathBuf, u8> {
+    places(root)
+        .into_iter()
+        .filter_map(|(page, count, path)| {
+            let count = count.filter(|&c| c > 0)?;
+            if page == 0 {
+                return None;
+            }
+            let pct = (((page + 1) * 100) / count).clamp(1, 100) as u8;
+            Some((root.join(path), pct))
+        })
+        .collect()
+}
+
+fn keep_place(root: &Path, path: &Path, page: usize, count: usize) {
     let key = key(root, path);
     let mut all = places(root);
-    all.retain(|(_, p)| *p != key);
-    all.insert(0, (page, key));
+    all.retain(|(_, _, p)| *p != key);
+    all.insert(0, (page, Some(count), key));
     all.truncate(200);
-    let text: String = all.iter().map(|(n, p)| format!("{n}\t{p}\n")).collect();
+    let text: String = all
+        .iter()
+        .map(|(n, c, p)| match c {
+            Some(c) => format!("{n}/{c}\t{p}\n"),
+            None => format!("{n}\t{p}\n"),
+        })
+        .collect();
     let _ = std::fs::create_dir_all(root.join("Config"));
     let _ = slot_store::atomic_write(&root.join(PLACES), text.as_bytes());
 }

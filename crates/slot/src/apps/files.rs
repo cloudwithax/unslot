@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use slot_ui::FileIcon;
+
 /// What a file on the card is, by its extension, for what opens it.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Kind {
@@ -57,6 +59,80 @@ pub struct Entry {
     pub name: String,
     pub path: PathBuf,
     pub kind: Kind,
+    /// A file's size, or how many things a folder holds.
+    pub size: u64,
+    /// When it was last changed, in seconds since 1970.
+    pub modified: Option<i64>,
+}
+
+impl Entry {
+    /// Its icon: a game where a system takes its extension, an archive for a zip that is not.
+    pub fn icon(&self) -> FileIcon {
+        match self.kind {
+            Kind::Folder => FileIcon::Folder,
+            Kind::Picture => FileIcon::Picture,
+            Kind::Video => FileIcon::Video,
+            Kind::Audio => FileIcon::Audio,
+            Kind::Text => FileIcon::Text,
+            Kind::Epub => FileIcon::Book,
+            Kind::Pdf => FileIcon::Pdf,
+            Kind::Script => FileIcon::Script,
+            Kind::Other => {
+                let game = slot_store::Platform::ALL
+                    .into_iter()
+                    .filter(|p| !matches!(p, slot_store::Platform::Ports | slot_store::Platform::Apps))
+                    .any(|p| p.accepts(&self.path));
+                let ext = self.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                match (game, ext.to_ascii_lowercase().as_str()) {
+                    (_, "zip" | "7z" | "rar" | "tar" | "gz") => FileIcon::Archive,
+                    (true, _) => FileIcon::Game,
+                    _ => FileIcon::Other,
+                }
+            }
+        }
+    }
+
+    /// Its size as the file manager says it: "1.4 MB", or "12 items" for a folder.
+    pub fn size_text(&self) -> String {
+        match self.kind {
+            Kind::Folder => match self.size {
+                0 => "Empty".into(),
+                1 => "1 item".into(),
+                n => format!("{n} items"),
+            },
+            _ => bytes_text(self.size),
+        }
+    }
+
+    /// The day it was last changed: "24 Nov 2026".
+    pub fn date_text(&self) -> String {
+        const MONTHS: [&str; 12] = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
+        let Some(secs) = self.modified else {
+            return String::new();
+        };
+        let (y, m, d) = slot_store::civil_from_days(secs.div_euclid(86_400));
+        format!("{d} {} {y}", MONTHS[(m as usize).clamp(1, 12) - 1])
+    }
+}
+
+/// `n` bytes the way people say it: "980 B", "12 KB", "1.4 MB", "3.2 GB".
+pub fn bytes_text(n: u64) -> String {
+    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
+    if n < 1024 {
+        return format!("{n} B");
+    }
+    let mut v = n as f64 / 1024.0;
+    let mut unit = 0;
+    while v >= 1024.0 && unit + 1 < UNITS.len() {
+        v /= 1024.0;
+        unit += 1;
+    }
+    match v < 10.0 {
+        true => format!("{v:.1} {}", UNITS[unit]),
+        false => format!("{v:.0} {}", UNITS[unit]),
+    }
 }
 
 /// A folder's contents: folders first, then files, each in name order, hidden ones left out.
@@ -71,10 +147,30 @@ pub fn list(dir: &Path, only: Option<&[Kind]>) -> Vec<Entry> {
         .filter_map(|path| {
             let name = path.file_name()?.to_str()?.to_owned();
             let kind = Kind::of(&path);
-            Some(Entry { name, path, kind })
+            Some(Entry {
+                name,
+                path,
+                kind,
+                size: 0,
+                modified: None,
+            })
         })
         .filter(|e| e.kind == Kind::Folder || only.is_none_or(|k| k.contains(&e.kind)))
         .collect();
+    for e in &mut entries {
+        let meta = std::fs::metadata(&e.path).ok();
+        e.modified = meta
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64);
+        e.size = match e.kind {
+            Kind::Folder => std::fs::read_dir(&e.path)
+                .map(|d| d.flatten().filter(|c| !slot_store::is_hidden(&c.path())).count() as u64)
+                .unwrap_or(0),
+            _ => meta.map_or(0, |m| m.len()),
+        };
+    }
     entries.sort_by(|a, b| {
         (a.kind != Kind::Folder)
             .cmp(&(b.kind != Kind::Folder))
@@ -142,6 +238,25 @@ impl Browser {
         true
     }
 
+    /// Lists the folder again, after something in it changed, keeping the cursor near where it
+    /// was, on `select` if that is in it.
+    pub fn reload(&mut self, select: Option<&Path>) {
+        self.entries = list(&self.dir, self.only);
+        if let Some(at) = select.and_then(|p| self.entries.iter().position(|e| e.path == p)) {
+            self.cursor = at;
+        }
+        self.cursor = self.cursor.min(self.entries.len().saturating_sub(1));
+    }
+
+    /// The folders from the top down to this one, the top named `top`.
+    pub fn crumbs(&self, top: &str) -> Vec<String> {
+        let mut crumbs = vec![top.to_string()];
+        if let Ok(rest) = self.dir.strip_prefix(&self.top) {
+            crumbs.extend(rest.iter().map(|p| p.to_string_lossy().into_owned()));
+        }
+        crumbs
+    }
+
     /// The folder as the page's status says it, from the top.
     pub fn place(&self) -> String {
         match self.dir.strip_prefix(&self.top) {
@@ -162,4 +277,12 @@ impl Browser {
         let at = files.iter().position(|p| p == path).unwrap_or(0);
         (files, at)
     }
+}
+
+/// The first picture in `dir`, for a folder's tile in the gallery.
+pub fn first_picture(dir: &Path) -> Option<PathBuf> {
+    list(dir, Some(&[Kind::Picture]))
+        .into_iter()
+        .find(|e| e.kind == Kind::Picture)
+        .map(|e| e.path)
 }

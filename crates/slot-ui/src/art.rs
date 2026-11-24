@@ -120,6 +120,17 @@ fn box_average(src: &[u8], sw: u32, sh: u32, x0: f32, y0: f32, x1: f32, y1: f32)
     out
 }
 
+/// `src` fitted whole inside `w` by `h`, keeping its shape: the scaled picture and its size.
+pub(crate) fn fit_rgba(src: &[u8], sw: u32, sh: u32, w: u32, h: u32) -> Option<(Vec<u8>, u32, u32)> {
+    if sw == 0 || sh == 0 {
+        return None;
+    }
+    let scale = (w as f32 / sw as f32).min(h as f32 / sh as f32);
+    let fw = ((sw as f32 * scale).round() as u32).clamp(1, w);
+    let fh = ((sh as f32 * scale).round() as u32).clamp(1, h);
+    Some((cover_rgba(src, sw, sh, fw, fh)?, fw, fh))
+}
+
 /// A PNG's width and height, from its header alone.
 pub fn png_size(path: &Path) -> Option<(u32, u32)> {
     let mut head = [0u8; 24];
@@ -137,6 +148,17 @@ fn decode(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
     decode_bytes(&bytes)
 }
 
+/// A picture on the card decoded no larger than it need be to fill `w` by `h`: a JPEG is
+/// decoded at a half, a quarter or an eighth of its size where that is still enough, which is
+/// what makes a camera's photos quick to show.
+pub(crate) fn decode_near(path: &Path, w: u32, h: u32) -> Option<(Vec<u8>, u32, u32)> {
+    let bytes = std::fs::read(path).ok()?;
+    match bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        true => decode_jpeg_at(&bytes, Some((w, h))),
+        false => decode_png(&bytes),
+    }
+}
+
 /// A PNG or a JPEG, told apart by its first bytes rather than its name.
 pub fn decode_bytes(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     match bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
@@ -148,8 +170,16 @@ pub fn decode_bytes(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
 /// A JPEG as RGBA, as most wallpapers come. Bounded like a PNG: a picture past 16 million pixels
 /// is refused rather than held.
 fn decode_jpeg_bytes(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+    decode_jpeg_at(bytes, None)
+}
+
+fn decode_jpeg_at(bytes: &[u8], near: Option<(u32, u32)>) -> Option<(Vec<u8>, u32, u32)> {
     let mut dec = jpeg_decoder::Decoder::new(bytes);
     dec.read_info().ok()?;
+    if let Some((w, h)) = near {
+        let fit = |n: u32| n.clamp(1, u32::from(u16::MAX)) as u16;
+        dec.scale(fit(w), fit(h)).ok()?;
+    }
     let info = dec.info()?;
     let (w, h) = (u32::from(info.width), u32::from(info.height));
     if w == 0 || h == 0 || w as u64 * h as u64 > 16 << 20 {
