@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -42,6 +42,23 @@ const COST_BLEND: u32 = 4;
 const SNAPSHOT_EVERY: u32 = 2;
 
 const STALL: Duration = Duration::from_millis(25);
+
+/// How long the emu thread may stay in one round of its loop before its core is taken to have
+/// hung: longer than any core call slot waits out itself, a standalone emulator's 20 s save.
+/// Retro8 never comes back from 4 Giga Boss Fights' first frame, and slot waited on it for good.
+const WEDGED_MS: u64 = if cfg!(test) { 300 } else { 30_000 };
+
+/// How often a wait on the emu thread looks to see whether its core has hung.
+const REPLY_POLL: Duration = Duration::from_millis(100);
+
+/// A hung core was left running on its thread. Nothing frees it or the core's library short of
+/// slot starting again, and an in-process core cannot open beside it.
+static ABANDONED: AtomicBool = AtomicBool::new(false);
+
+/// Whether a hung core has been left running, for slot to start again once its cart is out.
+pub fn abandoned() -> bool {
+    ABANDONED.load(Ordering::Relaxed)
+}
 
 const RATE_WINDOW: u32 = 300;
 
@@ -155,6 +172,10 @@ struct Shared {
     have_generation: AtomicU64,
     resume_refused: AtomicBool,
     sav_refused: AtomicBool,
+    /// When the emu thread last came round its loop, in `boot_time` ms.
+    beat: AtomicU64,
+    /// The core's hang has been said in the log.
+    wedged: AtomicBool,
     link_lost: AtomicBool,
     linked: AtomicU64,
     peer_ended: AtomicBool,
@@ -173,6 +194,40 @@ struct Shared {
 struct Clock {
     tick: u64,
     done: u64,
+}
+
+impl Shared {
+    fn beat(&self) {
+        self.beat
+            .store(crate::boot_time::ms() as u64, Ordering::Relaxed);
+    }
+
+    /// Whether the running core has kept the emu thread in one call for over `WEDGED_MS`.
+    fn wedged(&self) -> bool {
+        if self.state.load(Ordering::Acquire) != CoreState::Ready as u8 {
+            return false;
+        }
+        let since = self.beat.load(Ordering::Relaxed);
+        let wedged = (crate::boot_time::ms() as u64).saturating_sub(since) > WEDGED_MS;
+        if wedged && !self.wedged.swap(true, Ordering::Relaxed) {
+            eprintln!(
+                "slot: emu: the core has not come back from a call in {} s, leaving it",
+                WEDGED_MS / 1000
+            );
+        }
+        wedged
+    }
+
+    /// The emu thread's answer, or None once it is gone or its core has hung.
+    fn reply<T>(&self, rx: &Receiver<T>) -> Option<T> {
+        loop {
+            match rx.recv_timeout(REPLY_POLL) {
+                Ok(v) => return Some(v),
+                Err(RecvTimeoutError::Timeout) if !self.wedged() => {}
+                Err(_) => return None,
+            }
+        }
+    }
 }
 
 impl EmuHandle {
@@ -229,6 +284,8 @@ impl EmuHandle {
             have_generation: AtomicU64::new(0),
             resume_refused: AtomicBool::new(false),
             sav_refused: AtomicBool::new(false),
+            beat: AtomicU64::new(0),
+            wedged: AtomicBool::new(false),
             link_lost: AtomicBool::new(false),
             linked: AtomicU64::new(0),
             peer_ended: AtomicBool::new(false),
@@ -517,6 +574,7 @@ impl EmuHandle {
     pub fn state(&self) -> CoreState {
         match self.shared.state.load(Ordering::Acquire) {
             0 => CoreState::Loading,
+            1 if self.shared.wedged() => CoreState::Failed,
             1 => CoreState::Ready,
             _ => CoreState::Failed,
         }
@@ -554,19 +612,19 @@ impl Snapshot for EmuSnapshot {
     fn state(&self) -> Option<Vec<u8>> {
         let (tx, rx) = channel();
         request(&self.cmds, &self.shared, Cmd::Save(tx)).then_some(())?;
-        rx.recv().ok()
+        self.shared.reply(&rx)
     }
 
     fn save_ram(&self) -> Option<Vec<u8>> {
         let (tx, rx) = channel();
         request(&self.cmds, &self.shared, Cmd::Sav(tx)).then_some(())?;
-        rx.recv().ok().flatten()
+        self.shared.reply(&rx).flatten()
     }
 
     fn thumb(&self) -> Option<Vec<u8>> {
         let (tx, rx) = channel();
         request(&self.cmds, &self.shared, Cmd::Thumb(tx)).then_some(())?;
-        rx.recv().ok().flatten()
+        self.shared.reply(&rx).flatten()
     }
 
     fn load(&self, state: Vec<u8>) {
@@ -586,7 +644,7 @@ impl Snapshot for EmuSnapshot {
         if !request(&self.cmds, &self.shared, Cmd::PauseWait(tx)) {
             return 0;
         }
-        rx.recv().unwrap_or(0)
+        self.shared.reply(&rx).unwrap_or(0)
     }
 }
 
@@ -610,6 +668,11 @@ impl Drop for EmuHandle {
     fn drop(&mut self) {
         eprintln!("slot: emu: stopping at {:.1} ms", crate::boot_time::ms());
         self.shared.stop.store(true, Ordering::Relaxed);
+        if self.shared.wedged() {
+            // Its thread never comes back to be joined: it is left as it is.
+            ABANDONED.store(true, Ordering::Relaxed);
+            return;
+        }
         if let Some(join) = self.join.take() {
             let _ = join.join();
         }
@@ -696,6 +759,7 @@ impl Worker {
         let mut period = frame_period(av.fps);
         let mut resampler = Resampler::new(core_hz(av, period), device_hz);
         ring.clear_faults();
+        self.shared.beat();
         self.shared
             .state
             .store(CoreState::Ready as u8, Ordering::Release);
@@ -732,6 +796,7 @@ impl Worker {
         let mut tracker: Option<Tracker> = None;
         let mut iteration = 0i64;
         while !self.shared.stop.load(Ordering::Relaxed) {
+            self.shared.beat();
             iteration += 1;
             let _iter = ft::span(ev::EMU_ITER, iteration);
             if core.gone() {
@@ -1170,6 +1235,7 @@ impl Worker {
                         }
                         Wait::Request => {
                             ft::instant(ev::EMU_WAIT_REQUEST, served as i64);
+                            self.shared.beat();
                             for cmd in self.cmds.try_iter() {
                                 self.command(
                                     cmd,
@@ -1668,6 +1734,72 @@ mod tests {
     use slot_retro::{LoopbackLink, MockCore};
 
     const PANEL: Duration = Duration::from_micros(16_760);
+
+    /// Retro8 on 4 Giga Boss Fights: a first frame that never ends.
+    struct Hangs(MockCore);
+
+    impl RetroCore for Hangs {
+        fn load(&mut self, rom: &Path) -> Result<(), CoreError> {
+            self.0.load(rom)
+        }
+        fn run_frame(&mut self, _input: ButtonMask) {
+            loop {
+                std::thread::park();
+            }
+        }
+        fn video_xrgb8888(&self) -> &[u8] {
+            self.0.video_xrgb8888()
+        }
+        fn take_audio(&mut self) -> Vec<i16> {
+            self.0.take_audio()
+        }
+        fn serialize(&mut self) -> Result<Vec<u8>, CoreError> {
+            self.0.serialize()
+        }
+        fn unserialize(&mut self, data: &[u8]) -> Result<(), CoreError> {
+            self.0.unserialize(data)
+        }
+        fn save_ram(&self) -> Option<Vec<u8>> {
+            self.0.save_ram()
+        }
+        fn load_save_ram(&mut self, data: &[u8]) -> Result<(), CoreError> {
+            self.0.load_save_ram(data)
+        }
+        fn av_info(&self) -> AvInfo {
+            self.0.av_info()
+        }
+    }
+
+    #[test]
+    fn a_hung_core_fails_and_is_left_without_holding_up_the_frontend() {
+        use crate::audio::{AudioSink, StubSink};
+        let mut sink = StubSink::new();
+        sink.open(32_768).expect("the stub refused to open");
+        let emu = EmuHandle::spawn(
+            Box::new(Hangs(MockCore::new())),
+            PathBuf::from("mock"),
+            sink.ring(),
+            None,
+            None,
+        );
+        emu.set_speed(Speed::Normal);
+        let began = Instant::now();
+        while emu.state() != CoreState::Failed {
+            assert!(
+                began.elapsed() < Duration::from_secs(5),
+                "a hung core was never failed"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let snapshot = emu.snapshot();
+        let asked = Instant::now();
+        assert_eq!(snapshot.state(), None);
+        assert_eq!(snapshot.save_ram(), None);
+        assert_eq!(snapshot.pause_wait(), 0);
+        assert!(asked.elapsed() < Duration::from_secs(2));
+        drop(emu);
+        assert!(abandoned(), "the hung core's thread was not left");
+    }
 
     #[test]
     fn a_core_near_sixty_hertz_runs_at_the_panels_rate() {

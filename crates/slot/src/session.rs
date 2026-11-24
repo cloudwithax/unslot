@@ -524,6 +524,10 @@ impl Session {
         let stem = match self.app.phase() {
             Phase::Shelf => {
                 self.emu = None;
+                // A hung core's thread is still running it, so slot starts again to be rid of it.
+                if crate::emu::abandoned() {
+                    self.app.begin_reload();
+                }
                 return;
             }
             Phase::Inserting { cart, .. } => cart.clone(),

@@ -9485,7 +9485,7 @@ impl App {
         self.set_led(LedState::Off);
     }
 
-    fn begin_reload(&mut self) {
+    pub fn begin_reload(&mut self) {
         if self.shutting_down() {
             return;
         }

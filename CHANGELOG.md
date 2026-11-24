@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A core that hangs no longer hangs slot with it. Retro8 never comes back from the first frame of some PICO-8 carts, such as 4 Giga Boss Fights, and Exit Game or a held Menu then waited on it for good, with the screen on and every button dead; a forced power-off left the cart in, so it hung again at the next boot. Now a core that has not come back from a call in 30 seconds is left where it is: its cart comes out with the alert of a game that would not open, and slot starts again on the shelf, as nothing else frees the core. fake-08, PICO-8's default core since v2.17.0, plays 4 Giga Boss Fights.
+
 ## v2.17.1
 
 - TrimUI A133P only: DraStic and PPSSPP run inside slot, with its in-game menu, states and Exit Game. v2.17.0's A133P card carried their shims from an `a133p-cores` built before `tools/bridge`, so each emulator drew straight over slot's last frame and Menu never reached slot. The release now refuses a shim without the bridge (`tools/a133p/check-card.sh`).
