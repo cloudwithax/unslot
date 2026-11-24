@@ -63,6 +63,9 @@ struct Host {
     options: std::collections::HashMap<String, std::ffi::CString>,
     options_dirty: bool,
     declared: std::collections::HashMap<String, Vec<String>>,
+    /// Each declared option's first value, its default, for a key slot never set: the core asks
+    /// for it as RetroArch would answer, and PCSX-ReARMed leaves its memory cards out without.
+    defaults: std::collections::HashMap<String, std::ffi::CString>,
     /// Each declared option's key and what the core calls it, in the order it gave them.
     labels: Vec<(String, String)>,
     /// The context of a core that draws with the GPU.
@@ -243,16 +246,18 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             let Ok(key) = std::ffi::CStr::from_ptr(var.key).to_str() else {
                 return false;
             };
-            with_host(|h| match h.options.get(key) {
-                Some(value) => {
-                    var.value = value.as_ptr();
-                    true
-                }
-                None => {
-                    var.value = ptr::null();
-                    false
-                }
-            })
+            with_host(
+                |h| match h.options.get(key).or_else(|| h.defaults.get(key)) {
+                    Some(value) => {
+                        var.value = value.as_ptr();
+                        true
+                    }
+                    None => {
+                        var.value = ptr::null();
+                        false
+                    }
+                },
+            )
             .unwrap_or(false)
         }
         GET_VARIABLE_UPDATE => {
@@ -270,6 +275,7 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             if data.is_null() {
                 return with_host(|h| {
                     h.declared.clear();
+                    h.defaults.clear();
                     h.labels.clear();
                 })
                 .is_some();
@@ -303,6 +309,10 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
                 p = p.add(1);
             }
             with_host(|h| {
+                h.defaults = list
+                    .iter()
+                    .filter_map(|(k, v)| Some((k.clone(), CString::new(v.first()?.as_str()).ok()?)))
+                    .collect();
                 h.declared = list;
                 h.labels = labels;
             })
@@ -967,6 +977,7 @@ impl LibretroCore {
                 .collect(),
             options_dirty: false,
             declared: std::collections::HashMap::new(),
+            defaults: std::collections::HashMap::new(),
             labels: Vec::new(),
             hw: None,
             memory_maps: MemoryMaps::default(),
@@ -1383,6 +1394,7 @@ mod tests {
             options,
             options_dirty,
             declared: HashMap::new(),
+            defaults: HashMap::new(),
             labels: Vec::new(),
             hw: None,
             memory_maps: MemoryMaps::default(),
@@ -1489,6 +1501,44 @@ mod tests {
 
         assert!(!ok);
         assert!(var.value.is_null());
+    }
+
+    #[test]
+    fn get_variable_answers_a_declared_option_slot_never_set_with_its_default() {
+        let mut options = HashMap::new();
+        options.insert(
+            "pcsx_rearmed_memcard2".to_string(),
+            CString::new("disabled").unwrap(),
+        );
+        let mut host = host_with(options, false);
+        let (a, _ak, _av) = declaration(
+            "pcsx_rearmed_memcard1",
+            "Memory Card 1; libretro|shared|disabled",
+        );
+        let (b, _bk, _bv) = declaration("pcsx_rearmed_memcard2", "Memory Card 2; shared|disabled");
+        let list = [a, b, end_of_list()];
+        let _active = Active::bind(&mut host);
+        assert!(unsafe { environment(SET_VARIABLES, list.as_ptr() as *mut c_void) });
+
+        let ask = |key: &str| {
+            let key = CString::new(key).unwrap();
+            let mut var = Variable {
+                key: key.as_ptr(),
+                value: ptr::null(),
+            };
+            let ok = unsafe { environment(GET_VARIABLE, &mut var as *mut Variable as *mut c_void) };
+            assert!(ok);
+            unsafe { CStr::from_ptr(var.value) }
+                .to_str()
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(ask("pcsx_rearmed_memcard1"), "libretro");
+        assert_eq!(
+            ask("pcsx_rearmed_memcard2"),
+            "disabled",
+            "the default beat what slot set"
+        );
     }
 
     #[test]
