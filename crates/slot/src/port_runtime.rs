@@ -115,7 +115,7 @@ fn names(runtimes: &[Runtime]) -> String {
     }
 }
 
-fn free_bytes(dir: &Path) -> Option<u64> {
+pub(crate) fn free_bytes(dir: &Path) -> Option<u64> {
     use std::os::unix::ffi::OsStrExt;
     let path = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
     let mut fs: libc::statvfs = unsafe { std::mem::zeroed() };

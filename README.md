@@ -42,7 +42,7 @@ Join the [unslot Discord](https://discord.gg/uBZPeKrmyQ) for questions, sharing 
 - **Apps:** Files, Books, Manuals, Gallery and Music on their own shelf, and PortMaster-style ports in `Ports` on theirs, as discs.
 - **Cast to a TV** over Wi-Fi, to a Chromecast or Google TV, or to a Miracast TV over Wi-Fi Direct.
 - **Controls:** remap the game's buttons for every game, for one system or for one game, and use the D-pad as the left stick on handhelds without one.
-- **Upload from Phone:** scan a code to send the card a game, a wallpaper or a bezel from a phone on the same Wi-Fi.
+- **Upload from Phone:** scan a code to send the card any file or folder, a wallpaper or a bezel from a phone or computer on the same Wi-Fi. Sort for Me puts games on their shelves and music, books, pictures and videos where their apps read; or pick any folder on the card.
 - **Wallpapers:** a bundled set, or any PNG or JPG of your own.
 
 Everything slot does is still here: the carts, the shelves, the link cable, the in-game menu and the save handling.

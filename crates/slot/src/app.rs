@@ -5217,6 +5217,15 @@ impl App {
                     format!("{name} is the {} bezel now", platform.name())
                 }
                 Landed::Bezel(_, name) => format!("{name} is beside its bezel"),
+                // A port or an app's file may have landed where a shelf reads.
+                Landed::File(path) => {
+                    self.rescan();
+                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                    match path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+                        Some(dir) => format!("{name} is in {}", dir.display()),
+                        None => format!("{name} is on the card"),
+                    }
+                }
             };
             if let Phase::Upload { note: at } = &mut self.phase {
                 *at = Some(note);
@@ -5869,7 +5878,7 @@ impl App {
                 title: "Upload from Phone".into(),
                 status: match (note, self.upload_url()) {
                     (Some(note), _) => note.clone(),
-                    (None, Some(_)) => "Scan to send games, bezels or wallpapers".into(),
+                    (None, Some(_)) => "Scan to send files, bezels or wallpapers".into(),
                     (None, None) => "Waiting for an address on the Wi-Fi".into(),
                 },
                 url: self.upload_url().unwrap_or_default(),

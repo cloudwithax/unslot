@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Upload from Phone sends any file, or a whole folder, not just games. Sort for Me, the default, puts a game on the shelf of the one system that takes it, music in Music, books in Books, pictures and videos in Pictures and anything else in Downloads, keeping the folders they came in; or walk the card's folders on the page, make a new one, and send there. A file the card has no room for is turned away before it is written.
 - PlayStation games have their memory cards again. slot answered a core asking for an option it had never set with nothing, where RetroArch answers with the option's default, and PCSX-ReARMed took no answer to mean no memory card in either slot, so no game could save and nothing was written to Saves/PS. A core now gets the default it declared for every option slot leaves alone.
 - A core that hangs no longer hangs slot with it. Retro8 never comes back from the first frame of some PICO-8 carts, such as 4 Giga Boss Fights, and Exit Game or a held Menu then waited on it for good, with the screen on and every button dead; a forced power-off left the cart in, so it hung again at the next boot. Now a core that has not come back from a call in 30 seconds is left where it is: its cart comes out with the alert of a game that would not open, and slot starts again on the shelf, as nothing else frees the core. fake-08, PICO-8's default core since v2.17.0, plays 4 Giga Boss Fights.
 
