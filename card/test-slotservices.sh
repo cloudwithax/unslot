@@ -38,6 +38,9 @@ reset() {
 	make_fake "$TMP/bin/ip" "$TMP/ip.log"
 	make_fake "$TMP/svc/samba/bin/smbpasswd" "$TMP/smbpasswd.log" "cat > \"$TMP/smbpasswd.in\""
 	make_fake "$TMP/svc/samba/bin/smbd" "$TMP/smbd.log" "sleep 30 & echo \$! > \"$TMP/run/slotsamba/smbd-smb.conf.pid\""
+	mkdir -p "$TMP/svc/samba/lib/vfs"
+	: > "$TMP/svc/samba/lib/vfs/streams_xattr.so"
+	: > "$TMP/svc/samba/lib/vfs/xattr_tdb.so"
 	# tailscaled stays up and opens its socket; as the CLI it says what it was asked.
 	make_fake "$TMP/svc/tailscaled" "$TMP/tailscaled.log" \
 		"[ \"\${TS_BE_CLI:-}\" = 1 ] && exit 0" \
@@ -89,6 +92,10 @@ echo 'pw' | run samba on /mnt/card || fail "samba on failed"
 grep -q 'path = /mnt/card' "$TMP/run/slotsamba/smb.conf" || fail "the card is not what is shared"
 grep -q 'max protocol = SMB2' "$TMP/run/slotsamba/smb.conf" || fail "SMB1 is still offered"
 grep -q 'guest ok = no' "$TMP/run/slotsamba/smb.conf" || fail "guests can get in"
+grep -q "vfs objects = $TMP/svc/samba/lib/vfs/streams_xattr.so $TMP/svc/samba/lib/vfs/xattr_tdb.so" \
+	"$TMP/run/slotsamba/smb.conf" || fail "named streams VFS modules were not wired"
+grep -q "xattr_tdb:file = $TMP/run/slotsamba/lock/xattr.tdb" \
+	"$TMP/run/slotsamba/smb.conf" || fail "xattr_tdb did not point into /run"
 grep -q -- "-s -a root" "$TMP/smbpasswd.log" || fail "root was not given a Samba password"
 [ "$(cat "$TMP/smbpasswd.in")" = "$(printf 'pw\npw')" ] || fail "smbpasswd was not told the password twice"
 grep -q -- "-s $TMP/run/slotsamba/smb.conf -D" "$TMP/smbd.log" || fail "smbd was not started on slot's config"

@@ -103,7 +103,14 @@ samba_on() {
 	root="$1"
 	pw=""
 	IFS= read -r pw || [ -n "$pw" ] || { echo "no password given" >&2; return 1; }
-	alive "$SMB/smbd-smb.conf.pid" && [ "$(stamp "$root" "$pw")" = "$(cat "$SMB_STAMP" 2>/dev/null)" ] &&
+	# Apple's Files app locks a share read-only unless the server advertises named streams.
+	# xattr_tdb keeps them in /run, so streams_xattr works on FAT and exFAT cards too without
+	# leaving sidecar files on the card.
+	vfs=""
+	if [ -f "$SVC/samba/lib/vfs/streams_xattr.so" ] && [ -f "$SVC/samba/lib/vfs/xattr_tdb.so" ]; then
+		vfs="$SVC/samba/lib/vfs/streams_xattr.so $SVC/samba/lib/vfs/xattr_tdb.so"
+	fi
+	alive "$SMB/smbd-smb.conf.pid" && [ "$(stamp "$root" "$pw" "$vfs")" = "$(cat "$SMB_STAMP" 2>/dev/null)" ] &&
 		return 0
 	samba_off
 	/bin/mkdir -p "$SMB/private" "$SMB/lock"
@@ -132,12 +139,18 @@ samba_on() {
 	guest ok = no
 	valid users = root
 EOF
+	if [ -n "$vfs" ]; then
+		cat >> "$SMB/smb.conf" <<EOF
+	vfs objects = $vfs
+	xattr_tdb:file = $SMB/lock/xattr.tdb
+EOF
+	fi
 	printf '%s\n%s\n' "$pw" "$pw" |
 		LD_LIBRARY_PATH="$SVC/samba/lib" "$SVC/samba/bin/smbpasswd" -c "$SMB/smb.conf" -s -a root \
 			>/dev/null || return 1
 	LD_LIBRARY_PATH="$SVC/samba/lib" $IDLE "$SVC/samba/bin/smbd" -s "$SMB/smb.conf" -D \
 		< /dev/null > "$SMB/smbd.out" 2>&1 || { echo "smbd did not start" >&2; return 1; }
-	stamp "$root" "$pw" > "$SMB_STAMP"
+	stamp "$root" "$pw" "$vfs" > "$SMB_STAMP"
 }
 
 samba_off() {

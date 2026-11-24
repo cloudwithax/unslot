@@ -69,6 +69,9 @@ jobs:
             file "$out/System/services/$b" | grep -q aarch64
           done
           test -f "$out/System/services/samba/lib/libnsl.so.1"
+          for v in streams_xattr.so xattr_tdb.so; do
+            file "$out/System/services/samba/lib/vfs/$v" | grep -q aarch64
+          done
           test -s "$out/System/licenses/services.manifest"
           # A fork may ship other wallpapers or none; what it ships must be credited.
           if [ -n "$(ls -A assets/wallpapers 2>/dev/null)" ]; then

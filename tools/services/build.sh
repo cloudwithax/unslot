@@ -96,7 +96,8 @@ raw="https://raw.githubusercontent.com/spruceUI/spruceOS/$SPRUCE_COMMIT/spruce/b
 for f in bin/smbd bin/smbpasswd \
 	lib/libnetapi.so.0 lib/libsmbclient.so.0 lib/libsmbsharemodes.so.0 \
 	lib/libtalloc.so.2 lib/libtdb.so.1 lib/libtevent.so.0 lib/lowcase.dat lib/upcase.dat \
-	lib/auth/script.so lib/charset/CP437.so lib/charset/CP850.so lib/idmap/autorid.so; do
+	lib/auth/script.so lib/charset/CP437.so lib/charset/CP850.so lib/idmap/autorid.so \
+	lib/vfs/streams_xattr.so lib/vfs/xattr_tdb.so; do
 	mkdir -p "$OUT/samba/$(dirname "$f")"
 	curl -fsSL -o "$OUT/samba/$f" "$raw/$f"
 	note "samba/$f" "$OUT/samba/$f" "$raw/$f"

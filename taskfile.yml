@@ -328,6 +328,8 @@ tasks:
       Needs a Linux host; Go is fetched and checked if a new enough one is not on PATH
     status:
       - test -f vendor/services/services.manifest
+      - test -f vendor/services/samba/lib/vfs/streams_xattr.so
+      - test -f vendor/services/samba/lib/vfs/xattr_tdb.so
     cmds:
       - sh tools/services/build.sh vendor/services
 
