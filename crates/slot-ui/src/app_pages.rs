@@ -31,6 +31,7 @@ pub const GALLERY_ACCENT: [u8; 3] = [0x4c, 0xa8, 0xf0];
 pub const MUSIC_ACCENT: [u8; 3] = [0xe8, 0x47, 0x3f];
 pub const BOOKS_ACCENT: [u8; 3] = [0x5f, 0xc8, 0x7a];
 pub const MANUALS_ACCENT: [u8; 3] = [0xa8, 0x80, 0xf0];
+pub const PLAYTIME_ACCENT: [u8; 3] = [0x38, 0xc8, 0xb8];
 
 /// The apps' icons, from the symbols font.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -295,6 +296,35 @@ pub struct MusicPage {
     pub legends: Vec<Legend>,
 }
 
+/// One game's row on the Playtime screen.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct PlaytimeRow {
+    /// Short system badge: "GBA", "PS", "SNES".
+    pub system: String,
+    /// Clean game title.
+    pub name: String,
+    /// Formatted duration: "14h 32m", "45m".
+    pub duration: String,
+    /// Secondary detail: "12 plays · Today".
+    pub detail: String,
+    /// Share of the most-played game, 0.0..=1.0.
+    pub share: f32,
+}
+
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct PlaytimePage {
+    /// Header right-hand sort label: "Most played", "Recent", "A-Z".
+    pub sort: String,
+    /// Summary bar left: e.g. "Total 18h 42m · 12 games · 64 plays".
+    pub summary: String,
+    /// Summary bar right: RetroShelf status badge when linked.
+    pub sync_badge: String,
+    pub rows: Vec<PlaytimeRow>,
+    pub cursor: usize,
+    pub status: String,
+    pub legends: Vec<Legend>,
+}
+
 /// What a video shows over its picture while a button has been pressed lately, or it is paused.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct VideoOsd {
@@ -313,6 +343,7 @@ pub enum AppPage {
     Library(LibraryPage),
     Reader(ReaderPage),
     Music(MusicPage),
+    Playtime(PlaytimePage),
 }
 
 impl AppPage {
@@ -325,6 +356,7 @@ impl AppPage {
             AppPage::Library(p) => p.draw(&mut s),
             AppPage::Reader(p) => p.draw(&mut s),
             AppPage::Music(p) => p.draw(&mut s),
+            AppPage::Playtime(p) => p.draw(&mut s),
         }
         s.face()
     }
@@ -751,6 +783,121 @@ impl MusicPage {
             1 => "1 track".into(),
             n => format!("{n} tracks"),
         }
+    }
+}
+
+const PLAYTIME_ROW_H: u32 = 48;
+const PLAYTIME_ROWS: usize = 6;
+
+impl PlaytimePage {
+    pub fn first_shown(&self) -> usize {
+        first_shown(self.rows.len(), self.cursor, PLAYTIME_ROWS, 1)
+    }
+
+    fn draw(&self, s: &mut Sheet) {
+        chrome(s, PLAYTIME_ACCENT, Glyph::Game, "Playtime", &self.sort);
+        let sy = HEAD_H + 1;
+        s.fill((0, sy, W, CRUMB_H), [0x1b, 0x1b, 0x21, 0xff]);
+        s.fill((0, sy + CRUMB_H, W, 1), RULE);
+        let right_w = if self.sync_badge.is_empty() { 0 } else { 210 };
+        s.text(
+            (PAD, sy, W - 2 * PAD - right_w, CRUMB_H),
+            &self.summary,
+            INK,
+            14.0,
+            Align::Left,
+        );
+        if !self.sync_badge.is_empty() {
+            s.text(
+                (W - PAD - right_w, sy, right_w, CRUMB_H),
+                &self.sync_badge,
+                opaque(PLAYTIME_ACCENT),
+                13.0,
+                Align::Right,
+            );
+        }
+
+        let top = HEAD_H + CRUMB_H + 6;
+        if self.rows.is_empty() {
+            s.glyph(Glyph::Game, W / 2, top + 96, 64.0, FAINT);
+            s.text(
+                (0, top + 138, W, 28),
+                "No playtime recorded yet",
+                DIM,
+                16.0,
+                Align::Centre,
+            );
+            s.text(
+                (0, top + 166, W, 24),
+                "Play any game to start tracking",
+                FAINT,
+                13.0,
+                Align::Centre,
+            );
+        }
+        let first = self.first_shown();
+        for (slot, (at, row)) in self
+            .rows
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(PLAYTIME_ROWS)
+            .enumerate()
+        {
+            let y = top + slot as u32 * PLAYTIME_ROW_H;
+            let lit = at == self.cursor;
+            if lit {
+                s.round(
+                    (8, y + 1, W - 30, PLAYTIME_ROW_H - 2),
+                    9,
+                    tinted(PLAYTIME_ACCENT, 0x2a),
+                );
+                s.round(
+                    (8, y + 10, 4, PLAYTIME_ROW_H - 20),
+                    2,
+                    opaque(PLAYTIME_ACCENT),
+                );
+            }
+            s.round(
+                (20, y + 12, 60, 24),
+                6,
+                if lit {
+                    tinted(PLAYTIME_ACCENT, 0x44)
+                } else {
+                    PANEL
+                },
+            );
+            s.text(
+                (20, y + 12, 60, 24),
+                &row.system,
+                if lit { opaque(PLAYTIME_ACCENT) } else { DIM },
+                11.0,
+                Align::Centre,
+            );
+            s.text((90, y + 4, 410, 24), &row.name, INK, 16.0, Align::Left);
+            s.text(
+                (510, y + 4, 134, 24),
+                &row.duration,
+                if lit { opaque(PLAYTIME_ACCENT) } else { INK },
+                15.0,
+                Align::Right,
+            );
+            s.bar((90, y + 34, 330, 5), row.share, PLAYTIME_ACCENT);
+            s.text((430, y + 27, 214, 18), &row.detail, DIM, 12.0, Align::Right);
+        }
+        s.scrollbar(
+            (
+                W - 14,
+                top + 4,
+                4,
+                PLAYTIME_ROWS as u32 * PLAYTIME_ROW_H - 8,
+            ),
+            first,
+            PLAYTIME_ROWS,
+            self.rows.len(),
+            PLAYTIME_ACCENT,
+        );
+        footer(s, &self.status, &self.legends);
     }
 }
 

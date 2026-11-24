@@ -293,6 +293,7 @@ fn up_and_down_move_the_bar_and_wrap_at_the_ends() {
         QuickRow::Game,
         QuickRow::Network,
         QuickRow::Online,
+        QuickRow::Playtime,
         QuickRow::Power,
         QuickRow::About,
         QuickRow::General,
@@ -1094,8 +1095,15 @@ fn the_pointer_stands_left_of_the_selected_row_and_only_it_is_lit() {
             ly + lh / 2.0,
             "{row:?}: the pointer is off the row"
         );
+        let first = row
+            .position(&[])
+            .saturating_sub(QUICK_ROWS_MAX / 2)
+            .min(QuickRow::MAIN.len().saturating_sub(QUICK_ROWS_MAX));
+        let visible = &QuickRow::MAIN[first..first + QUICK_ROWS_MAX.min(QuickRow::MAIN.len())];
         for other in QuickRow::MAIN.into_iter().filter(|r| *r != row) {
-            assert!(drawn(&out, label(other, false)), "{other:?} is not grey");
+            if visible.contains(&other) {
+                assert!(drawn(&out, label(other, false)), "{other:?} is not grey");
+            }
             assert!(!drawn(&out, label(other, true)), "{other:?} is lit");
         }
         press(&mut a, Btn::Down);

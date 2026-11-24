@@ -41,6 +41,8 @@ use crate::link_screen::LinkSprites;
 use crate::link_start::{link_port, LinkFail, LinkProgress, LinkStarter, LinkStep};
 use crate::loading_mark::LoadingMark;
 use crate::persist::{self, Snapshot};
+use crate::playtime::{ActiveSession, PlaytimeStore, Sort as PlaytimeSort};
+use crate::retroshelf::{Retroshelf, RetroshelfView};
 use crate::romm::{Romm, RommView};
 use crate::scrape::{EsrbScraper, EsrbView, ScrapeView, Scraper, SsState};
 use crate::services::{Services, ServicesView, SyncProgress, Tailnet, Wanted};
@@ -420,6 +422,16 @@ pub enum Phase {
         page: RommPage,
         note: Option<String>,
     },
+    /// Local playtime breakdown across all played games.
+    Playtime {
+        cursor: usize,
+        sort: PlaytimeSort,
+    },
+    /// RetroShelf account link and play-session sync.
+    Retroshelf {
+        page: RetroshelfPage,
+        note: Option<String>,
+    },
     /// Typing for the network or services page, which it goes back to at `cursor`.
     Keyboard {
         keys: Keyboard,
@@ -439,6 +451,15 @@ pub enum RommPage {
     Library { cursor: usize },
     /// One system's games, as `shelf` in the list of systems.
     Games { shelf: usize, cursor: usize },
+}
+
+/// A page of RetroShelf's.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum RetroshelfPage {
+    /// Account link, manual sync, and shortcut to Playtime.
+    Main { cursor: usize },
+    /// The QR code and user code to approve at `retroshelf.org/link`.
+    SignIn,
 }
 
 /// What the keyboard is being typed for.
@@ -774,6 +795,13 @@ pub struct App {
     romm_on_card: std::collections::HashSet<u64>,
     /// Whether the saves are to be synced with RomM once nothing is being played.
     romm_sync_due: bool,
+    playtime: PlaytimeStore,
+    active_play: Option<ActiveSession>,
+    retroshelf: Option<Retroshelf>,
+    retroshelf_view: RetroshelfView,
+    retroshelf_conf: crate::retroshelf::Conf,
+    /// Whether pending play sessions should be pushed to RetroShelf once idle and online.
+    retroshelf_sync_due: bool,
     all_carts: Vec<Cart>,
     kiosk: KioskConfig,
     esrb: HashMap<(Platform, String), Esrb>,
@@ -1062,6 +1090,12 @@ impl App {
             romm_conf: crate::romm::Conf::default(),
             romm_on_card: std::collections::HashSet::new(),
             romm_sync_due: true,
+            playtime: PlaytimeStore::default(),
+            active_play: None,
+            retroshelf: None,
+            retroshelf_view: RetroshelfView::default(),
+            retroshelf_conf: crate::retroshelf::Conf::default(),
+            retroshelf_sync_due: true,
             all_carts,
             kiosk: KioskConfig::default(),
             esrb: HashMap::new(),
@@ -1129,6 +1163,9 @@ impl App {
         app.scraper = Some(Scraper::for_card(root));
         app.romm = Some(Romm::for_card(root));
         app.romm_conf = crate::romm::read(root);
+        app.playtime = PlaytimeStore::read(root);
+        app.retroshelf_conf = crate::retroshelf::read(root);
+        app.retroshelf = Some(Retroshelf::for_card(root));
         app.ss_state = crate::scrape::ss_state(root);
         app.kiosk = read_kiosk_config(root);
         app.esrb = read_esrb_map(root);
@@ -1708,6 +1745,8 @@ impl App {
             | QuickRow::Romm
             | QuickRow::Achievements
             | QuickRow::TrophyRoom
+            | QuickRow::Retroshelf
+            | QuickRow::Playtime
             | QuickRow::Kiosk
             | QuickRow::Power
             | QuickRow::Restart
@@ -2408,7 +2447,17 @@ impl App {
             return None;
         }
         let shelf = self.shelf();
-        shelf.carts.get(shelf.index).map(slot_ui::label_text)
+        let cart = shelf.carts.get(shelf.index)?;
+        let label = slot_ui::label_text(cart);
+        let secs = self.playtime.game_secs(cart.platform, &cart.stem);
+        if secs > 0 {
+            Some(format!(
+                "{label} · {}",
+                crate::playtime::format_duration(secs)
+            ))
+        } else {
+            Some(label)
+        }
     }
 
     pub fn set_shelf_title_face(&mut self, face: TexId, w: u32) {
@@ -3347,6 +3396,7 @@ impl App {
             self.end_link();
         }
         self.close_game_menu();
+        self.finish_play_session();
         self.remember_shelf();
         self.flush_resume();
         self.settle_saves();
@@ -3760,6 +3810,14 @@ impl App {
                 },
                 format!("{page:?}"),
             ),
+            Phase::Playtime { cursor, sort } => (2, format!("{cursor}:{sort:?}")),
+            Phase::Retroshelf { page, .. } => (
+                match page {
+                    RetroshelfPage::Main { .. } => 3,
+                    RetroshelfPage::SignIn => 4,
+                },
+                format!("{page:?}"),
+            ),
             Phase::Trophies(t) => (
                 3 + usize::from(
                     matches!(t.mode, crate::trophies::TrophyViewMode::Game(_))
@@ -4027,6 +4085,8 @@ impl App {
             Phase::CoreDownloads { cursor } => self.core_downloads_input(cursor, action),
             Phase::GameArt { cursor, .. } => self.game_art_input(cursor, action),
             Phase::Romm { page, .. } => self.romm_input(page, action),
+            Phase::Playtime { cursor, sort } => self.playtime_input(cursor, sort, action),
+            Phase::Retroshelf { page, .. } => self.retroshelf_input(page, action),
             Phase::Cores { cursor } => self.cores_input(cursor, action),
             Phase::Search { cursor } => self.search_input(cursor, action),
             Phase::Kiosk { page } => self.kiosk_input(page, action),
@@ -4869,6 +4929,413 @@ impl App {
         };
         QrPage {
             title: "Sign In to RomM".into(),
+            status,
+            url,
+            legends: vec![back_legend()],
+        }
+    }
+
+    pub fn playtime(&self) -> &PlaytimeStore {
+        &self.playtime
+    }
+
+    pub fn retroshelf_conf(&self) -> &crate::retroshelf::Conf {
+        &self.retroshelf_conf
+    }
+
+    pub fn retroshelf_view(&self) -> &RetroshelfView {
+        &self.retroshelf_view
+    }
+
+    fn start_play_session(&mut self, stem: &str) {
+        let Some(cart) = self
+            .seated_cart()
+            .filter(|c| c.stem == stem)
+            .or_else(|| self.all_carts.iter().find(|c| c.stem == stem && c.platform == self.platform))
+        else {
+            return;
+        };
+        if matches!(cart.platform, Platform::Apps) {
+            return;
+        }
+        self.active_play = Some(ActiveSession::start(
+            cart.platform,
+            cart.stem.clone(),
+            cart.rom.clone(),
+            crate::playtime::now_unix(),
+        ));
+    }
+
+    fn tick_playtime(&mut self, dt: f32) {
+        let playing = matches!(self.phase, Phase::Playing { .. })
+            && self.in_game_menu.is_none()
+            && self.game_menu.is_none()
+            && !self.game_page_open()
+            && !self.shutting_down();
+        if !playing {
+            return;
+        }
+        let Some(active) = &mut self.active_play else {
+            return;
+        };
+        let Some(delta) = active.tick(dt) else {
+            return;
+        };
+        let (platform, stem, rom) = (active.platform, active.stem.clone(), active.rom.clone());
+        let root_ref = self.root.as_deref().unwrap_or_else(|| Path::new(""));
+        self.playtime.record_checkpoint(
+            platform,
+            &stem,
+            &rom,
+            root_ref,
+            delta,
+            crate::playtime::now_unix(),
+        );
+        if let Some(root) = &self.root {
+            if let Err(e) = self.playtime.write(root) {
+                eprintln!("slot: playtime: {e}");
+            }
+        }
+    }
+
+    fn finish_play_session(&mut self) {
+        let Some(active) = self.active_play.take() else {
+            return;
+        };
+        let (platform, stem, rom, started_at) = (
+            active.platform,
+            active.stem.clone(),
+            active.rom.clone(),
+            active.started_at,
+        );
+        let (total, delta) = active.finish();
+        if total == 0 {
+            return;
+        }
+        let root_ref = self.root.as_deref().unwrap_or_else(|| Path::new(""));
+        let queued = self.playtime.finish_session(
+            platform,
+            &stem,
+            &rom,
+            root_ref,
+            total,
+            delta,
+            started_at,
+            crate::playtime::now_unix(),
+        );
+        if let Some(root) = &self.root {
+            if let Err(e) = self.playtime.write(root) {
+                eprintln!("slot: playtime: {e}");
+            }
+        }
+        if queued {
+            self.retroshelf_sync_due = true;
+        }
+    }
+
+    fn playtime_input(&mut self, cursor: usize, sort: PlaytimeSort, action: Action) {
+        if matches!(action, Action::GbaDown(Btn::B) | Action::QuickMenu) {
+            self.phase = Phase::QuickMenu {
+                row: QuickRow::Playtime,
+            };
+            return;
+        }
+        if action == Action::GbaDown(Btn::X) {
+            self.phase = Phase::Retroshelf {
+                page: RetroshelfPage::Main { cursor: 0 },
+                note: None,
+            };
+            return;
+        }
+        if action == Action::GbaDown(Btn::Y) {
+            self.phase = Phase::Playtime {
+                cursor: 0,
+                sort: sort.next(),
+            };
+            return;
+        }
+        let ranked = self.playtime.ranked(sort);
+        let n = ranked.len();
+        if n == 0 {
+            return;
+        }
+        let cursor = cursor.min(n - 1);
+        let next = match action {
+            Action::GbaDown(Btn::Up) => (cursor + n - 1) % n,
+            Action::GbaDown(Btn::Down) => (cursor + 1) % n,
+            Action::GbaDown(Btn::L1) => cursor.saturating_sub(6),
+            Action::GbaDown(Btn::R1) => (cursor + 6).min(n - 1),
+            Action::GbaDown(Btn::A) => {
+                let g = ranked[cursor];
+                if let Some(platform) = crate::playtime::platform_from_dir(&g.platform) {
+                    let stem = g.stem.clone();
+                    self.go_to_game(&(platform, stem));
+                }
+                return;
+            }
+            _ => return,
+        };
+        self.phase = Phase::Playtime { cursor: next, sort };
+    }
+
+    fn playtime_page(&self, cursor: usize, sort: PlaytimeSort) -> slot_ui::PlaytimePage {
+        let now = crate::playtime::now_unix();
+        let ranked = self.playtime.ranked(sort);
+        let max_secs = ranked
+            .iter()
+            .map(|g| g.total_secs)
+            .max()
+            .unwrap_or(1)
+            .max(1);
+        let rows: Vec<slot_ui::PlaytimeRow> = ranked
+            .iter()
+            .map(|g| {
+                let platform = crate::playtime::platform_from_dir(&g.platform);
+                let system = platform
+                    .map_or(g.platform.as_str(), |p| p.dir_name())
+                    .to_string();
+                let name = platform
+                    .and_then(|p| {
+                        self.all_carts
+                            .iter()
+                            .find(|c| c.platform == p && c.stem == g.stem)
+                    })
+                    .map(slot_ui::label_text)
+                    .unwrap_or_else(|| g.stem.clone());
+                let plays = match g.sessions {
+                    0 => String::new(),
+                    1 => "1 play".into(),
+                    n => format!("{n} plays"),
+                };
+                let when = crate::playtime::format_last_played(g.last_played, now);
+                let detail = match (plays.is_empty(), when.is_empty()) {
+                    (false, false) => format!("{plays} · {when}"),
+                    (false, true) => plays,
+                    (true, false) => when,
+                    (true, true) => String::new(),
+                };
+                slot_ui::PlaytimeRow {
+                    system,
+                    name,
+                    duration: crate::playtime::format_duration(g.total_secs),
+                    detail,
+                    share: g.total_secs as f32 / max_secs as f32,
+                }
+            })
+            .collect();
+        let total = self.playtime.total_secs();
+        let n_games = rows.len();
+        let n_sess = self.playtime.total_sessions();
+        let summary = if n_games == 0 {
+            "0m · 0 games".into()
+        } else {
+            let g_word = if n_games == 1 { "game" } else { "games" };
+            let p_word = if n_sess == 1 { "play" } else { "plays" };
+            format!(
+                "Total {} · {n_games} {g_word} · {n_sess} {p_word}",
+                crate::playtime::format_duration(total)
+            )
+        };
+        let pending = self.playtime.pending_count();
+        let sync_badge = if self.retroshelf_conf.linked() {
+            if self.retroshelf_view.busy.is_some() {
+                "RetroShelf · Syncing".into()
+            } else if pending > 0 {
+                format!("RetroShelf · {pending} pending")
+            } else {
+                "RetroShelf · Synced".into()
+            }
+        } else {
+            String::new()
+        };
+        let status = self.retroshelf_status(None).unwrap_or_else(|| {
+            if self.retroshelf_conf.linked() {
+                "Synced with RetroShelf".into()
+            } else {
+                "Tracked locally".into()
+            }
+        });
+        let mut legends = vec![back_legend()];
+        if !rows.is_empty() {
+            legends.push(Legend::new(ButtonLegend::A, "Go to Game"));
+        }
+        if rows.len() > 1 {
+            legends.push(Legend::new(ButtonLegend::Y, "Sort"));
+        }
+        legends.push(Legend::new(ButtonLegend::X, "RetroShelf"));
+        slot_ui::PlaytimePage {
+            sort: sort.label().into(),
+            summary,
+            sync_badge,
+            cursor: cursor.min(rows.len().saturating_sub(1)),
+            rows,
+            status,
+            legends,
+        }
+    }
+
+    fn retroshelf_status(&self, note: Option<&str>) -> Option<String> {
+        let v = &self.retroshelf_view;
+        v.busy
+            .clone()
+            .or_else(|| note.map(str::to_string))
+            .or_else(|| v.error.clone())
+            .or_else(|| v.note.clone())
+    }
+
+    fn retroshelf_input(&mut self, page: RetroshelfPage, action: Action) {
+        let back = matches!(action, Action::GbaDown(Btn::B) | Action::QuickMenu);
+        let (page, note) = match page {
+            RetroshelfPage::Main { .. } if back => {
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::Retroshelf,
+                };
+                return;
+            }
+            RetroshelfPage::Main { cursor } => match (cursor, action) {
+                (_, Action::GbaDown(Btn::Up)) => {
+                    (RetroshelfPage::Main { cursor: (cursor + 2) % 3 }, None)
+                }
+                (_, Action::GbaDown(Btn::Down)) => {
+                    (RetroshelfPage::Main { cursor: (cursor + 1) % 3 }, None)
+                }
+                (0, Action::GbaDown(Btn::A)) if self.retroshelf_conf.linked() => {
+                    let note = match self.root.as_deref().map(crate::retroshelf::sign_out) {
+                        Some(Ok(())) => "Unlinked from RetroShelf".to_string(),
+                        Some(Err(e)) => format!("Could not unlink: {e}"),
+                        None => "No card to unlink on".to_string(),
+                    };
+                    if let Some(root) = &self.root {
+                        self.retroshelf_conf = crate::retroshelf::read(root);
+                    }
+                    if let Some(rs) = &self.retroshelf {
+                        rs.forget();
+                    }
+                    (RetroshelfPage::Main { cursor }, Some(note))
+                }
+                (0, Action::GbaDown(Btn::A)) => {
+                    if let Some(rs) = &self.retroshelf {
+                        rs.pair(&self.hostname);
+                    }
+                    (RetroshelfPage::SignIn, None)
+                }
+                (1, Action::GbaDown(Btn::A)) if !self.retroshelf_conf.linked() => (
+                    RetroshelfPage::Main { cursor },
+                    Some("Link your RetroShelf account first".into()),
+                ),
+                (1, Action::GbaDown(Btn::A)) => {
+                    if let Some(rs) = &self.retroshelf {
+                        rs.sync();
+                    }
+                    (RetroshelfPage::Main { cursor }, None)
+                }
+                (2, Action::GbaDown(Btn::A)) => {
+                    self.phase = Phase::Playtime {
+                        cursor: 0,
+                        sort: PlaytimeSort::MostPlayed,
+                    };
+                    return;
+                }
+                _ => return,
+            },
+            RetroshelfPage::SignIn if back => {
+                if let Some(rs) = &self.retroshelf {
+                    rs.stop_pairing();
+                }
+                (RetroshelfPage::Main { cursor: 0 }, None)
+            }
+            RetroshelfPage::SignIn => return,
+        };
+        self.phase = Phase::Retroshelf { page, note };
+    }
+
+    fn retroshelf_page(&self, page: RetroshelfPage, note: Option<&str>) -> ListPage {
+        let row = |label: &str, detail: String| ListRow {
+            label: label.into(),
+            detail,
+            bars: None,
+            icon: None,
+        };
+        let cursor = match page {
+            RetroshelfPage::Main { cursor } => cursor.min(2),
+            RetroshelfPage::SignIn => 0,
+        };
+        let linked = self.retroshelf_conf.linked();
+        let pending = self.playtime.pending_count();
+        let total = self.playtime.total_secs();
+        let n_games = self.playtime.ranked(PlaytimeSort::MostPlayed).len();
+        let playtime_detail = if n_games == 0 {
+            "No games yet".into()
+        } else {
+            let word = if n_games == 1 { "game" } else { "games" };
+            format!(
+                "{} · {n_games} {word}",
+                crate::playtime::format_duration(total)
+            )
+        };
+        let rows = vec![
+            row(
+                "Account",
+                if linked {
+                    "Linked".into()
+                } else {
+                    "Not linked".into()
+                },
+            ),
+            row(
+                "Sync Playtime",
+                if !linked {
+                    "Link first".into()
+                } else if pending == 0 {
+                    "Up to date".into()
+                } else {
+                    format!("{pending} pending")
+                },
+            ),
+            row("Playtime", playtime_detail),
+        ];
+        let status = self.retroshelf_status(note).unwrap_or_else(|| {
+            if linked {
+                if !self.retroshelf_conf.last_note.is_empty() {
+                    self.retroshelf_conf.last_note.clone()
+                } else {
+                    "Play sessions sync automatically when online".into()
+                }
+            } else {
+                "Link your device at retroshelf.org/link to sync playtime".into()
+            }
+        });
+        let action = match cursor {
+            0 if linked => Some("Unlink"),
+            0 => Some("Link"),
+            1 if linked => Some("Sync"),
+            1 => None,
+            _ => Some("Open"),
+        };
+        ListPage {
+            title: "RetroShelf".into(),
+            status,
+            cursor,
+            rows,
+            legends: with_action(action),
+        }
+    }
+
+    fn retroshelf_sign_in_page(&self) -> QrPage {
+        let v = &self.retroshelf_view;
+        let (status, url) = match &v.pairing {
+            Some(p) => (
+                format!("Scan to link, or enter {} at retroshelf.org/link", p.user_code),
+                p.url.clone(),
+            ),
+            None => (
+                self.retroshelf_status(None)
+                    .unwrap_or_else(|| "Asking RetroShelf for a code".into()),
+                String::new(),
+            ),
+        };
+        QrPage {
+            title: "Link RetroShelf".into(),
             status,
             url,
             legends: vec![back_legend()],
@@ -5884,6 +6351,18 @@ impl App {
             Phase::Romm { page, note } => {
                 Some(PageModel::List(self.romm_page(*page, note.as_deref())))
             }
+            Phase::Playtime { cursor, sort } => {
+                Some(PageModel::App(slot_ui::AppPage::Playtime(
+                    self.playtime_page(*cursor, *sort),
+                )))
+            }
+            Phase::Retroshelf {
+                page: RetroshelfPage::SignIn,
+                ..
+            } => Some(PageModel::Qr(self.retroshelf_sign_in_page())),
+            Phase::Retroshelf { page, note } => {
+                Some(PageModel::List(self.retroshelf_page(*page, note.as_deref())))
+            }
             Phase::TailscaleLogin => match &self.services_view.tailnet {
                 Tailnet::SignIn(url) => Some(PageModel::Qr(QrPage {
                     title: "Tailscale".into(),
@@ -6140,6 +6619,18 @@ impl App {
             QuickRow::Romm => {
                 self.phase = Phase::Romm {
                     page: RommPage::Main { cursor: 0 },
+                    note: None,
+                }
+            }
+            QuickRow::Playtime => {
+                self.phase = Phase::Playtime {
+                    cursor: 0,
+                    sort: PlaytimeSort::MostPlayed,
+                }
+            }
+            QuickRow::Retroshelf => {
+                self.phase = Phase::Retroshelf {
+                    page: RetroshelfPage::Main { cursor: 0 },
                     note: None,
                 }
             }
@@ -6494,6 +6985,8 @@ impl App {
             | QuickRow::Romm
             | QuickRow::Achievements
             | QuickRow::TrophyRoom
+            | QuickRow::Retroshelf
+            | QuickRow::Playtime
             | QuickRow::Kiosk
             | QuickRow::Power
             | QuickRow::Restart
@@ -6878,6 +7371,7 @@ impl App {
                 _ => self.buzz(BUZZ_EJECT_MS, 0),
             }
         }
+        self.tick_playtime(dt);
         if let Some(phase) = next {
             self.phase = phase;
             self.launched_dark = spawn_at > 0.0;
@@ -6888,6 +7382,9 @@ impl App {
             };
             if seated.is_none() {
                 self.link_loaded = None;
+            }
+            if let Some(stem) = &seated {
+                self.start_play_session(stem);
             }
             self.record_cart(seated);
         }
@@ -7172,6 +7669,51 @@ impl App {
                 if let Some(romm) = &self.romm {
                     romm.sync();
                 }
+            }
+        }
+        if let Some(rs) = &self.retroshelf {
+            let next = rs.view();
+            let linked = next.linked != self.retroshelf_view.linked;
+            let synced = next.synced != self.retroshelf_view.synced;
+            let failed = next.error.is_some() && next.error != self.retroshelf_view.error;
+            self.retroshelf_view = next;
+            if linked || synced {
+                if let Some(root) = &self.root {
+                    self.retroshelf_conf = crate::retroshelf::read(root);
+                    if synced && self.active_play.is_none() {
+                        self.playtime = PlaytimeStore::read(root);
+                    }
+                }
+            }
+            if (linked || failed)
+                && matches!(
+                    self.phase,
+                    Phase::Retroshelf {
+                        page: RetroshelfPage::SignIn,
+                        ..
+                    }
+                )
+            {
+                self.phase = Phase::Retroshelf {
+                    page: RetroshelfPage::Main { cursor: 0 },
+                    note: None,
+                };
+            }
+            let awake = !matches!(self.phase, Phase::Doze { .. }) && self.wifi_view.ip.is_some();
+            rs.set_awake(awake);
+            let idle = !matches!(
+                self.phase,
+                Phase::Inserting { .. }
+                    | Phase::Playing { .. }
+                    | Phase::Ejecting { .. }
+                    | Phase::Polaroids { .. }
+                    | Phase::Doze { .. }
+            );
+            if !self.retroshelf_conf.linked() || self.playtime.pending_count() == 0 {
+                self.retroshelf_sync_due = false;
+            } else if self.retroshelf_sync_due && awake && idle {
+                self.retroshelf_sync_due = false;
+                rs.sync();
             }
         }
         if let Some(scraper) = &self.esrb_scraper {
@@ -8487,6 +9029,8 @@ impl App {
             | Phase::CoreDownloads { .. }
             | Phase::GameArt { .. }
             | Phase::Romm { .. }
+            | Phase::Playtime { .. }
+            | Phase::Retroshelf { .. }
             | Phase::Cores { .. }
             | Phase::Search { .. }
             | Phase::Kiosk { .. } => {
@@ -9393,6 +9937,7 @@ impl App {
         };
         self.end_link();
         self.close_game_menu();
+        self.finish_play_session();
         self.flush_eject(&cart);
         self.romm_sync_due = true;
         self.pending = None;
@@ -9454,6 +9999,7 @@ impl App {
             return;
         }
         self.state_writer.flush();
+        self.finish_play_session();
         self.flush_resume();
         let cart = match &mut self.phase {
             Phase::Playing { cart } | Phase::Polaroids { cart } => Some(std::mem::take(cart)),
@@ -9477,10 +10023,14 @@ impl App {
         let Phase::Doze { cart } = &mut self.phase else {
             return;
         };
-        self.phase = match cart.take() {
+        let woke_cart = cart.take();
+        self.phase = match woke_cart.clone() {
             Some(cart) => Phase::Playing { cart },
             None => Phase::Shelf,
         };
+        if let Some(cart) = woke_cart {
+            self.start_play_session(&cart);
+        }
         if let Some(power) = &mut self.power {
             power.on_open();
         }
@@ -9512,6 +10062,7 @@ impl App {
         if self.shutting_down() {
             return;
         }
+        self.finish_play_session();
         self.remember_shelf();
         self.shutdown = Some((PowerChoice::Restart, self.now() + SHUTDOWN_SHOW_MS));
         self.set_led(LedState::Off);
@@ -9521,6 +10072,7 @@ impl App {
         if self.shutting_down() {
             return;
         }
+        self.finish_play_session();
         self.remember_shelf();
         self.shutdown = Some((PowerChoice::Reload, self.now() + SHUTDOWN_SHOW_MS));
         self.set_led(LedState::Off);
@@ -10172,6 +10724,7 @@ impl App {
             self.end_link();
         }
         self.close_game_menu();
+        self.finish_play_session();
         self.remember_shelf();
         self.shutdown = Some((PowerChoice::PowerOff, self.now() + SHUTDOWN_SHOW_MS));
         self.set_led(LedState::Off);

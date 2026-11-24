@@ -35,6 +35,7 @@ Join the [unslot Discord](https://discord.gg/uBZPeKrmyQ) for questions, sharing 
 - **Updates over the air**, for unslot and for BaseOS under it, with an automatic rollback if a new version never starts.
 - **Game Art** finds a label for each game online, matched by CRC and file name. It keeps going while you play, and each label shows on the shelf as soon as it is found.
 - **RomM:** sign in to your own [RomM](https://github.com/rommapp/romm) server by scanning a code, fetch its games onto the shelf or send them from RomM's web page, keep saves in step with RomM (and with Grout handhelds), and take each game's art from RomM in place of Game Art's.
+- **Playtime & RetroShelf:** tracks active playtime for every game across all systems in `Config/playtime.json`, shows a game's total time on the shelf and a ranked **Playtime** breakdown in the menu (with sort by Most played, Recent or A-Z and A to jump to any game), and optionally links to [RetroShelf](https://www.retroshelf.org) via QR code under Settings → Online → RetroShelf to sync play sessions automatically when online.
 - **Menu sounds and haptics:** recorded clicks of real buttons and switches, and a nudge of the rumble motor when a cart goes home or a setting changes. Both can be turned off in Settings → General.
 - **Search:** X on the shelf finds a game by name on every system's shelf, with each result's cart, card or disc beside it, and A takes the slot to it.
 - **RetroAchievements**, softcore or hardcore, and they keep working offline once a game's set is cached.
@@ -67,7 +68,7 @@ before it starts whether to download it from PortMaster, over Wi-Fi; runtimes ar
 BaseOS has not got may still not start; `Logs/ports.log` says why.
 
 **Settings → Online** holds Upload from Phone, Game Art, RomM, Art While Asleep, RetroAchievements,
-Updates, Cores and **Auto-Update Cores**, which fetches new builds of the cores on the card once a
+Trophy Room, RetroShelf, Updates, Cores and **Auto-Update Cores**, which fetches new builds of the cores on the card once a
 start has the Wi-Fi up. Game Art's **Clear All Art** takes every label off the card, on a second
 press. Settings → Network keeps Wi-Fi, Bluetooth, Cast and services.
 

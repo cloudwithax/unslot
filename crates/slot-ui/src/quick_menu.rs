@@ -102,6 +102,10 @@ pub enum QuickRow {
     Achievements,
     /// 3D Trophy Room displaying cached RetroAchievements sets and unlocks.
     TrophyRoom,
+    /// Local playtime summary and game rankings.
+    Playtime,
+    /// Linking and syncing playtime with RetroShelf.
+    Retroshelf,
     /// Kiosk lock settings: PIN/password, system/game restrictions, and ESRB limit.
     Kiosk,
     /// Whether RetroAchievements runs in hardcore.
@@ -124,7 +128,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 73] = [
+const GENERIC: [QuickRow; 75] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -176,6 +180,8 @@ const GENERIC: [QuickRow; 73] = [
     QuickRow::Reload,
     QuickRow::Achievements,
     QuickRow::TrophyRoom,
+    QuickRow::Playtime,
+    QuickRow::Retroshelf,
     QuickRow::Kiosk,
     QuickRow::Cast,
     QuickRow::PlayCast,
@@ -294,12 +300,13 @@ impl QuickRow {
         all
     };
 
-    pub const MAIN: [QuickRow; 7] = [
+    pub const MAIN: [QuickRow; 8] = [
         QuickRow::General,
         QuickRow::Screen,
         QuickRow::Game,
         QuickRow::Network,
         QuickRow::Online,
+        QuickRow::Playtime,
         QuickRow::Power,
         QuickRow::About,
     ];
@@ -322,13 +329,14 @@ impl QuickRow {
         QuickRow::Hostname,
     ];
 
-    pub const ONLINE: [QuickRow; 9] = [
+    pub const ONLINE: [QuickRow; 10] = [
         QuickRow::Upload,
         QuickRow::GameArt,
         QuickRow::Romm,
         QuickRow::ArtAsleep,
         QuickRow::Achievements,
         QuickRow::TrophyRoom,
+        QuickRow::Retroshelf,
         QuickRow::Updates,
         QuickRow::Cores,
         QuickRow::AutoCores,
@@ -514,6 +522,7 @@ impl QuickRow {
             | QuickRow::ArtAsleep
             | QuickRow::Achievements
             | QuickRow::TrophyRoom
+            | QuickRow::Retroshelf
             | QuickRow::Updates
             | QuickRow::Cores
             | QuickRow::AutoCores => QuickRow::ONLINE.to_vec(),
@@ -663,6 +672,8 @@ impl QuickRow {
             QuickRow::Romm => "RomM",
             QuickRow::Achievements => "RetroAchievements",
             QuickRow::TrophyRoom => "Trophy Room",
+            QuickRow::Playtime => "Playtime",
+            QuickRow::Retroshelf => "RetroShelf",
             QuickRow::Kiosk => "Kiosk Mode",
             QuickRow::Hardcore => "Hardcore Achievements",
             QuickRow::Power => "Power",
@@ -706,6 +717,8 @@ impl QuickRow {
                 | QuickRow::Romm
                 | QuickRow::Achievements
                 | QuickRow::TrophyRoom
+                | QuickRow::Playtime
+                | QuickRow::Retroshelf
                 | QuickRow::Power
                 | QuickRow::Restart
                 | QuickRow::ShutDown
