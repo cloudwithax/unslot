@@ -318,6 +318,7 @@ impl PlaytimeStore {
 
     /// Completes a session: adds any uncheckpointed seconds, increments the session count, and
     /// queues a [`SessionRecord`] when `total_session_secs >= MIN_SYNC_SECS`.
+    #[allow(clippy::too_many_arguments)]
     pub fn finish_session(
         &mut self,
         platform: Platform,

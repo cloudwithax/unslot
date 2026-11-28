@@ -1,0 +1,61 @@
+--- a/platform/libretro/libretro.cpp
++++ b/platform/libretro/libretro.cpp
+@@ -322,11 +322,7 @@
+    if (enviro_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)
+       check_variables(false);
+ 
+-    //TODO: improve this so slower hardware can play 30fps games at full speed
+-    if (_vm->getTargetFps() == 60 || frame % 2 == 0)
+-    {
+-        input_poll_cb();
+-    }
++    input_poll_cb();
+ 
+     uint8_t currKDown = 0;
+     uint8_t currKHeld = 0;
+--- a/platform/libretro/libretrohost.cpp
++++ b/platform/libretro/libretrohost.cpp
+@@ -16,7 +16,10 @@
+ 
+ 
+ 
+-static uint8_t stubCurrKDown;
++// Latch button presses across 60 Hz retro_run frames until a 30 FPS cart's _update_buttons()
++// consumes them, so presses landing on a yield frame are never dropped and repeated reads
++// within the same frame cannot double-fire btnp().
++static uint8_t stubPendingKDown;
+ static uint8_t stubCurrKHeld;
+ static bool stubCurrKBdown = false;
+ static std::string stubCurrKBkey = "";
+@@ -27,7 +30,7 @@
+ std::string _currentCartDirectory;
+ 
+ void setInputState(uint8_t kDown, uint8_t kHeld, int16_t mouseX, int16_t mouseY, uint8_t mouseBtns) {
+-    stubCurrKDown = kDown;
++    stubPendingKDown |= kDown;
+     stubCurrKHeld = kHeld;
+     stubMouseX = mouseX;
+     stubMouseY = mouseY;
+@@ -66,7 +69,10 @@
+ 
+ 
+ InputState_t Host::scanInput(){
+-    return InputState_t {stubCurrKDown, stubCurrKHeld, stubMouseX, stubMouseY, stubMouseBtns, stubCurrKBdown, stubCurrKBkey};
++    uint8_t kDown = stubPendingKDown;
++    uint8_t kHeld = stubCurrKHeld | kDown;
++    stubPendingKDown = 0;
++    return InputState_t {kDown, kHeld, stubMouseX, stubMouseY, stubMouseBtns, stubCurrKBdown, stubCurrKBkey};
+ }
+ 
+ bool Host::shouldQuit() {
+--- a/source/p8GlobalLuaFunctions.h
++++ b/source/p8GlobalLuaFunctions.h
+@@ -548,7 +548,7 @@
+                 end
+                 if _draw then
+                     _draw()
+-                    flip()
++                    yield()
+                 else
+                     yield()
+                 end

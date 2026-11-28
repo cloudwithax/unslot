@@ -345,6 +345,7 @@ pub fn cart_face_with(cart: &Cart, art: Option<Vec<u8>>) -> CartFace {
     let mut face = shell_face(&s, &shell_for(cart));
     let label = match art {
         Some(rgba) => rgba,
+        None if cart.platform == Platform::Apps => app_label(&s, &label_text(cart)),
         None => generated_label(&s, &label_text(cart)),
     };
     paste_label(&s, &mut face, &label);
@@ -730,6 +731,119 @@ fn generated_label(s: &Spec, title: &str) -> Vec<u8> {
     rgba
 }
 
+/// Built-in app cartridge label: dark matte slate ground with a subtle top accent stripe, a
+/// centred icon glyph from the symbols font, and the app name printed underneath.
+fn app_label(s: &Spec, title: &str) -> Vec<u8> {
+    use crate::app_pages::{
+        Glyph, BOOKS_ACCENT, FILES_ACCENT, GALLERY_ACCENT, MANUALS_ACCENT, MUSIC_ACCENT,
+    };
+
+    let (_, _, lw, lh) = s.label;
+    let (glyph, accent) = match title {
+        "Files" => (Glyph::Folder, FILES_ACCENT),
+        "Books" => (Glyph::Book, BOOKS_ACCENT),
+        "Manuals" => (Glyph::Text, MANUALS_ACCENT),
+        "Gallery" => (Glyph::Pictures, GALLERY_ACCENT),
+        "Music" => (Glyph::Music, MUSIC_ACCENT),
+        _ => (Glyph::Card, [0xb0, 0xb2, 0xbc]),
+    };
+
+    const GROUND: [u8; 3] = [0x22, 0x23, 0x28];
+    const BORDER: [u8; 3] = [0x16, 0x17, 0x1b];
+    const BADGE: [u8; 3] = [0x2b, 0x2c, 0x33];
+    const TITLE_INK: [u8; 3] = [0xf0, 0xed, 0xe6];
+
+    let mut rgba = Vec::with_capacity((lw * lh * 4) as usize);
+    for _ in 0..lw * lh {
+        rgba.extend_from_slice(&[GROUND[0], GROUND[1], GROUND[2], 255]);
+    }
+
+    let mut blend_px = |x: i32, y: i32, c: [u8; 3], a: u8| {
+        if a == 0 || x < 0 || y < 0 || x >= lw as i32 || y >= lh as i32 {
+            return;
+        }
+        let i = ((y as u32 * lw + x as u32) * 4) as usize;
+        let a = u32::from(a);
+        let inv = 255 - a;
+        for ch in 0..3 {
+            rgba[i + ch] =
+                ((u32::from(c[ch]) * a + u32::from(rgba[i + ch]) * inv + 127) / 255) as u8;
+        }
+        rgba[i + 3] = 255;
+    };
+
+    // Thin dark rim round the label and a muted top accent band.
+    let stripe_h = (lh / 32).max(4);
+    for y in 0..lh {
+        for x in 0..lw {
+            if y < stripe_h {
+                blend_px(x as i32, y as i32, accent, 210);
+            } else if x < 2 || x >= lw - 2 || y >= lh - 2 {
+                blend_px(x as i32, y as i32, BORDER, 255);
+            }
+        }
+    }
+
+    // Recessed rounded square behind the icon.
+    let icon_band_top = stripe_h + 10;
+    let icon_band_h = (lh * 58 / 100).saturating_sub(stripe_h);
+    let badge_side = icon_band_h.min(lw.saturating_sub(48)).max(48);
+    let bx = (lw - badge_side) / 2;
+    let by = icon_band_top + (icon_band_h.saturating_sub(badge_side)) / 2;
+    let radius = (badge_side / 6).max(8) as f32;
+    for py in 0..badge_side {
+        for px in 0..badge_side {
+            let fx = (px as f32 + 0.5).min(badge_side as f32 - (px as f32 + 0.5));
+            let fy = (py as f32 + 0.5).min(badge_side as f32 - (py as f32 + 0.5));
+            let cover = if fx < radius && fy < radius {
+                let d = (radius - fx).hypot(radius - fy);
+                (radius - d + 0.5).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            if cover > 0.0 {
+                blend_px(
+                    (bx + px) as i32,
+                    (by + py) as i32,
+                    BADGE,
+                    (cover * 255.0).round() as u8,
+                );
+            }
+        }
+    }
+
+    // Crisp app icon centred in the badge.
+    if let Some(sym) = crate::icon::symbols_font() {
+        let icon_px = (badge_side as f32 * 0.62).max(24.0);
+        let (m, cov) = sym.rasterize(glyph.char(), icon_px);
+        let cx = (bx + badge_side / 2) as i32;
+        let cy = (by + badge_side / 2) as i32;
+        let x0 = cx - m.width as i32 / 2;
+        let y0 = cy - m.height as i32 / 2;
+        for gy in 0..m.height {
+            for gx in 0..m.width {
+                let a = cov[gy * m.width + gx];
+                if a > 0 {
+                    blend_px(x0 + gx as i32, y0 + gy as i32, accent, a);
+                }
+            }
+        }
+    }
+
+    // App title centred cleanly underneath the icon badge.
+    if let Some(font) = text::label_font() {
+        let text_top = by + badge_side + 4;
+        let text_h = lh.saturating_sub(text_top + 6).max(1);
+        let max_w = lw.saturating_sub(2 * PAD) as f32;
+        let max_px = (text_h as f32 * 0.62).clamp(MIN_PX, 28.0);
+        let layout = text::fit_box(font, title, max_w, text_h as f32, 1, max_px, MIN_PX);
+        let band = (text_top * lw * 4) as usize..((text_top + text_h) * lw * 4) as usize;
+        text::draw_centred(&mut rgba[band], lw, text_h, &layout, TITLE_INK);
+    }
+
+    rgba
+}
+
 fn ink(bg: [u8; 3]) -> [u8; 3] {
     let luma = 0.2126 * bg[0] as f32 + 0.7152 * bg[1] as f32 + 0.0722 * bg[2] as f32;
     if luma > 140.0 {
@@ -795,5 +909,35 @@ mod tests {
             .filter(|(px, p)| **p < 128 && px[..3] != bg)
             .count();
         assert_eq!(off, 0, "{off} pixels of the title are off the disc");
+    }
+
+    #[test]
+    fn app_carts_use_nes_grey_shell_and_draw_an_icon_on_their_label() {
+        let cart = Cart {
+            platform: Platform::Apps,
+            stem: "Files".into(),
+            title: String::new(),
+            code: String::new(),
+            rom: PathBuf::new(),
+            label: None,
+            shell: None,
+        };
+        assert_eq!(shell_for(&cart).colour, Media::Nes.colour());
+        let s = spec(mould_of(&cart));
+        let label = app_label(&s, "Files");
+        let (_, _, lw, lh) = s.label;
+        // Upper half (inside the icon badge) must contain accented icon pixels, not just a flat
+        // text-only fill.
+        let accent = crate::app_pages::FILES_ACCENT;
+        let icon_pixels = (lh / 5..lh * 3 / 5)
+            .flat_map(|y| (lw / 4..lw * 3 / 4).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let i = ((y * lw + x) * 4) as usize;
+                label[i].abs_diff(accent[0]) < 24
+                    && label[i + 1].abs_diff(accent[1]) < 24
+                    && label[i + 2].abs_diff(accent[2]) < 24
+            })
+            .count();
+        assert!(icon_pixels > 50, "expected icon pixels, got {icon_pixels}");
     }
 }

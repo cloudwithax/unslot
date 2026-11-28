@@ -41,8 +41,17 @@ pub fn file_name(runtime: &str) -> String {
 }
 
 /// The runtimes `script`'s port says it needs, in the port.json of the folder in `ports` whose
-/// items name the script, as PortMaster installs them.
+/// items name the script, as PortMaster installs them, falling back to any `.squashfs` runtime
+/// filenames referenced directly in `script` when `port.json` is absent or names none.
 pub fn wanted(ports: &Path, script: &Path) -> Vec<String> {
+    let from_json = wanted_from_json(ports, script);
+    if !from_json.is_empty() {
+        return from_json;
+    }
+    wanted_from_script(script)
+}
+
+fn wanted_from_json(ports: &Path, script: &Path) -> Vec<String> {
     let Some(name) = script.file_name().and_then(|n| n.to_str()) else {
         return Vec::new();
     };
@@ -63,6 +72,32 @@ pub fn wanted(ports: &Path, script: &Path) -> Vec<String> {
         }
     }
     Vec::new()
+}
+
+fn wanted_from_script(script: &Path) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(script) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.split('#').next().unwrap_or(line);
+        let mut rest = line;
+        while let Some(end) = rest.find(".squashfs") {
+            let before = &rest[..end];
+            let start = before
+                .rfind(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')))
+                .map_or(0, |i| i + 1);
+            let stem = &before[start..];
+            if !stem.is_empty() && !before[..start].ends_with('$') {
+                let file = format!("{stem}.squashfs");
+                if !out.contains(&file) {
+                    out.push(file);
+                }
+            }
+            rest = &rest[end + ".squashfs".len()..];
+        }
+    }
+    out
 }
 
 /// `file` as `list`, PortMaster's ports.json, has it among its runtimes.
@@ -649,6 +684,18 @@ mod tests {
         std::fs::write(dir.join("weston_pkg_0.2.squashfs"), b"").unwrap();
         let files = wanted(&dir, &dir.join("Anodyne.sh"));
         assert_eq!(missing(&dir, &files), ["mono-6.12.0.122-aarch64.squashfs"]);
+
+        // A script whose port.json is missing or names no runtime still gets any .squashfs
+        // runtime referenced directly in the script.
+        std::fs::write(
+            dir.join("StardewValley.sh"),
+            "#!/bin/bash\n# mono-ignored.squashfs\nmonolibs=\"/opt/tools/PortMaster/libs/mono-6.12.0.122-aarch64.squashfs\"\nmount \"$monolibs\" \"$HOME/mono\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            wanted(&dir, &dir.join("StardewValley.sh")),
+            ["mono-6.12.0.122-aarch64.squashfs"]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

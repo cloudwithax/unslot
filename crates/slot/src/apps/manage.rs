@@ -48,7 +48,10 @@ pub fn move_into(from: &Path, dir: &Path) -> Result<PathBuf, String> {
     if from.parent() == Some(dir) {
         return Ok(from.to_path_buf());
     }
-    let name = from.file_name().and_then(|n| n.to_str()).ok_or("That name will not do")?;
+    let name = from
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("That name will not do")?;
     let to = free_name(dir, name);
     std::fs::rename(from, &to).map_err(|e| e.to_string())?;
     Ok(to)
@@ -108,7 +111,10 @@ impl Copy {
         if dir.starts_with(from) {
             return Err("A folder will not go inside itself".into());
         }
-        let name = from.file_name().and_then(|n| n.to_str()).ok_or("That name will not do")?;
+        let name = from
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or("That name will not do")?;
         let to = free_name(dir, name);
         let total = size_of(from);
         if crate::port_runtime::free_bytes(dir).is_some_and(|free| free < total) {
@@ -180,7 +186,10 @@ fn copy_all(from: &Path, to: &Path, done: &AtomicU64, stop: &AtomicBool) -> Resu
     }
     if from.is_dir() {
         std::fs::create_dir(to).map_err(|e| e.to_string())?;
-        for e in std::fs::read_dir(from).map_err(|e| e.to_string())?.flatten() {
+        for e in std::fs::read_dir(from)
+            .map_err(|e| e.to_string())?
+            .flatten()
+        {
             copy_all(&e.path(), &to.join(e.file_name()), done, stop)?;
         }
         return Ok(());
@@ -212,7 +221,10 @@ mod tests {
         std::fs::write(d.path().join("Notes.txt"), "").unwrap();
         std::fs::write(d.path().join("Notes (2).txt"), "").unwrap();
         std::fs::create_dir(d.path().join("Saves")).unwrap();
-        assert_eq!(free_name(d.path(), "Notes.txt"), d.path().join("Notes (3).txt"));
+        assert_eq!(
+            free_name(d.path(), "Notes.txt"),
+            d.path().join("Notes (3).txt")
+        );
         assert_eq!(free_name(d.path(), "Saves"), d.path().join("Saves (2)"));
         assert_eq!(free_name(d.path(), "New.txt"), d.path().join("New.txt"));
     }
@@ -229,7 +241,10 @@ mod tests {
         }
         assert_eq!(copy.ended(), Some(Ok(())));
         assert_eq!(copy.to, d.path().join("A (2)"));
-        assert_eq!(std::fs::read_to_string(d.path().join("A (2)/B/c.txt")).unwrap(), "hello");
+        assert_eq!(
+            std::fs::read_to_string(d.path().join("A (2)/B/c.txt")).unwrap(),
+            "hello"
+        );
         assert!(Copy::start(&from, &from.join("B")).is_err());
         assert!(move_into(&from, &from.join("B")).is_err());
     }

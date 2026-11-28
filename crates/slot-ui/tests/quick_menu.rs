@@ -96,16 +96,7 @@ fn the_run_ahead_row_offers_off_and_one_frame() {
 fn the_rows_run_in_the_order_the_user_chose() {
     assert_eq!(
         QuickRow::MAIN.map(QuickRow::label),
-        [
-            "General",
-            "Screen",
-            "Gameplay",
-            "Network",
-            "Online",
-            "Playtime",
-            "Power",
-            "About"
-        ]
+        ["General", "Screen", "Gameplay", "Network", "Online", "Playtime", "Power", "About"]
     );
     assert_eq!(
         QuickRow::GENERAL.map(QuickRow::label),
@@ -131,9 +122,9 @@ fn the_rows_run_in_the_order_the_user_chose() {
         .into_iter()
         .map(QuickRow::label)
         .collect();
-    // The Game Boy family first, then every other system in the order of the shelves.
-    // Every system except Ports and Apps (no game drawn).
-    assert_eq!(screens.len(), Platform::COUNT - 2);
+    // The Game Boy family first, then every other system in the order of the shelves, including
+    // Ports and Apps so any shelf can be hidden or shown from Screen.
+    assert_eq!(screens.len(), Platform::COUNT);
     assert_eq!(
         screens[..13],
         [
@@ -256,7 +247,12 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::Hostname,
         ]
         .into_iter()
-        .chain(Platform::ALL.map(QuickRow::ScreenOf))
+        .chain(
+            Platform::ALL
+                .into_iter()
+                .filter(|p| !matches!(p, Platform::Ports | Platform::Apps))
+                .map(QuickRow::ScreenOf),
+        )
         .chain(Platform::ALL.map(QuickRow::ShaderParamsOf))
         .collect::<Vec<_>>()
     );
@@ -577,8 +573,12 @@ fn screen_opens_a_page_per_console_and_each_backs_out_to_its_console() {
             assert_eq!(row.parent(), Some(console), "{row:?}");
         }
     }
-    assert!(QuickRow::ScreenOf(Platform::Gb).centred());
+    assert!(!QuickRow::ScreenOf(Platform::Gb).centred());
     assert!(!QuickRow::ShaderOf(Platform::Gb).centred());
+    assert_eq!(QuickRow::ScreenOf(Platform::Apps).child(), None);
+    assert!(!QuickRow::ScreenOf(Platform::Apps).opens());
+    assert_eq!(QuickRow::ScreenOf(Platform::Ports).child(), None);
+    assert!(!QuickRow::ScreenOf(Platform::Ports).opens());
 }
 
 #[test]
@@ -658,4 +658,19 @@ fn a_system_without_colour_correction_has_no_row_for_it() {
     assert!(
         QuickRow::screen_of(Platform::Gba).contains(&QuickRow::ColourCorrectionOf(Platform::Gba))
     );
+}
+
+#[test]
+fn screen_platform_labels_clear_the_show_hide_column() {
+    let pad = slot_ui::MENU_PAD as f32;
+    let right = slot_ui::OUT_W as f32 - slot_ui::QUICK_EDGE;
+    let show_left = right - (value_face("Show", true).w as f32 - 2.0 * pad);
+    for p in Platform::ALL {
+        let face = quick_label_face(QuickRow::ScreenOf(p), true);
+        let label_right = slot_ui::QUICK_LABEL_X + (face.w as f32 - 2.0 * pad);
+        assert!(
+            label_right + 16.0 <= show_left,
+            "{p:?} label ({label_right:.1}) collides with Show column ({show_left:.1})"
+        );
+    }
 }

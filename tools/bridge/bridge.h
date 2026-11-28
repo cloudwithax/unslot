@@ -280,8 +280,9 @@ __attribute__((constructor)) static void bridge_open(void) {
 	int mem, sock;
 	if (!fds || sscanf(fds, "%d %d", &mem, &sock) != 2)
 		return;
-	/* The emulator's own children are not slot's to drive. */
+	/* The emulator's own children are not slot's to drive, nor should they preload the SDL shim. */
 	unsetenv("UNSLOT_BRIDGE");
+	unsetenv("LD_PRELOAD");
 	void *m = mmap(NULL, sizeof(struct unslot_bridge), PROT_READ | PROT_WRITE, MAP_SHARED, mem, 0);
 	close(mem);
 	if (m == MAP_FAILED) {

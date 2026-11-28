@@ -143,6 +143,25 @@ if [ -f "$SD/.unslot-port" ]; then
 		"$SD/Ports/"*)
 			link "$SYS/PortMaster" "$FS/opt/tools/PortMaster"
 			link "$SD/Ports" "$FS/roms/ports"
+			# Ensure PortMaster helpers stay executable on ext4 cards even if copied or
+			# unpacked without Unix modes.
+			for bin in "$SYS/bin/bash" "$SYS/bin/zip" "$SYS/bin/umount" \
+				"$SYS/PortMaster/gptokeyb" "$SYS/PortMaster/gptokeyb2" \
+				"$SYS/PortMaster/portmsg.aarch64" "$SYS/PortMaster/harbourmaster" \
+				"$SYS/PortMaster/7zzs.aarch64" "$SYS/PortMaster/innoextract.aarch64" \
+				"$SYS/PortMaster/xdelta3" "$SYS/PortMaster/astcenc.aarch64" \
+				"$SYS/PortMaster/sdl_resolution.aarch64" \
+				"$SYS/PortMaster/runtimes/love_11.5/love.aarch64"; do
+				[ -f "$bin" ] && [ ! -x "$bin" ] && chmod 755 "$bin" 2>/dev/null || true
+			done
+			# BaseOS init leaves HOME=/, which makes ports mount at //mono and //.config.
+			if [ -z "${HOME:-}" ] || [ "$HOME" = "/" ]; then
+				if [ -d "$FS/root" ] && [ -w "$FS/root" ]; then
+					export HOME="$FS/root"
+				else
+					mkdir -p /tmp/unslot-home && export HOME=/tmp/unslot-home
+				fi
+			fi
 			[ -e "$FS/bin/bash" ] || link "$SYS/bin/bash" "$FS/bin/bash"
 			[ -e "$FS/dev/fd" ] || link /proc/self/fd "$FS/dev/fd"
 			for i in 0:stdin 1:stdout 2:stderr; do

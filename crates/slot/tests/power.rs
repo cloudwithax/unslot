@@ -446,3 +446,60 @@ fn a_shut_lid_over_a_session_takes_its_network_down_too() {
     );
     assert!(jobs.contains(&RadioJob::Cool));
 }
+
+#[test]
+fn wake_from_suspend_restores_panel_and_ignores_stray_wake_power_tap() {
+    let d = tmp_root_with_carts(&["Emerald"]);
+    let mut a = app_playing_in(d.path(), "Emerald");
+    let (power, backlight) = panel(d.path(), Duration::from_secs(180));
+    a.set_power(power);
+    let lit = backlight.load(Ordering::Relaxed);
+    assert!(lit > 0);
+
+    a.apply(Action::PowerTap);
+    assert!(matches!(a.phase(), Phase::Doze { .. }));
+    assert!(a.can_deep_sleep());
+    assert_eq!(backlight.load(Ordering::Relaxed), 0);
+
+    a.wake_from_suspend();
+    assert!(matches!(a.phase(), Phase::Playing { .. }));
+    assert_eq!(backlight.load(Ordering::Relaxed), lit);
+
+    // Buffered wake press/tap within 600ms must not send the device straight back to sleep.
+    let woke_at = a.now();
+    a.tick_ms(woke_at + 100);
+    a.apply(Action::PowerPress);
+    a.apply(Action::PowerTap);
+    assert!(matches!(a.phase(), Phase::Playing { .. }));
+
+    // After the grace window, a normal PowerTap puts the device back to sleep.
+    a.tick_ms(woke_at + 700);
+    a.apply(Action::PowerTap);
+    assert!(matches!(a.phase(), Phase::Doze { .. }));
+}
+
+#[test]
+fn suspend_timeout_matches_power_off_after_setting() {
+    let d = tmp_root_with_carts(&["Emerald"]);
+    let timed = common::app_playing_with_state(
+        d.path(),
+        SlotState {
+            cart: Some("Emerald".into()),
+            clock_set: true,
+            power_off_after: 5,
+            ..SlotState::default()
+        },
+    );
+    assert_eq!(timed.suspend_timeout(), Some(Duration::from_secs(300)));
+
+    let never = common::app_playing_with_state(
+        d.path(),
+        SlotState {
+            cart: Some("Emerald".into()),
+            clock_set: true,
+            power_off_after: 0,
+            ..SlotState::default()
+        },
+    );
+    assert_eq!(never.suspend_timeout(), None);
+}

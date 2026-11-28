@@ -520,6 +520,7 @@ fn screen_opens_a_page_of_its_own_and_b_comes_back_to_it() {
     for want in [
         QuickRow::ScreenOf(Platform::Gbc),
         QuickRow::ScreenOf(Platform::Gb),
+        QuickRow::ScreenOf(Platform::Apps),
         QuickRow::ScreenOf(Platform::Gba),
         QuickRow::ScreenOf(Platform::Gbc),
         QuickRow::ScreenOf(Platform::Gb),
@@ -881,6 +882,8 @@ fn fake_faces(a: &mut App) {
             (id(402), 80),
             (id(403), 90),
             (id(404), 85),
+            (id(405), 75),
+            (id(406), 75),
         ],
         legend_light: [
             (id(400), 70),
@@ -888,6 +891,8 @@ fn fake_faces(a: &mut App) {
             (id(402), 80),
             (id(403), 90),
             (id(404), 85),
+            (id(405), 75),
+            (id(406), 75),
         ],
     });
     a.set_quick_clock_faces((id(500), 150, 40), (id(501), 150, 40));
@@ -1211,6 +1216,8 @@ fn no_row_in_hand_runs_its_arrows_into_its_label() {
             (id(402), 80),
             (id(403), 90),
             (id(404), 85),
+            (id(405), 75),
+            (id(406), 75),
         ],
         legend_light: [
             (id(400), 70),
@@ -1218,6 +1225,8 @@ fn no_row_in_hand_runs_its_arrows_into_its_label() {
             (id(402), 80),
             (id(403), 90),
             (id(404), 85),
+            (id(405), 75),
+            (id(406), 75),
         ],
     });
     for page in [
@@ -1676,4 +1685,85 @@ fn the_ds_fills_the_whole_screen_at_its_own_shape() {
     assert!(a.game_layout_of(Platform::Nds).panel);
     assert!(a.hidden_rows().contains(&QuickRow::BezelOf(Platform::Nds)));
     assert!(!a.game_layout_of(Platform::Nes).panel);
+}
+
+#[test]
+fn x_on_the_screen_page_hides_and_shows_any_shelf_while_a_opens_its_screen_settings() {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    std::fs::create_dir_all(d.path().join("Games/NES")).unwrap();
+    std::fs::write(d.path().join("Games/NES/Mario.nes"), [0u8; 64]).unwrap();
+    write_slot_state(
+        d.path(),
+        &SlotState {
+            clock_set: true,
+            ..SlotState::default()
+        },
+    )
+    .expect("write slot.state");
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    assert_eq!(a.shelf_platform_name(), Some("Game Boy Advance"));
+
+    // Hide the Apps shelf with X on Settings → Screen → Apps.
+    open_at(&mut a, QuickRow::ScreenOf(Platform::Apps));
+    assert_eq!(
+        a.quick_value(QuickRow::ScreenOf(Platform::Apps)),
+        Some(QuickValue::Show)
+    );
+    // A on Apps does nothing (no screen settings page).
+    press(&mut a, Btn::A);
+    assert_eq!(a.quick_menu(), Some(QuickRow::ScreenOf(Platform::Apps)));
+    // X hides Apps and saves to slot.state.
+    press(&mut a, Btn::X);
+    assert_eq!(
+        a.quick_value(QuickRow::ScreenOf(Platform::Apps)),
+        Some(QuickValue::Hide)
+    );
+    assert!(read_slot_state(d.path()).is_shelf_hidden(Platform::Apps));
+
+    // Return to the shelf and cycle through every visible shelf: Apps must be skipped.
+    press(&mut a, Btn::B);
+    press(&mut a, Btn::B);
+    assert!(matches!(a.phase(), Phase::Shelf));
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        seen.push(a.shelf_platform_name());
+        press(&mut a, Btn::R1);
+    }
+    assert!(
+        !seen.contains(&Some("Apps")),
+        "hidden Apps shelf still appeared on R1: {seen:?}"
+    );
+    assert!(seen.contains(&Some("Game Boy Advance")));
+    assert!(seen.contains(&Some("Nintendo Entertainment System")));
+
+    // Hiding the currently active shelf (GBA) moves off it to another visible shelf.
+    assert_eq!(a.shelf_platform_name(), Some("Game Boy Advance"));
+    open_at(&mut a, QuickRow::ScreenOf(Platform::Gba));
+    // A still opens GBA's Screen settings page.
+    press(&mut a, Btn::A);
+    assert_eq!(a.quick_menu(), Some(QuickRow::ShaderOf(Platform::Gba)));
+    press(&mut a, Btn::B);
+    assert_eq!(a.quick_menu(), Some(QuickRow::ScreenOf(Platform::Gba)));
+    // X hides GBA.
+    press(&mut a, Btn::X);
+    assert_eq!(
+        a.quick_value(QuickRow::ScreenOf(Platform::Gba)),
+        Some(QuickValue::Hide)
+    );
+    assert!(read_slot_state(d.path()).is_shelf_hidden(Platform::Gba));
+    press(&mut a, Btn::B);
+    press(&mut a, Btn::B);
+    assert_eq!(a.selected_stem(), Some("Mario"));
+
+    // Rebooting keeps GBA and Apps hidden and opens on NES.
+    let (mut b, _) = app_booting_at(d.path(), CLOCK_IS_SET);
+    assert_eq!(b.selected_stem(), Some("Mario"));
+    // Unhiding Apps makes it reachable again.
+    open_at(&mut b, QuickRow::ScreenOf(Platform::Apps));
+    press(&mut b, Btn::X);
+    assert!(!read_slot_state(d.path()).is_shelf_hidden(Platform::Apps));
+    press(&mut b, Btn::B);
+    press(&mut b, Btn::B);
+    press(&mut b, Btn::R1);
+    assert_eq!(b.shelf_platform_name(), Some("Apps"));
 }

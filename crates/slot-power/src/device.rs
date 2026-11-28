@@ -634,6 +634,10 @@ impl Platform for DevicePlatform {
             .unwrap_or_default()
     }
 
+    fn suspend(&mut self, timeout: Option<Duration>) -> (crate::WakeReason, u64) {
+        crate::suspend::suspend_to_ram(&self.sysfs, timeout)
+    }
+
     fn set_backlight(&mut self, step: u8) {
         let Some(backlight) = &self.backlight else {
             return;

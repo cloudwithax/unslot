@@ -443,7 +443,9 @@ fn session_json(root: &Path, rec: &SessionRecord, now: i64) -> Value {
     let hint = platform_from_dir(&rec.platform)
         .map(platform_hint)
         .unwrap_or(rec.platform.as_str());
-    let age = now.saturating_sub(rec.played_at + rec.duration as i64).max(0);
+    let age = now
+        .saturating_sub(rec.played_at + rec.duration as i64)
+        .max(0);
     let mut obj = json!({
         "romPath": rom_path,
         "romName": rec.rom_name,
@@ -779,9 +781,19 @@ mod tests {
             if req.url.ends_with("/api/auth/device/token") {
                 self.polls += 1;
                 if self.polls == 1 {
-                    return Ok((400, json!({ "error": "authorization_pending" }).to_string().into_bytes()));
+                    return Ok((
+                        400,
+                        json!({ "error": "authorization_pending" })
+                            .to_string()
+                            .into_bytes(),
+                    ));
                 }
-                return Ok((200, json!({ "access_token": "tok-xyz" }).to_string().into_bytes()));
+                return Ok((
+                    200,
+                    json!({ "access_token": "tok-xyz" })
+                        .to_string()
+                        .into_bytes(),
+                ));
             }
             if req.url.ends_with("/api/syncClient/completeLink") {
                 assert_eq!(req.token, Some("tok-xyz"));
@@ -814,7 +826,16 @@ mod tests {
         std::fs::write(&rom, b"pokemon-emerald-rom").unwrap();
 
         let mut store = PlaytimeStore::default();
-        store.finish_session(Platform::Gba, "Emerald", &rom, d.path(), 600, 600, 1700000000, 1700000600);
+        store.finish_session(
+            Platform::Gba,
+            "Emerald",
+            &rom,
+            d.path(),
+            600,
+            600,
+            1700000000,
+            1700000600,
+        );
         store.write(d.path()).unwrap();
 
         let mut http = FakeHttp {
@@ -834,7 +855,15 @@ mod tests {
             PollOutcome::Token("tok-xyz".into())
         );
 
-        let cid = complete_link(&mut http, BASE_URL, "tok-xyz", "my-sp", "fp123", Some("anbernic-rg-35xx-sp")).unwrap();
+        let cid = complete_link(
+            &mut http,
+            BASE_URL,
+            "tok-xyz",
+            "my-sp",
+            "fp123",
+            Some("anbernic-rg-35xx-sp"),
+        )
+        .unwrap();
         assert_eq!(cid, "cid-42");
 
         let conf = Conf {

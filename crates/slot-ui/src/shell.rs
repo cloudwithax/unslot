@@ -87,6 +87,9 @@ pub fn shell_for(cart: &Cart) -> Shell {
         };
         return shell(choice.colour, finish);
     }
+    if cart.platform == Platform::Apps {
+        return shell(crate::media::Media::Nes.colour(), Finish::Solid);
+    }
     if let Some(media) = crate::media::Media::of(cart.platform) {
         return shell(media.colour(), Finish::Solid);
     }

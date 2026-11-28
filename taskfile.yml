@@ -1016,7 +1016,7 @@ tasks:
 
   deploy:device:
     desc: Build and push onto a device over adb, then restart it. SD defaults to /mnt/sdcard
-    deps: [core:device, core:gpsp, core:fetch, services, drastic, ppsspp, portmaster, glshim, build:device]
+    deps: [core:device, core:gpsp, core:fetch, services, overlays, drastic, ppsspp, portmaster, glshim, build:device]
     vars:
       SD: '{{.SD | default "/mnt/sdcard"}}'
     cmds:
@@ -1040,7 +1040,9 @@ tasks:
       - adb shell 'mkdir -p {{.SD}}/System/PortMaster/libs.aarch64 {{.SD}}/System/bin'
       - adb push vendor/drastic/libs/libSDL2-2.0.so.0 '{{.SD}}/System/PortMaster/libs.aarch64/'
       - adb push vendor/portmaster/bin/bash vendor/portmaster/bin/zip '{{.SD}}/System/bin/'
-      - adb shell 'mkdir -p {{.SD}}/System/Wallpapers {{.SD}}/System/Slots'
+      - adb shell 'mkdir -p {{.SD}}/System/overlays {{.SD}}/System/Wallpapers {{.SD}}/System/Slots'
+      - for d in vendor/overlays/*x*; do adb push "$d" '{{.SD}}/System/overlays/'; done
+      - adb push vendor/overlays/overlays.meta '{{.SD}}/System/licenses/overlays.meta'
       - |
         for f in assets/wallpapers/*; do
           case "$f" in *.[jJ][pP][gG] | *.[jJ][pP][eE][gG] | *.[pP][nN][gG]) adb push "$f" '{{.SD}}/System/Wallpapers/' ;; esac

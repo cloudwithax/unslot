@@ -42,6 +42,12 @@ const CLOSING: Duration = Duration::from_secs(5);
 const SAVING: Duration = Duration::from_secs(20);
 const PRESS_AGAIN: Duration = Duration::from_millis(1500);
 
+/// RAM-backed scratch directories for PPSSPP and DraStic savestate exchange so save/load hotkeys
+/// and `--state` do not spend ~1.5–2.3 s writing multi-megabyte state files synchronously to FAT32
+/// SD cards. Persistent states still live under `<root>/States/` via slot's own state writer.
+const PPSSPP_TMP_STATES: &str = "/tmp/unslot-ppsspp-states";
+const DRASTIC_TMP_STATES: &str = "/tmp/unslot-drastic-states";
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Emulator {
     Drastic,
@@ -66,19 +72,33 @@ impl Emulator {
         }
     }
 
-    /// Where the emulator keeps every game's states, and how the name of a game's first ends;
-    /// PICO-8 keeps none.
+    /// Where the emulator keeps its scratch states for save/load exchange, and how the name of a
+    /// game's first ends; PICO-8 keeps none.
     fn states(self, root: &Path) -> Option<(PathBuf, &'static str)> {
         match self {
-            Emulator::Drastic => Some((root.join("Saves/NDS/savestates"), "_0.dss")),
-            Emulator::Ppsspp => Some((root.join("States/PSP"), "_0.ppst")),
+            Emulator::Drastic => {
+                let tmp = PathBuf::from(DRASTIC_TMP_STATES);
+                if std::fs::create_dir_all(&tmp).is_ok() {
+                    Some((tmp, "_0.dss"))
+                } else {
+                    Some((root.join("Saves/NDS/savestates"), "_0.dss"))
+                }
+            }
+            Emulator::Ppsspp => {
+                let tmp = PathBuf::from(PPSSPP_TMP_STATES);
+                if std::fs::create_dir_all(&tmp).is_ok() {
+                    Some((tmp, "_0.ppst"))
+                } else {
+                    Some((root.join("States/PSP"), "_0.ppst"))
+                }
+            }
             Emulator::Pico8 => None,
         }
     }
 
     /// Where the emulator's save and load keys leave its state for `rom`, if slot can tell:
     /// DraStic names it after the file, PPSSPP after the game's disc, which slot learns from the
-    /// first save and keeps beside the states.
+    /// first save and keeps beside the persistent states on the card.
     fn state_file(self, root: &Path, rom: &Path) -> Option<PathBuf> {
         let stem = rom.file_stem().unwrap_or_default().to_string_lossy();
         let (dir, end) = self.states(root)?;
@@ -91,10 +111,14 @@ impl Emulator {
         }
     }
 
-    /// Where the name of `rom`'s state is kept once learned.
+    /// Where the name of `rom`'s state is kept once learned (persisted on the card).
     fn learned(self, root: &Path, rom: &Path) -> Option<PathBuf> {
         let stem = rom.file_stem().unwrap_or_default().to_string_lossy();
-        Some(self.states(root)?.0.join(format!(".{stem}.unslot")))
+        let dir = match self {
+            Emulator::Ppsspp => root.join("States/PSP"),
+            _ => self.states(root)?.0,
+        };
+        Some(dir.join(format!(".{stem}.unslot")))
     }
 }
 
@@ -104,6 +128,8 @@ pub struct StandaloneCore {
     rom: PathBuf,
     /// Where the game's state is saved and loaded, once known.
     state: Option<PathBuf>,
+    /// Pre-staged state file passed to PPSSPP via `--state=` on launch.
+    preload_state: Option<PathBuf>,
     child: Option<Child>,
     sock: Option<UnixStream>,
     mem: *mut Bridge,
@@ -148,6 +174,7 @@ impl StandaloneCore {
             root: root.to_path_buf(),
             rom: PathBuf::new(),
             state: None,
+            preload_state: None,
             child: None,
             sock: None,
             mem,
@@ -211,6 +238,21 @@ impl StandaloneCore {
 }
 
 impl RetroCore for StandaloneCore {
+    fn preload_resume(&mut self, data: &[u8]) -> bool {
+        if self.emulator != Emulator::Ppsspp {
+            return false;
+        }
+        let Some((dir, _)) = self.emulator.states(&self.root) else {
+            return false;
+        };
+        let path = dir.join("resume.ppst");
+        if std::fs::write(&path, data).is_err() {
+            return false;
+        }
+        self.preload_state = Some(path);
+        true
+    }
+
     fn load(&mut self, rom: &Path) -> Result<(), CoreError> {
         self.rom = rom.to_path_buf();
         self.state = self.emulator.state_file(&self.root, rom);
@@ -224,6 +266,22 @@ impl RetroCore for StandaloneCore {
             .arg(rom)
             .env("SLOT_ROOT", &self.root)
             .env("UNSLOT_BRIDGE", "3 4");
+        match self.emulator {
+            Emulator::Ppsspp => {
+                if let Some((dir, _)) = self.emulator.states(&self.root) {
+                    cmd.env("SLOT_PPSSPP_STATES", dir);
+                }
+                if let Some(state_path) = self.preload_state.take() {
+                    cmd.env("SLOT_RESUME_STATE", state_path);
+                }
+            }
+            Emulator::Drastic => {
+                if let Some((dir, _)) = self.emulator.states(&self.root) {
+                    cmd.env("SLOT_DRASTIC_STATES", dir);
+                }
+            }
+            Emulator::Pico8 => {}
+        }
         let (mem_raw, sock_raw) = (mem.as_raw_fd(), theirs.as_raw_fd());
         // SAFETY: only async-signal-safe calls between fork and exec.
         unsafe {
@@ -347,11 +405,20 @@ impl RetroCore for StandaloneCore {
                 self.emulator.learned(&self.root, &self.rom),
                 file.file_name(),
             ) {
+                if let Some(dir) = learned.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
                 let _ = std::fs::write(learned, name.to_string_lossy().as_bytes());
             }
             self.state = Some(file.clone());
         }
-        std::fs::read(&file).map_err(|e| CoreError::State(format!("{}: {e}", file.display())))
+        let bytes = std::fs::read(&file)
+            .map_err(|e| CoreError::State(format!("{}: {e}", file.display())))?;
+        if matches!(self.emulator, Emulator::Ppsspp | Emulator::Drastic) {
+            let _ = std::fs::remove_file(&file);
+            let _ = std::fs::remove_file(file.with_extension("jpg"));
+        }
+        Ok(bytes)
     }
 
     fn unserialize(&mut self, data: &[u8]) -> Result<(), CoreError> {
@@ -365,7 +432,9 @@ impl RetroCore for StandaloneCore {
         if let Some(dir) = file.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        std::fs::write(&file, data)?;
+        if std::fs::read(&file).ok().as_deref() != Some(data) {
+            std::fs::write(&file, data)?;
+        }
         self.ask(b'l', b'k', RUNNING)
     }
 
@@ -404,7 +473,7 @@ impl Drop for StandaloneCore {
                 match child.try_wait() {
                     Ok(Some(_)) | Err(_) => break,
                     Ok(None) if Instant::now() < until => {
-                        std::thread::sleep(Duration::from_millis(20))
+                        std::thread::sleep(Duration::from_millis(5))
                     }
                     Ok(None) => {
                         eprintln!("slot: standalone: the emulator would not close, killing it");
@@ -415,6 +484,9 @@ impl Drop for StandaloneCore {
                     }
                 }
             }
+        }
+        if self.emulator == Emulator::Ppsspp {
+            let _ = std::fs::remove_file(Path::new(PPSSPP_TMP_STATES).join("resume.ppst"));
         }
         // SAFETY: mapped in new, with this size, and not touched after.
         unsafe { libc::munmap(self.mem.cast(), std::mem::size_of::<Bridge>()) };

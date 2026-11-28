@@ -428,6 +428,8 @@ fn quick_menu_faces(a: &mut App) {
             (id(402), 80),
             (id(403), 90),
             (id(404), 85),
+            (id(405), 75),
+            (id(406), 75),
         ],
         legend_light: [
             (id(400), 70),
@@ -435,6 +437,8 @@ fn quick_menu_faces(a: &mut App) {
             (id(402), 80),
             (id(403), 90),
             (id(404), 85),
+            (id(405), 75),
+            (id(406), 75),
         ],
     });
 }

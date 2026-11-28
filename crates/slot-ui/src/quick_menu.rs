@@ -398,13 +398,10 @@ impl QuickRow {
         QuickRow::PlayContrast,
     ];
 
-    /// The Screen page: one row for each platform a core runs, leaving out Ports and Apps.
+    /// The Screen page: one row for each platform (including Ports and Apps, so any shelf can be
+    /// hidden or shown with X).
     pub fn screen_page() -> Vec<QuickRow> {
-        SCREEN_ORDER
-            .into_iter()
-            .filter(|p| !matches!(p, Platform::Ports | Platform::Apps))
-            .map(QuickRow::ScreenOf)
-            .collect()
+        SCREEN_ORDER.into_iter().map(QuickRow::ScreenOf).collect()
     }
 
     /// A platform's page under Screen.
@@ -569,10 +566,7 @@ impl QuickRow {
 
     pub fn centred(self) -> bool {
         let page = self.page();
-        page == QuickRow::MAIN
-            || page == QuickRow::PLAY
-            || page == QuickRow::SETTINGS
-            || page == QuickRow::screen_page()
+        page == QuickRow::MAIN || page == QuickRow::PLAY || page == QuickRow::SETTINGS
     }
 
     pub fn child(self) -> Option<QuickRow> {
@@ -586,7 +580,9 @@ impl QuickRow {
             QuickRow::Network => Some(QuickRow::NETWORK[0]),
             QuickRow::Online => Some(QuickRow::ONLINE[0]),
             QuickRow::Power => Some(QuickRow::POWER[0]),
-            QuickRow::ScreenOf(p) => Some(QuickRow::screen_of(p)[0]),
+            QuickRow::ScreenOf(p) if !matches!(p, Platform::Ports | Platform::Apps) => {
+                Some(QuickRow::screen_of(p)[0])
+            }
             _ => None,
         }
     }
@@ -702,7 +698,6 @@ impl QuickRow {
                 | QuickRow::PlayGameplay
                 | QuickRow::ShaderParams
                 | QuickRow::ShaderParamsOf(_)
-                | QuickRow::ScreenOf(_)
                 | QuickRow::Network
                 | QuickRow::Online
                 | QuickRow::WifiNetworks
@@ -723,7 +718,7 @@ impl QuickRow {
                 | QuickRow::Restart
                 | QuickRow::ShutDown
                 | QuickRow::Reload
-        )
+        ) || matches!(self, QuickRow::ScreenOf(p) if !matches!(p, Platform::Ports | Platform::Apps))
     }
 
     pub fn up(self, hidden: &[QuickRow]) -> QuickRow {
@@ -1002,8 +997,17 @@ const LEGEND_Y: f32 = 427.0;
 pub(crate) const DIM_INK: [u8; 3] = [0x9a, 0x9a, 0xa4];
 const PANEL_GAP: f32 = 12.0;
 
+const SCREEN_LABEL_MAX_W: f32 = OUT_W as f32 - QUICK_LABEL_X - QUICK_EDGE - 110.0;
+const SCREEN_LABEL_MIN_PX: f32 = 18.0;
+
 pub fn quick_label_face(row: QuickRow, lit: bool) -> UndoFace {
-    quick_text_face(row.label(), if lit { MENU_INK } else { DIM_INK })
+    let colour = if lit { MENU_INK } else { DIM_INK };
+    match row {
+        QuickRow::ScreenOf(_) => {
+            quick_text_face_fit(row.label(), colour, SCREEN_LABEL_MAX_W, SCREEN_LABEL_MIN_PX)
+        }
+        _ => quick_text_face(row.label(), colour),
+    }
 }
 
 fn cap_centre(label: &fontdue::Font, h: u32) -> f32 {
@@ -1054,6 +1058,10 @@ pub fn value_face(text: &str, lit: bool) -> UndoFace {
 }
 
 pub(crate) fn quick_text_face(label: &str, colour: [u8; 3]) -> UndoFace {
+    quick_text_face_fit(label, colour, OUT_W as f32, MENU_PX)
+}
+
+fn quick_text_face_fit(label: &str, colour: [u8; 3], max_w: f32, min_px: f32) -> UndoFace {
     let Some(font) = text::label_font() else {
         return UndoFace {
             rgba: Vec::new(),
@@ -1061,7 +1069,7 @@ pub(crate) fn quick_text_face(label: &str, colour: [u8; 3]) -> UndoFace {
             h: 0,
         };
     };
-    let layout = text::fit(font, label, OUT_W as f32, 1, MENU_PX, MENU_PX);
+    let layout = text::fit(font, label, max_w, 1, MENU_PX, min_px);
     let set = layout
         .lines
         .iter()
@@ -1101,7 +1109,7 @@ pub fn quick_caret_face(right: bool) -> UndoFace {
     UndoFace { rgba, w, h }
 }
 
-pub fn quick_legend_faces(ink: [u8; 3]) -> [UndoFace; 5] {
+pub fn quick_legend_faces(ink: [u8; 3]) -> [UndoFace; 7] {
     let hint = Some(ink);
     [
         with_hint(button_face(ButtonLegend::B), "Back", hint, true),
@@ -1114,6 +1122,8 @@ pub fn quick_legend_faces(ink: [u8; 3]) -> [UndoFace; 5] {
         with_hint(button_face(ButtonLegend::A), "Open", hint, false),
         with_hint(button_face(ButtonLegend::B), "Resume", hint, true),
         with_hint(button_face(ButtonLegend::X), "Restart", hint, false),
+        with_hint(button_face(ButtonLegend::X), "Hide", hint, false),
+        with_hint(button_face(ButtonLegend::X), "Show", hint, false),
     ]
 }
 
@@ -1194,8 +1204,8 @@ pub struct QuickMenuFaces {
     pub pointer: (TexId, u32, u32),
     pub values: Vec<[(TexId, u32, u32); 2]>,
     pub carets: [(TexId, u32, u32); 2],
-    pub legend: [(TexId, u32); 5],
-    pub legend_light: [(TexId, u32); 5],
+    pub legend: [(TexId, u32); 7],
+    pub legend_light: [(TexId, u32); 7],
 }
 
 pub struct QuickMenu<'a> {
@@ -1298,7 +1308,7 @@ impl QuickMenu<'_> {
             let Some((tex, w, h)) = value else {
                 continue;
             };
-            if !lit || row.opens() {
+            if !lit || row.opens() || matches!(row, QuickRow::ScreenOf(_)) {
                 push(out, tex, right + pad - w as f32, y, w, h);
                 continue;
             }
@@ -1312,13 +1322,25 @@ impl QuickMenu<'_> {
         if self.over_game || self.footer_legends {
             return;
         }
-        let [back, change, open, resume, _] = faces.legend;
+        let [back, change, open, resume, _, hide, show] = faces.legend;
         let back = match self.row.page() == QuickRow::PLAY {
             true => resume,
             false => back,
         };
-        let other = if self.row.opens() { open } else { change };
-        for (tex, w, x) in centred_hints(self.canvas, &[back, other], LEGEND_GAP) {
+        let mut hints = vec![back];
+        if matches!(self.row, QuickRow::ScreenOf(_)) {
+            let toggle = match self.values[self.row.index()] {
+                Some(QuickValue::Hide) => show,
+                _ => hide,
+            };
+            hints.push(toggle);
+            if self.row.opens() {
+                hints.push(open);
+            }
+        } else {
+            hints.push(if self.row.opens() { open } else { change });
+        }
+        for (tex, w, x) in centred_hints(self.canvas, &hints, LEGEND_GAP) {
             push(out, tex, x, LEGEND_Y + self.canvas.extra(), w, HINT_H);
         }
     }

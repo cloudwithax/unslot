@@ -23,7 +23,7 @@ for bin in services/syncthing services/tailscaled services/wireguard-go services
 	PortMaster/portmsg.aarch64 PortMaster/harbourmaster PortMaster/7zzs.aarch64 \
 	PortMaster/innoextract.aarch64 PortMaster/xdelta3 PortMaster/astcenc.aarch64 \
 	PortMaster/sdl_resolution.aarch64 \
-	PortMaster/runtimes/love_11.5/love.aarch64; do
+	PortMaster/runtimes/love_11.5/love.aarch64 pico8/bin/wget; do
 	f="$TREE/System/$bin"
 	[ ! -e "$f" ] || [ -x "$f" ] || { echo "$f is not executable" >&2; exit 1; }
 done

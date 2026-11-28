@@ -24,13 +24,63 @@ const PSY: &str = "/sys/class/power_supply";
 const LID_POLL_MS: Millis = 150;
 
 pub struct DeviceInput {
-    pending: Arc<Mutex<Vec<RawEvent>>>,
+    pending: Arc<Mutex<EventQueue>>,
     sticks: Arc<Mutex<Sticks>>,
     steers: Arc<AtomicBool>,
     hall: Option<PathBuf>,
     lid_shut: Option<bool>,
     next_lid_poll: Millis,
     menu_dpad_display: bool,
+}
+
+/// Events waiting for the main loop, deduplicated across evdev nodes so two nodes reporting the
+/// same physical key (e.g. `ANBERNIC-keys` and `dierct-keys-polled`) emit one press and one
+/// release.
+#[derive(Default)]
+struct EventQueue {
+    events: Vec<RawEvent>,
+    counts: [u8; 32],
+}
+
+impl EventQueue {
+    fn push(&mut self, held: &mut Vec<Btn>, ev: RawEvent) {
+        match ev {
+            RawEvent::Down(btn) => {
+                if !held.contains(&btn) {
+                    held.push(btn);
+                    let slot = &mut self.counts[btn as usize];
+                    if *slot == 0 {
+                        self.events.push(RawEvent::Down(btn));
+                    }
+                    *slot = slot.saturating_add(1);
+                }
+            }
+            RawEvent::Up(btn) => {
+                if let Some(i) = held.iter().position(|&b| b == btn) {
+                    held.swap_remove(i);
+                    let slot = &mut self.counts[btn as usize];
+                    *slot = slot.saturating_sub(1);
+                    if *slot == 0 {
+                        self.events.push(RawEvent::Up(btn));
+                    }
+                }
+            }
+        }
+    }
+
+    fn release_all(&mut self, held: &mut Vec<Btn>) {
+        for btn in held.drain(..) {
+            let slot = &mut self.counts[btn as usize];
+            *slot = slot.saturating_sub(1);
+            if *slot == 0 {
+                self.events.push(RawEvent::Up(btn));
+            }
+        }
+    }
+
+    fn drain(&mut self) -> Vec<RawEvent> {
+        std::mem::take(&mut self.events)
+    }
 }
 
 impl DeviceInput {
@@ -49,7 +99,7 @@ impl DeviceInput {
         let readers = Readers {
             dev: dev.to_path_buf(),
             sys: sys.to_path_buf(),
-            pending: Arc::new(Mutex::new(Vec::new())),
+            pending: Arc::new(Mutex::new(EventQueue::default())),
             sticks: Arc::new(Mutex::new([0; 4])),
             steers: Arc::new(AtomicBool::new(false)),
             open: Arc::new(Mutex::new(HashSet::new())),
@@ -89,7 +139,7 @@ const WATCH_EVERY: Duration = Duration::from_secs(2);
 struct Readers {
     dev: PathBuf,
     sys: PathBuf,
-    pending: Arc<Mutex<Vec<RawEvent>>>,
+    pending: Arc<Mutex<EventQueue>>,
     sticks: Arc<Mutex<Sticks>>,
     steers: Arc<AtomicBool>,
     open: Arc<Mutex<HashSet<PathBuf>>>,
@@ -204,7 +254,7 @@ type StickOut = ([u16; 4], bool, Arc<Mutex<Sticks>>);
 fn read_node(
     node: &Path,
     kind: Kind,
-    queue: &Mutex<Vec<RawEvent>>,
+    queue: &Mutex<EventQueue>,
     sticks: Option<StickOut>,
     steers: &AtomicBool,
     trace: Option<&Trace>,
@@ -214,6 +264,7 @@ fn read_node(
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| node.display().to_string());
     let mut hat = Hat::default();
+    let mut held = Vec::new();
     let mut file = match File::open(node) {
         Ok(f) => f,
         Err(e) => {
@@ -244,6 +295,10 @@ fn read_node(
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(e) => {
                 eprintln!("slot: input {}: {e}", node.display());
+                queue
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .release_all(&mut held);
                 return;
             }
         };
@@ -288,10 +343,10 @@ fn read_node(
         if events.is_empty() {
             continue;
         }
-        queue
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .extend(events);
+        let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
+        for ev in events {
+            q.push(&mut held, ev);
+        }
     }
 }
 
@@ -352,7 +407,11 @@ impl DeviceInput {
 
 impl InputSource for DeviceInput {
     fn poll(&mut self, now: Millis) -> Vec<RawEvent> {
-        let mut out = std::mem::take(&mut *self.pending.lock().unwrap_or_else(|e| e.into_inner()));
+        let mut out = self
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain();
         if self.hall.is_some() && now >= self.next_lid_poll {
             self.next_lid_poll = now + LID_POLL_MS;
             if let Some(shut) = self.read_lid() {
@@ -469,7 +528,7 @@ mod tests {
         let readers = Readers {
             dev: dev.clone(),
             sys: sys.clone(),
-            pending: Arc::new(Mutex::new(Vec::new())),
+            pending: Arc::new(Mutex::new(EventQueue::default())),
             sticks: Arc::new(Mutex::new([0; 4])),
             steers: Arc::new(AtomicBool::new(false)),
             open: Arc::new(Mutex::new(HashSet::new())),
@@ -480,11 +539,11 @@ mod tests {
         node(&sys, &dev, "event5", &press_a());
         readers.open_new();
         let deadline = Instant::now() + Duration::from_secs(2);
-        while readers.pending.lock().unwrap().is_empty() && Instant::now() < deadline {
+        while readers.pending.lock().unwrap().events.is_empty() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(
-            readers.pending.lock().unwrap().as_slice(),
+            readers.pending.lock().unwrap().events.as_slice(),
             [RawEvent::Down(Btn::A)],
             "the pad that turned up later was never read"
         );
@@ -501,7 +560,7 @@ mod tests {
         let readers = Readers {
             dev,
             sys,
-            pending: Arc::new(Mutex::new(Vec::new())),
+            pending: Arc::new(Mutex::new(EventQueue::default())),
             sticks: Arc::new(Mutex::new([0; 4])),
             steers: Arc::new(AtomicBool::new(false)),
             open: Arc::new(Mutex::new(HashSet::new())),
@@ -510,14 +569,33 @@ mod tests {
         };
         readers.open_new();
         let deadline = Instant::now() + Duration::from_secs(2);
-        while readers.pending.lock().unwrap().is_empty() && Instant::now() < deadline {
+        while readers.pending.lock().unwrap().events.is_empty() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(
-            readers.pending.lock().unwrap().as_slice(),
+            readers.pending.lock().unwrap().events.as_slice(),
             [RawEvent::Down(Btn::A)],
             "the pad's A was not read as A"
         );
+    }
+
+    #[test]
+    fn overlapping_nodes_emit_one_press_and_one_release() {
+        let mut q = EventQueue::default();
+        let (mut node1, mut node2) = (Vec::new(), Vec::new());
+        q.push(&mut node1, RawEvent::Down(Btn::VolUp));
+        q.push(&mut node2, RawEvent::Down(Btn::VolUp));
+        q.push(&mut node1, RawEvent::Up(Btn::VolUp));
+        q.push(&mut node2, RawEvent::Up(Btn::VolUp));
+        assert_eq!(
+            q.drain(),
+            [RawEvent::Down(Btn::VolUp), RawEvent::Up(Btn::VolUp)]
+        );
+
+        // If one node disconnects while holding a button, release_all frees it cleanly.
+        q.push(&mut node1, RawEvent::Down(Btn::A));
+        q.release_all(&mut node1);
+        assert_eq!(q.drain(), [RawEvent::Down(Btn::A), RawEvent::Up(Btn::A)]);
     }
 
     #[test]

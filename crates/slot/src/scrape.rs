@@ -340,8 +340,9 @@ fn is_disc(rom: &Path) -> bool {
         .any(|d| ext.eq_ignore_ascii_case(d))
 }
 
-/// A ScreenScraper login: unslot's developer id, which every call needs, and optionally the
-/// player's own account, which raises their quota.
+/// A ScreenScraper login: unslot's developer id, which every call needs, optionally the
+/// player's own account, which raises their quota, and optionally preferred artwork region(s)
+/// (`region=de` or `region=de,eu`).
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct SsLogin {
     pub devid: String,
@@ -349,6 +350,7 @@ pub struct SsLogin {
     pub softname: String,
     pub ssid: Option<String>,
     pub sspassword: Option<String>,
+    pub region: Option<String>,
 }
 
 /// unslot's own ScreenScraper developer id, built in when a release is made with one, from the
@@ -393,6 +395,7 @@ fn read_conf_with(root: &Path, built: Option<(&str, &str)>) -> Option<SsLogin> {
         softname: conf_get(&text, "softname").unwrap_or_else(|| "unslot".into()),
         ssid: conf_get(&text, "ssid"),
         sspassword: conf_get(&text, "sspassword"),
+        region: conf_get(&text, "region"),
     })
 }
 
@@ -467,9 +470,17 @@ pub fn ss_url(login: &SsLogin, system: u32, crc: Option<u32>, size: u64, file: &
     format!("{SS_API}?{}", query.join("&"))
 }
 
+const DEFAULT_REGIONS: [&str; 6] = ["wor", "us", "eu", "ss", "jp", ""];
+
 /// The URL of a game's media of `kind` (`wheel` for its logo, `box-2D` for its box) in a
 /// `jeuInfos` answer, the world's or the common regions' first.
 pub fn ss_media(text: &str, kind: &str) -> Option<String> {
+    ss_media_for(text, kind, None)
+}
+
+/// Like `ss_media`, prioritizing any region code(s) in `preferred` (e.g. `"de"` or `"de,eu"`,
+/// case-insensitive) ahead of the default fallback order.
+pub fn ss_media_for(text: &str, kind: &str, preferred: Option<&str>) -> Option<String> {
     let medias = &text[text.find("\"medias\"")?..];
     let found: Vec<(String, String)> = medias
         .split('}')
@@ -481,9 +492,23 @@ pub fn ss_media(text: &str, kind: &str) -> Option<String> {
             ))
         })
         .collect();
-    ["wor", "us", "eu", "ss", "jp", ""]
+    if let Some(pref) = preferred {
+        for r in pref.split(',').map(str::trim).filter(|r| !r.is_empty()) {
+            if let Some((_, url)) = found
+                .iter()
+                .find(|(region, _)| region.eq_ignore_ascii_case(r))
+            {
+                return Some(url.clone());
+            }
+        }
+    }
+    DEFAULT_REGIONS
         .iter()
-        .find_map(|r| found.iter().find(|(region, _)| region == r))
+        .find_map(|r| {
+            found
+                .iter()
+                .find(|(region, _)| region.eq_ignore_ascii_case(r))
+        })
         .or(found.first())
         .map(|(_, url)| url.clone())
 }
@@ -820,17 +845,18 @@ fn ss_art(
     };
     let answer = String::from_utf8_lossy(&answer);
     art.esrb = ss_esrb(&answer);
-    if let Some(url) = ss_media(&answer, "wheel") {
+    let region = login.region.as_deref();
+    if let Some(url) = ss_media_for(&answer, "wheel", region) {
         art.logo = fetch.get(&url)?;
     }
-    if let Some(url) = ss_media(&answer, "box-2D") {
+    if let Some(url) = ss_media_for(&answer, "box-2D", region) {
         art.boxart = fetch.get(&url)?;
     }
     // The physical media: the label as scanned, and the cart or disc drawn whole where it is one.
-    if let Some(url) = ss_media(&answer, "support-texture") {
+    if let Some(url) = ss_media_for(&answer, "support-texture", region) {
         art.texture = fetch.get(&url)?;
     }
-    if let Some(url) = ss_media(&answer, "support-2D").filter(|_| with_render) {
+    if let Some(url) = ss_media_for(&answer, "support-2D", region).filter(|_| with_render) {
         art.render = fetch.get(&url)?;
     }
     Ok(art)
@@ -1225,6 +1251,7 @@ game (
             softname: "unslot".into(),
             ssid: Some("me".into()),
             sspassword: Some("s3cret&".into()),
+            region: None,
         };
         let url = ss_url(&login, 12, Some(0x1F1C_08FB), 16777216, "Emerald (USA).gba");
         assert!(url.starts_with(SS_API));
@@ -1258,6 +1285,53 @@ game (
             Some("https://ss/box-jp.png")
         );
         assert_eq!(ss_media(answer, "screenmarquee"), None);
+    }
+
+    #[test]
+    fn screenscraper_media_prioritizes_configured_region_before_default_fallback() {
+        let answer = r#"{"response":{"jeu":{"medias":[
+            {"type":"support-2D","parent":"jeu","url":"https:\/\/ss\/cart-us.png","region":"us","format":"png"},
+            {"type":"support-2D","parent":"jeu","url":"https:\/\/ss\/cart-de.png","region":"de","format":"png"},
+            {"type":"support-2D","parent":"jeu","url":"https:\/\/ss\/cart-wor.png","region":"wor","format":"png"},
+            {"type":"wheel","parent":"jeu","url":"https:\/\/ss\/wheel-eu.png","region":"eu","format":"png"},
+            {"type":"wheel","parent":"jeu","url":"https:\/\/ss\/wheel-us.png","region":"us","format":"png"}
+        ]}}}"#;
+        // Configured region wins over default wor/us priority, case-insensitively.
+        assert_eq!(
+            ss_media_for(answer, "support-2D", Some("DE")).as_deref(),
+            Some("https://ss/cart-de.png")
+        );
+        // Falls back to the default priority when the preferred region is missing.
+        assert_eq!(
+            ss_media_for(answer, "wheel", Some("de")).as_deref(),
+            Some("https://ss/wheel-us.png")
+        );
+        // Supports a comma-separated preference list before the default fallback.
+        assert_eq!(
+            ss_media_for(answer, "wheel", Some("de, eu")).as_deref(),
+            Some("https://ss/wheel-eu.png")
+        );
+        // Unset keeps default priority unchanged.
+        assert_eq!(
+            ss_media_for(answer, "support-2D", None).as_deref(),
+            Some("https://ss/cart-wor.png")
+        );
+    }
+
+    #[test]
+    fn screenscraper_region_is_read_from_conf_and_kept_across_login_saves() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("Config")).unwrap();
+        std::fs::write(
+            d.path().join(SS_CONF),
+            "devid=d\ndevpassword=p\nregion=de\n",
+        )
+        .unwrap();
+        save_ss_login(d.path(), "me", "pw").unwrap();
+        let login = read_ss_conf(d.path()).unwrap();
+        assert_eq!(login.region.as_deref(), Some("de"));
+        let text = std::fs::read_to_string(d.path().join(SS_CONF)).unwrap();
+        assert!(text.contains("region=de"), "{text}");
     }
 
     #[test]
@@ -1489,6 +1563,7 @@ game (
             softname: "unslot".into(),
             ssid: None,
             sspassword: None,
+            region: None,
         };
         for (platform, asked) in [(Platform::Snes, true), (Platform::Arcade, false)] {
             let mut fetch = Asked(Vec::new());

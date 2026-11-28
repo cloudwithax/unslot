@@ -242,7 +242,7 @@ A `.pak` is the release's `MinUI.zip`, untouched, with its version and checksum 
 | `Config/Remaps` | Button maps: `All.txt`, `<SYSTEM>.txt` and `<SYSTEM>/<game>.txt`. |
 | `Config/retroachievements` | Achievements earned offline, until the service confirms them. Keep it with your saves. |
 | `Config/wireguard` | WireGuard tunnels, as wg-quick `.conf` files. |
-| `Config/screenscraper.conf` | Your ScreenScraper login (`ssid=`, `sspassword=`), which you can also enter from Game Art's ScreenScraper row, and optionally a developer ID (`devid=`, `devpassword=`) to use in place of the one built into the release. With both, Game Art asks ScreenScraper first. |
+| `Config/screenscraper.conf` | Your ScreenScraper login (`ssid=`, `sspassword=`), which you can also enter from Game Art's ScreenScraper row, optionally a preferred artwork region (`region=de` or a comma-separated list like `region=de,eu`, tried before the default `wor, us, eu, ss, jp` fallback), and optionally a developer ID (`devid=`, `devpassword=`) to use in place of the one built into the release. With a developer ID, Game Art asks ScreenScraper first. |
 | `Config/romm.conf` | Your RomM server (`server=`), the device's sign-in to it (`token=`, `user=`, `device=`), whether art comes from unslot or RomM (`art=unslot` or `art=romm`), and whether saves sync with RomM (`saves=romm` or `saves=off`). Keep it private: the token lets anyone fetch your library. |
 | `System` | unslot itself. Updates replace it whole. |
 

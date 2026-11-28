@@ -32,9 +32,16 @@ done
 test -f "$out/System/ppsspp/launch.sh"
 test -f "$out/System/ppsspp/assets/ppge_atlas.zim"
 test -s "$out/System/licenses/ppsspp.meta"
+test -s "$out/System/bezels/640x480.png"
+test -s "$out/System/licenses/overlays.meta"
+for size in 640x480 720x480 720x720; do
+  test "$(ls "$out/System/overlays/$size"/*/*.png | wc -l)" -ge 15
+done
 # slot drives DraStic and PPSSPP over tools/bridge/bridge.h; shims from an a133p-cores
 # built before it leave each emulator drawing over slot's last frame, out of its reach.
 for f in drastic/libs/libunslot-drastic.so ppsspp/libs/libunslot-ppsspp.so; do
   grep -q UNSLOT_BRIDGE "$out/System/$f" ||
     { echo "$f has no bridge; run the a133p-cores workflow" >&2; exit 1; }
 done
+grep -q "offscreen pbuffer" "$out/System/ppsspp/libs/libunslot-ppsspp.so" ||
+  { echo "libunslot-ppsspp.so lacks offscreen Pbuffer fix" >&2; exit 1; }

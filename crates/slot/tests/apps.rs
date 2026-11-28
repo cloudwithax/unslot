@@ -270,15 +270,29 @@ fn files_walks_the_card_and_a_picture_steps_through_its_folder() {
     press(&mut a, Btn::A);
     assert!(!viewer_page(&a).chrome, "A did not hide the viewer chrome");
     press(&mut a, Btn::A);
-    assert!(viewer_page(&a).chrome, "A did not show the viewer chrome again");
+    assert!(
+        viewer_page(&a).chrome,
+        "A did not show the viewer chrome again"
+    );
     press(&mut a, Btn::Right);
     assert_eq!(viewer_page(&a).path, shots.join("c.jpg"));
     press(&mut a, Btn::Right);
-    assert_eq!(viewer_page(&a).path, shots.join("a.png"), "it did not go round");
+    assert_eq!(
+        viewer_page(&a).path,
+        shots.join("a.png"),
+        "it did not go round"
+    );
     press(&mut a, Btn::B);
-    assert_eq!(gallery_page(&a).tiles[gallery_page(&a).cursor].name, "b.png");
+    assert_eq!(
+        gallery_page(&a).tiles[gallery_page(&a).cursor].name,
+        "b.png"
+    );
     press(&mut a, Btn::B);
-    assert_eq!(gallery_page(&a).tiles[0].name, "Trip", "B did not go up a folder");
+    assert_eq!(
+        gallery_page(&a).tiles[0].name,
+        "Trip",
+        "B did not go up a folder"
+    );
     press(&mut a, Btn::B);
     assert!(matches!(a.phase(), Phase::Shelf), "{:?}", a.phase());
 }
@@ -398,9 +412,16 @@ fn a_book_turns_its_pages_and_opens_again_where_it_was_left() {
     assert_eq!(reader_page(&a).page, 1);
     press(&mut a, Btn::B);
     let lib = library_page(&a);
-    assert!(lib.tiles[0].read.is_some(), "read progress was not recorded");
+    assert!(
+        lib.tiles[0].read.is_some(),
+        "read progress was not recorded"
+    );
     open_book(&mut a, "Long");
-    assert_eq!(reader_page(&a).lines, second.lines, "the place was not kept");
+    assert_eq!(
+        reader_page(&a).lines,
+        second.lines,
+        "the place was not kept"
+    );
 }
 
 #[test]

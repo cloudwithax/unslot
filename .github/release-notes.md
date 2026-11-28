@@ -1,10 +1,11 @@
 ## Changes
 
-- **RomM**: under Settings → Online, a client for your own [RomM](https://github.com/rommapp/romm) server. Sign in by scanning a code with your phone, browse the library and fetch games straight onto the shelf, and games sent to the handheld from RomM's web page land on the shelf by themselves. Game Art can come from RomM. Save Sync keeps battery saves in step with RomM on the same `autosave` slot Grout uses (DS, PSP and PICO-8 saves stay out of it), and turns Syncthing off, as both would change the same saves. Tested against RomM 5.4.1.
-- **DraStic, PPSSPP and PICO-8 inside slot**: the standalone emulators now run as slot's own cores do, with the same in-game menu, states, shaders, bezels, volume keys and resume state as every other system.
-- **PICO-8**: carts play in fake-08 by default, with Retro8 still a choice. Your own PICO-8 (the Raspberry Pi zip from Lexaloffle, in `BIOS/PICO-8`) plays carts too and opens Splore, and carts you favourite in Splore go on the shelf. PICO-8 carts have a cart of their own, labelled from the cart itself.
-- **Ports**: a shelf of their own beside Apps, each one a disc. A Kiosk Mode rule that named a port under Apps needs setting again under Ports.
-- **DS**: the two screens are stacked, top over bottom, by default. A card with DraStic settings already keeps its layout.
+- **Playtime & RetroShelf**: automatic local playtime tracking across every system (shown on the shelf and in a new **Playtime** screen with sort modes and jump-to-game), plus optional QR-linked sync with [RetroShelf](https://retroshelf.org).
+- **Dedicated Built-in App Screens & NES-Grey App Carts**: **Files** (full file manager with copy/cut/paste/rename/delete/new folder), **Gallery** (4×3 thumbnail grid + video player bar), **Books & Manuals** (6×2 cover shelf + paper reader) and **Music** (now-playing pane with cover art & tags), with redesigned NES-grey icon carts on the Apps shelf.
+- **TrimUI A133P S3 Deep Sleep + RTC Auto Power-Off**: hardware Suspend-to-RAM (`mem`) with `/sys/class/rtc/rtc0/wakealarm` timed save-and-power-off, instant Power-button wake, and `xradio_wlan` quiesce retry.
+- **Flicker-Free, Fast PSP & DS**: fixed PowerVR `/dev/fb0` flashing in PPSSPP via offscreen `EGLPbufferSurface`, moved PPSSPP & DraStic savestate exchange to RAM tmpfs, and added direct `--state=` preloading on PPSSPP (cutting Brick Pro PSP launch from ~4.4 s to ~1.3 s and exit from ~3.5 s to ~0.44 s).
+- **Exact Content Frame Rate & Hide Any Shelf**: every core runs at its exact native refresh rate by default (fixing fast/sharp audio), and any shelf (including Apps and Ports) can now be hidden or shown with `X` under Settings → Screen.
+- **Fixes & Improvements**: PlayStation memory cards fixed (#3), PICO-8 30 FPS input latching & Splore fixes (#6), overlays packaging/deploy checks (#7), configurable ScreenScraper artwork `region=` (#8), Upload from Phone any file/folder + Sort for Me, iOS/iPadOS writable Samba shares, PortMaster launcher hardening, and hung-core recovery.
 
 The full list is in [CHANGELOG.md](https://github.com/cloudwithax/unslot/blob/$TAG/CHANGELOG.md).
 

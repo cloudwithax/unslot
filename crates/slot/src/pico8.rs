@@ -169,6 +169,20 @@ pub fn command_line(
     args
 }
 
+/// Makes `path` executable when the filesystem allows it: on an ext4 card a binary copied over
+/// Samba or unzipped without Unix modes lacks `+x`, which would otherwise force PICO-8 through
+/// the dynamic loader where it fails to find `pico8.dat`.
+pub fn ensure_executable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let Ok(meta) = std::fs::metadata(path) else {
+        return;
+    };
+    let mode = meta.permissions().mode();
+    if meta.is_file() && mode & 0o111 == 0 {
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode | 0o755));
+    }
+}
+
 /// Whether the card lets `binary` run as a program of its own. Through the loader PICO-8 looks
 /// for pico8.dat beside the loader, so it is only run that way when it has to be.
 pub fn runs_directly(binary: &Path) -> bool {
@@ -237,6 +251,8 @@ pub fn run(root: &Path, rom: &Path) -> i32 {
         eprintln!("slot: pico8: {} is not on the card", shim.display());
         return 1;
     }
+    ensure_executable(&binary);
+    ensure_executable(&root.join(WGET_DIR).join("wget"));
     let line = command_line(root, &binary, arch, rom, runs_directly(&binary));
     eprintln!("slot: pico8: {}", line.join(" "));
     let install = binary.parent().unwrap_or(root).to_path_buf();
@@ -268,10 +284,23 @@ pub fn run(root: &Path, rom: &Path) -> i32 {
             .env("SDL_JOYSTICK_DEVICE", nodes.join(":"));
     }
     command.env("LD_PRELOAD", &shim);
+    // For single carts (non-Splore), replace this launcher process directly with PICO-8 so there
+    // is no extra parent waiting on exit. Splore needs to run `shelve_favourites` after exit.
+    #[cfg(unix)]
+    if !is_splore(rom) {
+        use std::os::unix::process::CommandExt;
+        let err = command.exec();
+        eprintln!("slot: pico8: {}: {err}", line[0]);
+        return 1;
+    }
     // PICO-8 closes when slot asks the shim to, and slot kills it with this if it will not.
     match command.spawn() {
         Ok(mut child) => {
-            let _ = child.wait();
+            if let Ok(status) = child.wait() {
+                if !status.success() {
+                    eprintln!("slot: pico8: exited with {status}");
+                }
+            }
         }
         Err(e) => {
             eprintln!("slot: pico8: {}: {e}", line[0]);
@@ -1028,6 +1057,18 @@ too few|fields
             find_binary(dir.path()),
             Some((inner.join("pico8_dyn"), Arch::Armhf))
         );
+    }
+
+    #[test]
+    fn ensure_executable_marks_a_copied_binary_to_run_directly() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("pico8_64");
+        std::fs::write(&bin, b"elf").unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!runs_directly(&bin));
+        ensure_executable(&bin);
+        assert!(runs_directly(&bin));
     }
 
     #[test]

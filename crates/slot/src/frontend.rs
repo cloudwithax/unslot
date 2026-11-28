@@ -618,7 +618,7 @@ impl Frontend {
             .map(|v| v.map(&mut up))
             .collect();
         let carets = faces.quick_carets.map(&mut up);
-        let mut pack_legend = |faces: [UndoFace; 5]| {
+        let mut pack_legend = |faces: [UndoFace; 7]| {
             faces.map(|f| {
                 let (tex, w, _) = up(f);
                 (tex, w)
@@ -1050,12 +1050,40 @@ impl Frontend {
         self.session.update(dt);
     }
 
+    pub fn now_ms(&self) -> Millis {
+        self.now()
+    }
+
     fn now(&self) -> Millis {
         self.start.elapsed().as_millis() as Millis
     }
 
     pub fn dozing(&self) -> bool {
         self.session.dozing()
+    }
+
+    pub fn can_deep_sleep(&self) -> bool {
+        self.session.app().can_deep_sleep()
+    }
+
+    pub fn suspend_timeout(&self) -> Option<std::time::Duration> {
+        self.session.app().suspend_timeout()
+    }
+
+    pub fn suspend_to_ram(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+    ) -> (slot_power::WakeReason, u64) {
+        self.session.app_mut().settle_saves();
+        self.session.app_mut().suspend_to_ram(timeout)
+    }
+
+    pub fn wake_from_suspend(&mut self) {
+        self.session.app_mut().wake_from_suspend();
+    }
+
+    pub fn prepare_suspend_poweroff(&mut self) {
+        self.session.app_mut().prepare_suspend_poweroff();
     }
 
     pub fn powering_off(&self) -> bool {
@@ -1120,8 +1148,8 @@ struct UiFaces {
     quick_pointer: UndoFace,
     quick_values: Vec<[UndoFace; 2]>,
     quick_carets: [UndoFace; 2],
-    quick_legend: [UndoFace; 5],
-    quick_legend_light: [UndoFace; 5],
+    quick_legend: [UndoFace; 7],
+    quick_legend_light: [UndoFace; 7],
     sockets: Vec<CartFace>,
     chips: Vec<CartFace>,
     blank_chip: CartFace,

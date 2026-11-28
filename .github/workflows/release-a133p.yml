@@ -46,7 +46,7 @@ jobs:
           set -eu
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends zip unzip cmake binutils-aarch64-linux-gnu \
-            python3-pip libasound2-dev libudev-dev
+            python3-pip libasound2-dev libudev-dev libgles-dev
           pip3 install --break-system-packages ziglang==0.17.1
           curl -fsSL https://taskfile.dev/install.sh | sudo sh -s -- -b /usr/local/bin
           rustup target add aarch64-unknown-linux-gnu
@@ -96,6 +96,7 @@ jobs:
           (cd "$RUNNER_TEMP" && sha256sum -c a133p-cores.tar.gz.sha256)
           mkdir -p target-a133p
           tar -xzf "$RUNNER_TEMP/a133p-cores.tar.gz" -C target-a133p
+          sh tools/a133p/shims.sh
 
       - name: Build the card
         env:

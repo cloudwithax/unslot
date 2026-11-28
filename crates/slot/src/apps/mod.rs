@@ -98,7 +98,10 @@ pub enum Done {
     /// Quit slot for this port to run.
     Port(PathBuf),
     /// Open the keyboard to name a file or folder, then pass the result to [`Apps::typed`].
-    Type { title: String, text: String },
+    Type {
+        title: String,
+        text: String,
+    },
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -351,7 +354,12 @@ impl Apps {
     fn file_action_enabled(&self, browser: &Browser, action: FileAction) -> bool {
         let selected = browser.selected();
         let protected = selected.is_some_and(|e| manage::kept(&self.root, &e.path));
-        file_action_can(selected.is_some(), protected, self.clipboard.is_some(), action)
+        file_action_can(
+            selected.is_some(),
+            protected,
+            self.clipboard.is_some(),
+            action,
+        )
     }
 
     fn open_entry(
@@ -412,12 +420,7 @@ impl Apps {
         Done::Stay
     }
 
-    fn overlay_input(
-        &mut self,
-        btn: Btn,
-        music: &mut Option<Music>,
-        volume: u8,
-    ) -> Done {
+    fn overlay_input(&mut self, btn: Btn, music: &mut Option<Music>, volume: u8) -> Done {
         match self.overlay.take() {
             Some(Overlay::Copying(copy)) => {
                 if btn == Btn::B {
@@ -805,7 +808,10 @@ impl Apps {
                     legends: vec![
                         back,
                         Legend::new(ButtonLegend::A, "Play"),
-                        Legend::new(ButtonLegend::X, if view.paused { "Resume" } else { "Pause" }),
+                        Legend::new(
+                            ButtonLegend::X,
+                            if view.paused { "Resume" } else { "Pause" },
+                        ),
                         Legend::new(ButtonLegend::Y, "Stop"),
                     ],
                 }))
@@ -860,11 +866,7 @@ impl Apps {
         let status = if !note.is_empty() {
             note
         } else if let Some(clip) = &self.clipboard {
-            let what = clip
-                .path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            let what = clip.path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             format!("{}: {what}", if clip.cut { "Cut" } else { "Copied" })
         } else {
             crate::port_runtime::free_bytes(&browser.dir)
@@ -1099,8 +1101,6 @@ pub struct VideoModel {
 
 impl PartialEq for VideoModel {
     fn eq(&self, other: &Self) -> bool {
-        self.path == other.path
-            && self.frame.serial == other.frame.serial
-            && self.osd == other.osd
+        self.path == other.path && self.frame.serial == other.frame.serial && self.osd == other.osd
     }
 }

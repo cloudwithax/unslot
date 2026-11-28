@@ -73,7 +73,7 @@ pub enum Glyph {
 }
 
 impl Glyph {
-    fn char(self) -> char {
+    pub(crate) fn char(self) -> char {
         match self {
             Glyph::Folder => '\u{f024b}',
             Glyph::FolderOpen => '\u{f0770}',
@@ -396,7 +396,13 @@ fn footer(s: &mut Sheet, status: &str, legends: &[Legend]) {
     let y = H - FOOT_H;
     s.fill((0, y, W, 1), RULE);
     s.text((PAD, y, 220, FOOT_H), status, DIM, 14.0, Align::Left);
-    legends_into(&mut s.px, W, (240, y + 2, W - 240 - PAD, FOOT_H - 2), legends, INK);
+    legends_into(
+        &mut s.px,
+        W,
+        (240, y + 2, W - 240 - PAD, FOOT_H - 2),
+        legends,
+        INK,
+    );
 }
 
 fn opaque(c: [u8; 3]) -> [u8; 4] {
@@ -414,7 +420,9 @@ fn first_shown(count: usize, cursor: usize, shown: usize, step: usize) -> usize 
     if rows <= shown_rows {
         return 0;
     }
-    at.saturating_sub(shown_rows.saturating_sub(1) / 2).min(rows - shown_rows) * step
+    at.saturating_sub(shown_rows.saturating_sub(1) / 2)
+        .min(rows - shown_rows)
+        * step
 }
 
 const FILE_ROW_H: u32 = 42;
@@ -432,21 +440,48 @@ impl FilesPage {
         let top = HEAD_H + CRUMB_H + 4;
         if self.rows.is_empty() {
             s.glyph(Glyph::FolderOpen, W / 2, top + 100, 64.0, FAINT);
-            s.text((0, top + 140, W, 30), "This folder is empty", DIM, 16.0, Align::Centre);
+            s.text(
+                (0, top + 140, W, 30),
+                "This folder is empty",
+                DIM,
+                16.0,
+                Align::Centre,
+            );
         }
         let first = self.first_shown();
-        for (slot, (at, row)) in self.rows.iter().enumerate().skip(first).take(FILE_ROWS).enumerate() {
+        for (slot, (at, row)) in self
+            .rows
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(FILE_ROWS)
+            .enumerate()
+        {
             let y = top + slot as u32 * FILE_ROW_H;
             if at == self.cursor {
-                s.round((8, y + 1, W - 30, FILE_ROW_H - 2), 9, tinted(FILES_ACCENT, 0x30));
+                s.round(
+                    (8, y + 1, W - 30, FILE_ROW_H - 2),
+                    9,
+                    tinted(FILES_ACCENT, 0x30),
+                );
                 s.round((8, y + 10, 4, FILE_ROW_H - 20), 2, opaque(FILES_ACCENT));
             }
             let ink = if row.faded { FAINT } else { INK };
-            let tint = if row.faded { FAINT } else { opaque(row.icon.tint()) };
+            let tint = if row.faded {
+                FAINT
+            } else {
+                opaque(row.icon.tint())
+            };
             s.glyph(row.icon.glyph(), 36, y + FILE_ROW_H / 2, 22.0, tint);
             s.text((60, y, 360, FILE_ROW_H), &row.name, ink, 16.0, Align::Left);
             s.text((430, y, 96, FILE_ROW_H), &row.size, DIM, 13.0, Align::Right);
-            s.text((532, y, 110, FILE_ROW_H), &row.date, DIM, 13.0, Align::Right);
+            s.text(
+                (532, y, 110, FILE_ROW_H),
+                &row.date,
+                DIM,
+                13.0,
+                Align::Right,
+            );
         }
         s.scrollbar(
             (W - 14, top + 4, 4, FILE_ROWS as u32 * FILE_ROW_H - 8),
@@ -490,9 +525,17 @@ impl FilesPage {
                 x += 14.0;
             }
             let last = i + 1 == self.crumbs.len();
-            let w = (s.text_width(crumb, px) + 12.0).min(W as f32 - PAD as f32 - x).max(0.0);
+            let w = (s.text_width(crumb, px) + 12.0)
+                .min(W as f32 - PAD as f32 - x)
+                .max(0.0);
             let ink = if last { INK } else { DIM };
-            s.text((x as u32, y, w as u32, CRUMB_H), crumb, ink, px, Align::Left);
+            s.text(
+                (x as u32, y, w as u32, CRUMB_H),
+                crumb,
+                ink,
+                px,
+                Align::Left,
+            );
             x += w + 4.0;
         }
     }
@@ -505,7 +548,13 @@ impl Menu {
         let (x, y) = (W - PAD - w, HEAD_H + 10);
         s.round((x - 1, y - 1, w + 2, h + 2), 12, RULE);
         s.round((x, y, w, h), 11, PANEL);
-        s.text((x + 16, y + 4, w - 32, 34), &self.title, DIM, 13.0, Align::Left);
+        s.text(
+            (x + 16, y + 4, w - 32, 34),
+            &self.title,
+            DIM,
+            13.0,
+            Align::Left,
+        );
         for (i, (glyph, label, can)) in self.rows.iter().enumerate() {
             let ry = y + 40 + i as u32 * ROW;
             if i == self.cursor {
@@ -526,7 +575,13 @@ impl Dialog {
         let (x, y) = ((W - w) / 2, (H - h) / 2);
         s.round((x - 1, y - 1, w + 2, h + 2), 15, RULE);
         s.round((x, y, w, h), 14, PANEL);
-        s.text((x + 24, y + 14, w - 48, 34), &self.title, INK, 19.0, Align::Left);
+        s.text(
+            (x + 24, y + 14, w - 48, 34),
+            &self.title,
+            INK,
+            19.0,
+            Align::Left,
+        );
         s.wrapped((x + 24, y + 52, w - 48, 66), &self.body, DIM, 15.0, 3);
         if let Some(done) = self.progress {
             s.bar((x + 24, y + 124, w - 48, 6), done, accent);
@@ -546,22 +601,48 @@ impl GalleryPage {
         chrome(s, GALLERY_ACCENT, Glyph::Pictures, &self.title, &self.meta);
         if self.tiles.is_empty() {
             s.glyph(Glyph::Pictures, W / 2, 190, 64.0, FAINT);
-            s.text((0, 232, W, 30), "No pictures or videos here", DIM, 16.0, Align::Centre);
+            s.text(
+                (0, 232, W, 30),
+                "No pictures or videos here",
+                DIM,
+                16.0,
+                Align::Centre,
+            );
         }
         let shown = TILE_COLS * TILE_ROWS;
         let first = first_shown(self.tiles.len(), self.cursor, shown, TILE_COLS);
-        for (slot, (at, tile)) in self.tiles.iter().enumerate().skip(first).take(shown).enumerate() {
+        for (slot, (at, tile)) in self
+            .tiles
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(shown)
+            .enumerate()
+        {
             let (col, row) = ((slot % TILE_COLS) as u32, (slot / TILE_COLS) as u32);
             let x = PAD + col * (TILE_W + TILE_GAP);
             let y = HEAD_H + 12 + row * (TILE_H + TILE_GAP);
             if at == self.cursor {
-                s.round((x - 4, y - 4, TILE_W + 8, TILE_H + 8), 13, opaque(GALLERY_ACCENT));
+                s.round(
+                    (x - 4, y - 4, TILE_W + 8, TILE_H + 8),
+                    13,
+                    opaque(GALLERY_ACCENT),
+                );
             }
             s.round((x, y, TILE_W, TILE_H), 10, PANEL);
-            let thumb = tile.picture.as_deref().and_then(|p| thumb(p, TILE_W, TILE_H));
+            let thumb = tile
+                .picture
+                .as_deref()
+                .and_then(|p| thumb(p, TILE_W, TILE_H));
             match &thumb {
                 Some(px) => s.image_round(px, TILE_W, TILE_H, x, y, 10),
-                None => s.glyph(tile.icon.glyph(), x + TILE_W / 2, y + TILE_H / 2 - 10, 40.0, opaque(tile.icon.tint())),
+                None => s.glyph(
+                    tile.icon.glyph(),
+                    x + TILE_W / 2,
+                    y + TILE_H / 2 - 10,
+                    40.0,
+                    opaque(tile.icon.tint()),
+                ),
             }
             match tile.icon {
                 FileIcon::Video => {
@@ -574,12 +655,29 @@ impl GalleryPage {
                 }
                 _ => {}
             }
-            s.shade_in((x, y + TILE_H - 30, TILE_W, 30), (x, y, TILE_W, TILE_H), 0, 0xc8, 10);
-            s.text((x + 8, y + TILE_H - 28, TILE_W - 16, 26), &tile.name, INK, 13.0, Align::Left);
+            s.shade_in(
+                (x, y + TILE_H - 30, TILE_W, 30),
+                (x, y, TILE_W, TILE_H),
+                0,
+                0xc8,
+                10,
+            );
+            s.text(
+                (x + 8, y + TILE_H - 28, TILE_W - 16, 26),
+                &tile.name,
+                INK,
+                13.0,
+                Align::Left,
+            );
         }
         let rows = self.tiles.len().div_ceil(TILE_COLS);
         s.scrollbar(
-            (W - 7, HEAD_H + 12, 3, TILE_ROWS as u32 * (TILE_H + TILE_GAP) - TILE_GAP),
+            (
+                W - 7,
+                HEAD_H + 12,
+                3,
+                TILE_ROWS as u32 * (TILE_H + TILE_GAP) - TILE_GAP,
+            ),
             first / TILE_COLS,
             TILE_ROWS,
             rows,
@@ -598,17 +696,41 @@ impl ViewerPage {
             Some((px, fw, fh)) => s.image(&px, fw, fh, (W - fw) / 2, (H - fh) / 2),
             None => {
                 s.glyph(Glyph::Alert, W / 2, H / 2 - 20, 48.0, FAINT);
-                s.text((0, H / 2 + 16, W, 30), "This picture will not open", DIM, 16.0, Align::Centre);
+                s.text(
+                    (0, H / 2 + 16, W, 30),
+                    "This picture will not open",
+                    DIM,
+                    16.0,
+                    Align::Centre,
+                );
             }
         }
         if !self.chrome {
             return;
         }
         s.shade((0, 0, W, 64), 0xc0, 0, 16);
-        s.text((PAD + 4, 6, W - 160, 40), &self.name, INK, 18.0, Align::Left);
-        s.text((W - PAD - 130, 6, 126, 40), &self.place, DIM, 15.0, Align::Right);
+        s.text(
+            (PAD + 4, 6, W - 160, 40),
+            &self.name,
+            INK,
+            18.0,
+            Align::Left,
+        );
+        s.text(
+            (W - PAD - 130, 6, 126, 40),
+            &self.place,
+            DIM,
+            15.0,
+            Align::Right,
+        );
         s.shade((0, H - 60, W, 60), 0, 0xc8, 16);
-        legends_into(&mut s.px, W, (0, H - FOOT_H, W, FOOT_H - 4), &self.legends, INK);
+        legends_into(
+            &mut s.px,
+            W,
+            (0, H - FOOT_H, W, FOOT_H - 4),
+            &self.legends,
+            INK,
+        );
     }
 }
 
@@ -623,24 +745,51 @@ impl LibraryPage {
         chrome(s, self.accent, Glyph::Shelf, &self.title, &self.meta);
         if self.tiles.is_empty() {
             s.glyph(Glyph::Shelf, W / 2, 190, 64.0, FAINT);
-            s.text((0, 232, W, 30), "Nothing to read here yet", DIM, 16.0, Align::Centre);
+            s.text(
+                (0, 232, W, 30),
+                "Nothing to read here yet",
+                DIM,
+                16.0,
+                Align::Centre,
+            );
         }
         let gap = (W - 2 * PAD - BOOK_COLS as u32 * BOOK_W) / (BOOK_COLS as u32 - 1);
         let shown = BOOK_COLS * BOOK_ROWS;
         let first = first_shown(self.tiles.len(), self.cursor, shown, BOOK_COLS);
-        for (slot, (at, tile)) in self.tiles.iter().enumerate().skip(first).take(shown).enumerate() {
+        for (slot, (at, tile)) in self
+            .tiles
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(shown)
+            .enumerate()
+        {
             let (col, row) = ((slot % BOOK_COLS) as u32, (slot / BOOK_COLS) as u32);
             let x = PAD + col * (BOOK_W + gap);
             let y = HEAD_H + 10 + row * (BOOK_H + BOOK_CAPTION + 6);
             if at == self.cursor {
-                s.round((x - 4, y - 4, BOOK_W + 8, BOOK_H + 8), 9, opaque(self.accent));
+                s.round(
+                    (x - 4, y - 4, BOOK_W + 8, BOOK_H + 8),
+                    9,
+                    opaque(self.accent),
+                );
             }
             match tile.icon {
                 FileIcon::Folder => {
                     s.round((x, y, BOOK_W, BOOK_H), 6, PANEL);
-                    s.glyph(Glyph::Folder, x + BOOK_W / 2, y + BOOK_H / 2, 44.0, opaque(FILES_ACCENT));
+                    s.glyph(
+                        Glyph::Folder,
+                        x + BOOK_W / 2,
+                        y + BOOK_H / 2,
+                        44.0,
+                        opaque(FILES_ACCENT),
+                    );
                 }
-                _ => match tile.picture.as_deref().and_then(|p| thumb(p, BOOK_W, BOOK_H)) {
+                _ => match tile
+                    .picture
+                    .as_deref()
+                    .and_then(|p| thumb(p, BOOK_W, BOOK_H))
+                {
                     Some(px) => s.image_round(&px, BOOK_W, BOOK_H, x, y, 5),
                     None => s.made_cover((x, y, BOOK_W, BOOK_H), &tile.name),
                 },
@@ -650,13 +799,34 @@ impl LibraryPage {
                 let fill = ((BOOK_W - 12) * u32::from(read.min(100)) / 100).max(4);
                 s.round((x + 6, y + BOOK_H - 9, fill, 4), 2, opaque(self.accent));
             }
-            let ink = if at == self.cursor { INK } else { [0xd6, 0xd4, 0xcf, 0xff] };
-            s.text((x - 4, y + BOOK_H + 3, BOOK_W + 8, 18), &tile.name, ink, 13.0, Align::Centre);
-            s.text((x - 4, y + BOOK_H + 19, BOOK_W + 8, 14), &tile.detail, DIM, 11.0, Align::Centre);
+            let ink = if at == self.cursor {
+                INK
+            } else {
+                [0xd6, 0xd4, 0xcf, 0xff]
+            };
+            s.text(
+                (x - 4, y + BOOK_H + 3, BOOK_W + 8, 18),
+                &tile.name,
+                ink,
+                13.0,
+                Align::Centre,
+            );
+            s.text(
+                (x - 4, y + BOOK_H + 19, BOOK_W + 8, 14),
+                &tile.detail,
+                DIM,
+                11.0,
+                Align::Centre,
+            );
         }
         let rows = self.tiles.len().div_ceil(BOOK_COLS);
         s.scrollbar(
-            (W - 7, HEAD_H + 10, 3, BOOK_ROWS as u32 * (BOOK_H + BOOK_CAPTION + 6) - 6),
+            (
+                W - 7,
+                HEAD_H + 10,
+                3,
+                BOOK_ROWS as u32 * (BOOK_H + BOOK_CAPTION + 6) - 6,
+            ),
             first / BOOK_COLS,
             BOOK_ROWS,
             rows,
@@ -669,7 +839,13 @@ impl LibraryPage {
 impl ReaderPage {
     fn draw(&self, s: &mut Sheet) {
         s.round((0, 0, W, H), 16, WINDOW);
-        s.text((PAD + 4, 4, W - 220, 40), &self.title, INK, 17.0, Align::Left);
+        s.text(
+            (PAD + 4, 4, W - 220, 40),
+            &self.title,
+            INK,
+            17.0,
+            Align::Left,
+        );
         let place = format!("Page {} of {}", self.page + 1, self.pages.max(1));
         s.text((W - PAD - 190, 4, 186, 40), &place, DIM, 14.0, Align::Right);
         let (x, y, w, h) = PAPER_RECT;
@@ -689,15 +865,33 @@ impl ReaderPage {
                 s.round((x, y, w, h), 6, PAPER);
                 for (i, line) in self.lines.iter().take(READER_LINES).enumerate() {
                     let ly = y + 14 + i as u32 * READER_LINE_H;
-                    s.text((x + PAPER_MARGIN, ly, READER_TEXT_W + 8, READER_LINE_H), line, PAPER_INK, READER_PX, Align::Left);
+                    s.text(
+                        (x + PAPER_MARGIN, ly, READER_TEXT_W + 8, READER_LINE_H),
+                        line,
+                        PAPER_INK,
+                        READER_PX,
+                        Align::Left,
+                    );
                 }
             }
         }
         let fy = H - FOOT_H;
         let done = (self.page + 1) as f32 / self.pages.max(1) as f32;
         s.bar((PAD, fy + 4, W - 2 * PAD, 4), done, self.accent);
-        s.text((PAD, fy + 8, 120, FOOT_H - 8), &format!("{}%", (done * 100.0).round()), DIM, 14.0, Align::Left);
-        legends_into(&mut s.px, W, (140, fy + 8, W - 280, FOOT_H - 8), &self.legends, INK);
+        s.text(
+            (PAD, fy + 8, 120, FOOT_H - 8),
+            &format!("{}%", (done * 100.0).round()),
+            DIM,
+            14.0,
+            Align::Left,
+        );
+        legends_into(
+            &mut s.px,
+            W,
+            (140, fy + 8, W - 280, FOOT_H - 8),
+            &self.legends,
+            INK,
+        );
     }
 }
 
@@ -719,13 +913,39 @@ impl MusicPage {
             Some(px) => s.image_round(&px, ART, ART, ax, ay, 12),
             None => {
                 s.round((ax, ay, ART, ART), 12, PANEL);
-                s.glyph(Glyph::Album, ax + ART / 2, ay + ART / 2, 84.0, tinted(MUSIC_ACCENT, 0xc0));
+                s.glyph(
+                    Glyph::Album,
+                    ax + ART / 2,
+                    ay + ART / 2,
+                    84.0,
+                    tinted(MUSIC_ACCENT, 0xc0),
+                );
             }
         }
-        let title = if self.loaded { self.title.as_str() } else { "Nothing playing" };
-        let artist = if self.loaded { self.artist.as_str() } else { "Press A on a track to play it" };
-        s.text((12, ay + ART + 6, pane - 24, 26), title, INK, 18.0, Align::Centre);
-        s.text((12, ay + ART + 30, pane - 24, 20), artist, DIM, 13.0, Align::Centre);
+        let title = if self.loaded {
+            self.title.as_str()
+        } else {
+            "Nothing playing"
+        };
+        let artist = if self.loaded {
+            self.artist.as_str()
+        } else {
+            "Press A on a track to play it"
+        };
+        s.text(
+            (12, ay + ART + 6, pane - 24, 26),
+            title,
+            INK,
+            18.0,
+            Align::Centre,
+        );
+        s.text(
+            (12, ay + ART + 30, pane - 24, 20),
+            artist,
+            DIM,
+            13.0,
+            Align::Centre,
+        );
         let (bx, by, bw) = (34, ay + ART + 60, pane - 68);
         let done = match self.total {
             Some(t) if t > 0 => self.secs as f32 / t as f32,
@@ -733,39 +953,105 @@ impl MusicPage {
         };
         s.bar((bx, by, bw, 4), done, MUSIC_ACCENT);
         if self.loaded {
-            s.disc(bx + (bw as f32 * done.min(1.0)) as u32, by + 2, 6, opaque(MUSIC_ACCENT));
+            s.disc(
+                bx + (bw as f32 * done.min(1.0)) as u32,
+                by + 2,
+                6,
+                opaque(MUSIC_ACCENT),
+            );
         }
         let total = self.total.map(clock).unwrap_or_default();
-        s.text((bx - 4, by + 8, 80, 18), &clock(self.secs), DIM, 12.0, Align::Left);
-        s.text((bx + bw - 76, by + 8, 80, 18), &total, DIM, 12.0, Align::Right);
+        s.text(
+            (bx - 4, by + 8, 80, 18),
+            &clock(self.secs),
+            DIM,
+            12.0,
+            Align::Left,
+        );
+        s.text(
+            (bx + bw - 76, by + 8, 80, 18),
+            &total,
+            DIM,
+            12.0,
+            Align::Right,
+        );
         let ty = by + 46;
         let cx = pane / 2;
         s.glyph(Glyph::Previous, cx - 60, ty, 26.0, INK);
         s.disc(cx, ty, 20, opaque(MUSIC_ACCENT));
-        let go = if self.loaded && !self.paused { Glyph::Pause } else { Glyph::Play };
+        let go = if self.loaded && !self.paused {
+            Glyph::Pause
+        } else {
+            Glyph::Play
+        };
         let nudge = if matches!(go, Glyph::Play) { 2 } else { 0 };
         s.glyph(go, cx + nudge, ty, 26.0, INK);
         s.glyph(Glyph::Next, cx + 60, ty, 26.0, INK);
 
         let lx = pane + 12;
-        s.text((lx + 4, HEAD_H + 6, 200, 26), &self.heading.to_uppercase(), DIM, 12.0, Align::Left);
+        s.text(
+            (lx + 4, HEAD_H + 6, 200, 26),
+            &self.heading.to_uppercase(),
+            DIM,
+            12.0,
+            Align::Left,
+        );
         let top = HEAD_H + 34;
         if self.tracks.is_empty() {
-            s.wrapped((lx + 4, top + 100, W - lx - 24, 60), &self.status, DIM, 15.0, 2);
+            s.wrapped(
+                (lx + 4, top + 100, W - lx - 24, 60),
+                &self.status,
+                DIM,
+                15.0,
+                2,
+            );
         }
         let first = self.first_shown();
-        for (slot, (at, track)) in self.tracks.iter().enumerate().skip(first).take(TRACK_ROWS).enumerate() {
+        for (slot, (at, track)) in self
+            .tracks
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(TRACK_ROWS)
+            .enumerate()
+        {
             let y = top + slot as u32 * TRACK_ROW_H;
             if at == self.cursor {
-                s.round((lx, y + 1, W - lx - 22, TRACK_ROW_H - 2), 8, tinted(MUSIC_ACCENT, 0x30));
+                s.round(
+                    (lx, y + 1, W - lx - 22, TRACK_ROW_H - 2),
+                    8,
+                    tinted(MUSIC_ACCENT, 0x30),
+                );
             }
             let now = self.now == Some(at);
             match now {
-                true => s.glyph(if self.paused { Glyph::Pause } else { Glyph::Music }, lx + 20, y + TRACK_ROW_H / 2, 16.0, opaque(MUSIC_ACCENT)),
-                false => s.text((lx + 2, y, 36, TRACK_ROW_H), &(at + 1).to_string(), FAINT, 13.0, Align::Centre),
+                true => s.glyph(
+                    if self.paused {
+                        Glyph::Pause
+                    } else {
+                        Glyph::Music
+                    },
+                    lx + 20,
+                    y + TRACK_ROW_H / 2,
+                    16.0,
+                    opaque(MUSIC_ACCENT),
+                ),
+                false => s.text(
+                    (lx + 2, y, 36, TRACK_ROW_H),
+                    &(at + 1).to_string(),
+                    FAINT,
+                    13.0,
+                    Align::Centre,
+                ),
             }
             let ink = if now { opaque(MUSIC_ACCENT) } else { INK };
-            s.text((lx + 40, y, W - lx - 70, TRACK_ROW_H), track, ink, 15.0, Align::Left);
+            s.text(
+                (lx + 40, y, W - lx - 70, TRACK_ROW_H),
+                track,
+                ink,
+                15.0,
+                Align::Left,
+            );
         }
         s.scrollbar(
             (W - 12, top + 2, 3, TRACK_ROWS as u32 * TRACK_ROW_H - 4),
@@ -774,7 +1060,11 @@ impl MusicPage {
             self.tracks.len(),
             MUSIC_ACCENT,
         );
-        let status = if self.tracks.is_empty() { "" } else { &self.status };
+        let status = if self.tracks.is_empty() {
+            ""
+        } else {
+            &self.status
+        };
         footer(s, status, &self.legends);
     }
 
@@ -909,7 +1199,13 @@ pub fn video_osd(frame: &[u8], osd: &VideoOsd) -> UndoFace {
         h: H,
     };
     s.shade((0, 0, W, 70), 0xb0, 0, 12);
-    s.text((PAD + 4, 6, W - 2 * PAD, 40), &osd.title, INK, 18.0, Align::Left);
+    s.text(
+        (PAD + 4, 6, W - 2 * PAD, 40),
+        &osd.title,
+        INK,
+        18.0,
+        Align::Left,
+    );
     s.shade((0, H - 96, W, 96), 0, 0xd8, 12);
     let (bx, by, bw) = (78, H - 66, W - 156);
     let done = match osd.total {
@@ -917,11 +1213,34 @@ pub fn video_osd(frame: &[u8], osd: &VideoOsd) -> UndoFace {
         _ => 0.0,
     };
     s.bar((bx, by, bw, 4), done, MUSIC_ACCENT);
-    s.disc(bx + (bw as f32 * done.min(1.0)) as u32, by + 2, 6, opaque(MUSIC_ACCENT));
-    s.text((PAD, by - 12, 58, 28), &clock(osd.secs), INK, 13.0, Align::Right);
+    s.disc(
+        bx + (bw as f32 * done.min(1.0)) as u32,
+        by + 2,
+        6,
+        opaque(MUSIC_ACCENT),
+    );
+    s.text(
+        (PAD, by - 12, 58, 28),
+        &clock(osd.secs),
+        INK,
+        13.0,
+        Align::Right,
+    );
     let total = osd.total.map(clock).unwrap_or_else(|| "--:--".into());
-    s.text((W - PAD - 58, by - 12, 58, 28), &total, INK, 13.0, Align::Left);
-    legends_into(&mut s.px, W, (0, H - FOOT_H - 4, W, FOOT_H), &osd.legends, INK);
+    s.text(
+        (W - PAD - 58, by - 12, 58, 28),
+        &total,
+        INK,
+        13.0,
+        Align::Left,
+    );
+    legends_into(
+        &mut s.px,
+        W,
+        (0, H - FOOT_H - 4, W, FOOT_H),
+        &osd.legends,
+        INK,
+    );
     if osd.paused {
         s.disc(W / 2, H / 2, 36, [0, 0, 0, 0xa0]);
         s.glyph(Glyph::Pause, W / 2, H / 2, 40.0, INK);
@@ -959,7 +1278,8 @@ fn thumb(path: &Path, w: u32, h: u32) -> Option<Arc<Vec<u8>>> {
 
 /// A track's cover, square, kept for the track playing.
 fn cover(c: &Cover, side: u32) -> Option<Arc<Vec<u8>>> {
-    static LAST: OnceLock<Mutex<Option<(Cover, Option<Arc<Vec<u8>>>)>>> = OnceLock::new();
+    type CachedCover = Option<(Cover, Option<Arc<Vec<u8>>>)>;
+    static LAST: OnceLock<Mutex<CachedCover>> = OnceLock::new();
     let last = LAST.get_or_init(Mutex::default);
     let mut last = last.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((was, px)) = last.as_ref() {
@@ -1059,7 +1379,11 @@ impl Sheet {
     }
 
     fn disc(&mut self, cx: u32, cy: u32, r: u32, c: [u8; 4]) {
-        self.round((cx.saturating_sub(r), cy.saturating_sub(r), 2 * r, 2 * r), r, c);
+        self.round(
+            (cx.saturating_sub(r), cy.saturating_sub(r), 2 * r, 2 * r),
+            r,
+            c,
+        );
     }
 
     /// A band shading from `from` to `to` black, top to bottom, inside the window's rounded corners.
@@ -1094,7 +1418,14 @@ impl Sheet {
     }
 
     /// Where a list stands in all of it, for one longer than is shown.
-    fn scrollbar(&mut self, (x, y, w, h): (u32, u32, u32, u32), first: usize, shown: usize, all: usize, accent: [u8; 3]) {
+    fn scrollbar(
+        &mut self,
+        (x, y, w, h): (u32, u32, u32, u32),
+        first: usize,
+        shown: usize,
+        all: usize,
+        accent: [u8; 3],
+    ) {
         if all <= shown {
             return;
         }
@@ -1147,7 +1478,14 @@ impl Sheet {
     }
 
     /// `s` as written in the box, on one line, cut short with dots where it is too long.
-    fn text(&mut self, (x, y, w, h): (u32, u32, u32, u32), s: &str, ink: [u8; 4], px: f32, align: Align) {
+    fn text(
+        &mut self,
+        (x, y, w, h): (u32, u32, u32, u32),
+        s: &str,
+        ink: [u8; 4],
+        px: f32,
+        align: Align,
+    ) {
         let Some(font) = text::label_font() else {
             return;
         };
@@ -1168,7 +1506,8 @@ impl Sheet {
             }
         }
         let layout = text::fit_as_written(font, &line, f32::MAX, px, px);
-        let set = (text::line_width(font, &line, layout.px, layout.tracking).ceil() as u32 + 2).min(w);
+        let set =
+            (text::line_width(font, &line, layout.px, layout.tracking).ceil() as u32 + 2).min(w);
         let bx = match align {
             Align::Left => x,
             Align::Centre => x + (w - set) / 2,
@@ -1184,7 +1523,14 @@ impl Sheet {
     }
 
     /// `s` wrapped to the box's width, up to `lines` of it, from the top left.
-    fn wrapped(&mut self, (x, y, w, h): (u32, u32, u32, u32), s: &str, ink: [u8; 4], px: f32, lines: usize) {
+    fn wrapped(
+        &mut self,
+        (x, y, w, h): (u32, u32, u32, u32),
+        s: &str,
+        ink: [u8; 4],
+        px: f32,
+        lines: usize,
+    ) {
         let Some(font) = text::label_font() else {
             return;
         };
@@ -1202,7 +1548,9 @@ impl Sheet {
     /// A cover for a book that has none: cloth of a colour its title picks, a spine down its
     /// left, and the title set on it.
     fn made_cover(&mut self, (x, y, w, h): (u32, u32, u32, u32), title: &str) {
-        let hash = title.bytes().fold(0x811c_9dc5u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
+        let hash = title.bytes().fold(0x811c_9dc5u32, |h, b| {
+            (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
+        });
         let hue = (hash % 360) as f32;
         let cloth = hsl(hue, 0.42, 0.34);
         self.round((x, y, w, h), 5, opaque(cloth));
@@ -1247,15 +1595,46 @@ mod tests {
     fn every_glyph_is_in_the_symbols_font() {
         let font = crate::icon::symbols_font().unwrap();
         for g in [
-            Glyph::Folder, Glyph::FolderOpen, Glyph::File, Glyph::Picture, Glyph::Video,
-            Glyph::Audio, Glyph::Text, Glyph::Pdf, Glyph::Book, Glyph::Script, Glyph::Archive,
-            Glyph::Game, Glyph::Play, Glyph::Pause, Glyph::Next, Glyph::Previous, Glyph::Card,
-            Glyph::Copy, Glyph::Cut, Glyph::Paste, Glyph::Delete, Glyph::Rename,
-            Glyph::NewFolder, Glyph::Album, Glyph::Check, Glyph::Chevron, Glyph::PlayCircle,
-            Glyph::Film, Glyph::Pictures, Glyph::Music, Glyph::Shelf, Glyph::UpFolder,
-            Glyph::Alert, Glyph::Close,
+            Glyph::Folder,
+            Glyph::FolderOpen,
+            Glyph::File,
+            Glyph::Picture,
+            Glyph::Video,
+            Glyph::Audio,
+            Glyph::Text,
+            Glyph::Pdf,
+            Glyph::Book,
+            Glyph::Script,
+            Glyph::Archive,
+            Glyph::Game,
+            Glyph::Play,
+            Glyph::Pause,
+            Glyph::Next,
+            Glyph::Previous,
+            Glyph::Card,
+            Glyph::Copy,
+            Glyph::Cut,
+            Glyph::Paste,
+            Glyph::Delete,
+            Glyph::Rename,
+            Glyph::NewFolder,
+            Glyph::Album,
+            Glyph::Check,
+            Glyph::Chevron,
+            Glyph::PlayCircle,
+            Glyph::Film,
+            Glyph::Pictures,
+            Glyph::Music,
+            Glyph::Shelf,
+            Glyph::UpFolder,
+            Glyph::Alert,
+            Glyph::Close,
         ] {
-            assert_ne!(font.lookup_glyph_index(g.char()), 0, "{g:?} is not in the font");
+            assert_ne!(
+                font.lookup_glyph_index(g.char()),
+                0,
+                "{g:?} is not in the font"
+            );
         }
     }
 

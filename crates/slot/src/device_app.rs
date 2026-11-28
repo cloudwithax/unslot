@@ -7,7 +7,8 @@ use slot::panel_turn::{panel_turn, PanelTurn};
 use slot_ftrace::{self as ft, ev};
 use slot_gfx::hdmi::{self, CableWatch};
 use slot_gfx::{Compositor, FbdevSurface, Surface};
-use slot_power::{trace_first_frame, DevicePlatform};
+use slot_input::InputSource;
+use slot_power::{trace_first_frame, DevicePlatform, WakeReason};
 
 const CARD: &str = "/mnt/sdcard";
 
@@ -179,7 +180,9 @@ pub fn run() {
         });
     let mut drawn = false;
     let mut dozed_blank = false;
-    frontend.drive_emulator();
+    let mut s3_fallback = false;
+    // Keep every core paced at its own exact content frame rate rather than locking to the
+    // panel's refresh rate, which overclocks cores and pitches up audio.
     let mut pacer = Pacer::new();
     let (mut frames, mut missed, mut early) = (0u32, 0u32, 0u32);
     let mut present_no = 0i64;
@@ -215,11 +218,28 @@ pub fn run() {
         }
         let dozing = frontend.dozing() && !frontend.app().shutting_down();
         if dozing && dozed_blank {
+            if !s3_fallback && use_hardware_s3() && frontend.can_deep_sleep() {
+                match run_s3_sleep(&mut frontend, &mut input) {
+                    S3Outcome::PowerOff => {
+                        frontend.poweroff();
+                        return;
+                    }
+                    S3Outcome::Woke => {
+                        dozed_blank = false;
+                        pacer.last_return = None;
+                    }
+                    S3Outcome::Fallback => {
+                        s3_fallback = true;
+                    }
+                }
+                continue;
+            }
             std::thread::sleep(Duration::from_millis(50));
             continue;
         }
         if !dozing {
             dozed_blank = false;
+            s3_fallback = false;
         }
         {
             let _s = ft::span(ev::PRESENT_STEP, 0);
@@ -269,6 +289,77 @@ pub fn run() {
         if let Some(left) = MIN_FRAME.checked_sub(began.elapsed()) {
             let _s = ft::span(ev::PRESENT_MIN_SLEEP, left.as_nanos() as i64);
             std::thread::sleep(left);
+        }
+    }
+}
+
+enum S3Outcome {
+    Woke,
+    PowerOff,
+    Fallback,
+}
+
+fn use_hardware_s3() -> bool {
+    slot::pak::CHIP == "a133p" && !std::env::var("SLOT_S3").is_ok_and(|v| v == "off")
+}
+
+/// Suspends an A133P handheld to hardware S3 (`mem`) with an optional RTC wakealarm for timed
+/// auto power-off. Re-enters S3 automatically on non-power wakes (such as USB plug/unplug).
+fn run_s3_sleep(frontend: &mut Frontend, input: &mut DeviceInput) -> S3Outcome {
+    slot::audio::release_for_suspend();
+    std::thread::sleep(Duration::from_millis(40));
+
+    let mut remaining = frontend.suspend_timeout();
+    let mut rapid_other: u32 = 0;
+
+    loop {
+        match remaining {
+            Some(dur) => eprintln!("slot: s3: entering mem (alarm in {}s)", dur.as_secs()),
+            None => eprintln!("slot: s3: entering mem (no alarm)"),
+        }
+        let (reason, elapsed) = frontend.suspend_to_ram(remaining);
+        match reason {
+            WakeReason::Alarm => {
+                eprintln!(
+                    "slot: s3: RTC alarm woke device after {elapsed}s; saving and powering off"
+                );
+                frontend.prepare_suspend_poweroff();
+                return S3Outcome::PowerOff;
+            }
+            WakeReason::PowerKey => {
+                eprintln!("slot: s3: woke by power key after {elapsed}s");
+                let now = frontend.now_ms();
+                let _ = input.poll(now);
+                std::thread::sleep(Duration::from_millis(40));
+                let _ = input.poll(frontend.now_ms());
+                frontend.wake_from_suspend();
+                return S3Outcome::Woke;
+            }
+            WakeReason::Other => {
+                if let Some(left) = remaining {
+                    let left_secs = left.as_secs().saturating_sub(elapsed);
+                    if left_secs == 0 {
+                        eprintln!(
+                            "slot: s3: sleep timer elapsed ({elapsed}s); saving and powering off"
+                        );
+                        frontend.prepare_suspend_poweroff();
+                        return S3Outcome::PowerOff;
+                    }
+                    remaining = Some(Duration::from_secs(left_secs));
+                }
+                if elapsed < 2 {
+                    rapid_other += 1;
+                    if rapid_other >= 5 {
+                        eprintln!("slot: s3: repeated non-power wakes, falling back to light doze");
+                        return S3Outcome::Fallback;
+                    }
+                } else {
+                    rapid_other = 0;
+                }
+                eprintln!("slot: s3: non-power wake after {elapsed}s; returning to mem");
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            WakeReason::Unsupported => return S3Outcome::Fallback,
         }
     }
 }

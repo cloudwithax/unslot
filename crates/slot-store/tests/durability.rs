@@ -311,6 +311,7 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             scale_gb: slot_store::Scale::default(),
             scale_gbc: slot_store::Scale::default(),
             stretches: [slot_store::Stretch::default(); Platform::COUNT],
+            hidden_shelves: [false; Platform::COUNT],
         }
     );
 }

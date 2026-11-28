@@ -29,12 +29,12 @@
 #define AUDIO_F32LSB 0x8120
 
 /* SDL_QUIT, the keyboard's events, 0x300 to 0x3ff, and the joystick and game controller
- * events, 0x600 to 0x6ff. */
+ * input events (leaving device-added/removed events through so SDL discovers the pad). */
 #define SDL_QUIT 0x100
 #define SDL_KEY_FIRST 0x300
 #define SDL_KEY_LAST 0x3ff
-#define SDL_JOY_FIRST 0x600
-#define SDL_JOY_LAST 0x6ff
+#define SDL_JOYAXISMOTION 0x600
+#define SDL_JOYBUTTONUP 0x604
 #define SDL_CONTROLLERAXISMOTION 0x650
 #define SDL_CONTROLLERBUTTONDOWN 0x651
 #define SDL_CONTROLLERBUTTONUP 0x652
@@ -254,6 +254,48 @@ int16_t SDL_GameControllerGetAxis(void *c, int axis) {
 	return real ? real(c, axis) : 0;
 }
 
+/* Driven, PICO-8 sees only slot's bridged controller: silence SDL's raw keyboard and joystick
+ * state so hardware evdev nodes (such as a second polled keypad) cannot double-fire inputs. */
+const uint8_t *SDL_GetKeyboardState(int *numkeys) {
+	static const uint8_t *(*real)(int *);
+	static uint8_t quiet[512];
+	if (bridge_on()) {
+		if (numkeys)
+			*numkeys = (int)sizeof quiet;
+		return quiet;
+	}
+	if (!real)
+		*(void **)&real = dlsym(RTLD_NEXT, "SDL_GetKeyboardState");
+	return real ? real(numkeys) : quiet;
+}
+
+uint8_t SDL_JoystickGetButton(void *j, int button) {
+	static uint8_t (*real)(void *, int);
+	if (bridge_on())
+		return 0;
+	if (!real)
+		*(void **)&real = dlsym(RTLD_NEXT, "SDL_JoystickGetButton");
+	return real ? real(j, button) : 0;
+}
+
+uint8_t SDL_JoystickGetHat(void *j, int hat) {
+	static uint8_t (*real)(void *, int);
+	if (bridge_on())
+		return 0;
+	if (!real)
+		*(void **)&real = dlsym(RTLD_NEXT, "SDL_JoystickGetHat");
+	return real ? real(j, hat) : 0;
+}
+
+int16_t SDL_JoystickGetAxis(void *j, int axis) {
+	static int16_t (*real)(void *, int);
+	if (bridge_on())
+		return 0;
+	if (!real)
+		*(void **)&real = dlsym(RTLD_NEXT, "SDL_JoystickGetAxis");
+	return real ? real(j, axis) : 0;
+}
+
 /* Driven: SDL_QUIT once slot closes PICO-8, then slot's pad, as presses and stick moves of the
  * controller PICO-8 opened, and none of the real pad's or keyboard's. */
 static int bridged_event(Event *e, int (*real)(Event *)) {
@@ -299,7 +341,8 @@ static int bridged_event(Event *e, int (*real)(Event *)) {
 		if (!got)
 			return 0;
 		uint32_t type = e->common.type;
-		if ((type >= SDL_JOY_FIRST && type <= SDL_JOY_LAST) ||
+		if ((type >= SDL_JOYAXISMOTION && type <= SDL_JOYBUTTONUP) ||
+				(type >= SDL_CONTROLLERAXISMOTION && type <= SDL_CONTROLLERBUTTONUP) ||
 				(type >= SDL_KEY_FIRST && type <= SDL_KEY_LAST))
 			continue;
 		return got;

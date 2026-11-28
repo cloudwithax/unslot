@@ -80,7 +80,9 @@ impl Entry {
             Kind::Other => {
                 let game = slot_store::Platform::ALL
                     .into_iter()
-                    .filter(|p| !matches!(p, slot_store::Platform::Ports | slot_store::Platform::Apps))
+                    .filter(|p| {
+                        !matches!(p, slot_store::Platform::Ports | slot_store::Platform::Apps)
+                    })
                     .any(|p| p.accepts(&self.path));
                 let ext = self.path.extension().and_then(|e| e.to_str()).unwrap_or("");
                 match (game, ext.to_ascii_lowercase().as_str()) {
@@ -166,7 +168,11 @@ pub fn list(dir: &Path, only: Option<&[Kind]>) -> Vec<Entry> {
             .map(|d| d.as_secs() as i64);
         e.size = match e.kind {
             Kind::Folder => std::fs::read_dir(&e.path)
-                .map(|d| d.flatten().filter(|c| !slot_store::is_hidden(&c.path())).count() as u64)
+                .map(|d| {
+                    d.flatten()
+                        .filter(|c| !slot_store::is_hidden(&c.path()))
+                        .count() as u64
+                })
                 .unwrap_or(0),
             _ => meta.map_or(0, |m| m.len()),
         };

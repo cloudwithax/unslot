@@ -121,7 +121,13 @@ fn box_average(src: &[u8], sw: u32, sh: u32, x0: f32, y0: f32, x1: f32, y1: f32)
 }
 
 /// `src` fitted whole inside `w` by `h`, keeping its shape: the scaled picture and its size.
-pub(crate) fn fit_rgba(src: &[u8], sw: u32, sh: u32, w: u32, h: u32) -> Option<(Vec<u8>, u32, u32)> {
+pub(crate) fn fit_rgba(
+    src: &[u8],
+    sw: u32,
+    sh: u32,
+    w: u32,
+    h: u32,
+) -> Option<(Vec<u8>, u32, u32)> {
     if sw == 0 || sh == 0 {
         return None;
     }

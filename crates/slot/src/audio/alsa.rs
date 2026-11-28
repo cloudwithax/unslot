@@ -44,6 +44,12 @@ pub fn set_route(device: Option<String>) {
     }
 }
 
+/// Releases any open ALSA PCM before entering hardware S3 suspend; the audio thread reopens it
+/// automatically on the next sound after resume.
+pub fn release_for_suspend() {
+    ROUTE_CHANGES.fetch_add(1, Ordering::Relaxed);
+}
+
 /// The H700's HDMI sound card, tried before the speaker while the picture is on a TV.
 const HDMI_DEVICES: [&str; 2] = ["plughw:CARD=ahubhdmi,DEV=0", "plughw:ahubhdmi"];
 

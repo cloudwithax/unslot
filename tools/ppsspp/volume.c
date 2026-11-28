@@ -7,12 +7,164 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <GLES2/gl2.h>
 #include "SDL.h"
 #include "bridge.h"
+
+/* Minimal Khronos EGL ABI definitions for redirecting PPSSPP onto an offscreen Pbuffer surface
+ * when bridged into slot, so PPSSPPSDL never renders into /dev/fb0 while slot owns the display. */
+typedef void *EGLDisplay;
+typedef void *EGLConfig;
+typedef void *EGLSurface;
+typedef void *EGLContext;
+typedef int EGLint;
+typedef unsigned int EGLBoolean;
+
+#define UNSLOT_EGL_NO_DISPLAY ((EGLDisplay)0)
+#define UNSLOT_EGL_NO_SURFACE ((EGLSurface)0)
+#define UNSLOT_EGL_NO_CONTEXT ((EGLContext)0)
+#define UNSLOT_EGL_CONFIG_ID  0x3028
+#define UNSLOT_EGL_NONE       0x3038
+#define UNSLOT_EGL_HEIGHT     0x3056
+#define UNSLOT_EGL_WIDTH      0x3057
+#define UNSLOT_EGL_DRAW       0x3059
+
+static EGLDisplay (*p_eglGetCurrentDisplay)(void);
+static EGLContext (*p_eglGetCurrentContext)(void);
+static EGLSurface (*p_eglGetCurrentSurface)(EGLint);
+static EGLBoolean (*p_eglQueryContext)(EGLDisplay, EGLContext, EGLint, EGLint *);
+static EGLBoolean (*p_eglQuerySurface)(EGLDisplay, EGLSurface, EGLint, EGLint *);
+static EGLBoolean (*p_eglChooseConfig)(EGLDisplay, const EGLint *, EGLConfig *, EGLint, EGLint *);
+static EGLSurface (*p_eglCreatePbufferSurface)(EGLDisplay, EGLConfig, const EGLint *);
+static EGLBoolean (*p_eglMakeCurrent)(EGLDisplay, EGLSurface, EGLSurface, EGLContext);
+static EGLBoolean (*p_eglDestroySurface)(EGLDisplay, EGLSurface);
+
+static EGLDisplay offscreen_dpy = UNSLOT_EGL_NO_DISPLAY;
+static EGLSurface offscreen_surf = UNSLOT_EGL_NO_SURFACE;
+
+static int load_egl_syms(void) {
+	static int loaded;
+	if (loaded)
+		return loaded > 0;
+	void *lib = dlopen("libEGL.so.1", RTLD_LAZY | RTLD_NOLOAD);
+	if (!lib)
+		lib = dlopen("libEGL.so", RTLD_LAZY | RTLD_NOLOAD);
+	if (!lib)
+		lib = dlopen("libEGL.so.1", RTLD_LAZY);
+	if (!lib)
+		lib = dlopen("libEGL.so", RTLD_LAZY);
+	if (!lib) {
+		loaded = -1;
+		return 0;
+	}
+	p_eglGetCurrentDisplay = dlsym(lib, "eglGetCurrentDisplay");
+	p_eglGetCurrentContext = dlsym(lib, "eglGetCurrentContext");
+	p_eglGetCurrentSurface = dlsym(lib, "eglGetCurrentSurface");
+	p_eglQueryContext = dlsym(lib, "eglQueryContext");
+	p_eglQuerySurface = dlsym(lib, "eglQuerySurface");
+	p_eglChooseConfig = dlsym(lib, "eglChooseConfig");
+	p_eglCreatePbufferSurface = dlsym(lib, "eglCreatePbufferSurface");
+	p_eglMakeCurrent = dlsym(lib, "eglMakeCurrent");
+	p_eglDestroySurface = dlsym(lib, "eglDestroySurface");
+	if (p_eglGetCurrentDisplay && p_eglGetCurrentContext && p_eglGetCurrentSurface &&
+	    p_eglQueryContext && p_eglQuerySurface && p_eglChooseConfig &&
+	    p_eglCreatePbufferSurface && p_eglMakeCurrent && p_eglDestroySurface) {
+		loaded = 1;
+		return 1;
+	}
+	loaded = -1;
+	return 0;
+}
+
+static void attach_offscreen_pbuffer(SDL_Window *window) {
+	if (!load_egl_syms())
+		return;
+	EGLDisplay dpy = p_eglGetCurrentDisplay();
+	EGLContext ctx = p_eglGetCurrentContext();
+	EGLSurface cur = p_eglGetCurrentSurface(UNSLOT_EGL_DRAW);
+	if (dpy == UNSLOT_EGL_NO_DISPLAY || ctx == UNSLOT_EGL_NO_CONTEXT)
+		return;
+
+	int w = 0, h = 0;
+	SDL_GL_GetDrawableSize(window, &w, &h);
+	if ((w <= 0 || h <= 0) && cur != UNSLOT_EGL_NO_SURFACE) {
+		EGLint sw = 0, sh = 0;
+		p_eglQuerySurface(dpy, cur, UNSLOT_EGL_WIDTH, &sw);
+		p_eglQuerySurface(dpy, cur, UNSLOT_EGL_HEIGHT, &sh);
+		w = (int)sw;
+		h = (int)sh;
+	}
+	if (w <= 0 || h <= 0)
+		return;
+
+	EGLint cid = 0;
+	if (!p_eglQueryContext(dpy, ctx, UNSLOT_EGL_CONFIG_ID, &cid))
+		return;
+	EGLint cfg_attrs[] = { UNSLOT_EGL_CONFIG_ID, cid, UNSLOT_EGL_NONE };
+	EGLConfig cfg = NULL;
+	EGLint ncfg = 0;
+	if (!p_eglChooseConfig(dpy, cfg_attrs, &cfg, 1, &ncfg) || ncfg < 1)
+		return;
+
+	EGLint pb_attrs[] = { UNSLOT_EGL_WIDTH, w, UNSLOT_EGL_HEIGHT, h, UNSLOT_EGL_NONE };
+	EGLSurface pbuf = p_eglCreatePbufferSurface(dpy, cfg, pb_attrs);
+	if (pbuf == UNSLOT_EGL_NO_SURFACE) {
+		fprintf(stderr, "slot: ppsspp: eglCreatePbufferSurface %dx%d failed\n", w, h);
+		return;
+	}
+	if (!p_eglMakeCurrent(dpy, pbuf, pbuf, ctx)) {
+		fprintf(stderr, "slot: ppsspp: eglMakeCurrent(pbuffer) failed\n");
+		p_eglDestroySurface(dpy, pbuf);
+		return;
+	}
+	if (offscreen_surf != UNSLOT_EGL_NO_SURFACE && offscreen_dpy != UNSLOT_EGL_NO_DISPLAY)
+		p_eglDestroySurface(offscreen_dpy, offscreen_surf);
+	offscreen_dpy = dpy;
+	offscreen_surf = pbuf;
+	fprintf(stderr, "slot: ppsspp: offscreen pbuffer %dx%d active\n", w, h);
+}
+
+SDL_GLContext SDL_GL_CreateContext(SDL_Window *window) {
+	static SDL_GLContext (*real)(SDL_Window *);
+	if (!real)
+		real = dlsym(RTLD_NEXT, "SDL_GL_CreateContext");
+	SDL_GLContext ctx = real(window);
+	if (ctx && bridge_on())
+		attach_offscreen_pbuffer(window);
+	return ctx;
+}
+
+int SDL_GL_MakeCurrent(SDL_Window *window, SDL_GLContext context) {
+	static int (*real)(SDL_Window *, SDL_GLContext);
+	if (!real)
+		real = dlsym(RTLD_NEXT, "SDL_GL_MakeCurrent");
+	if (bridge_on() && offscreen_surf != UNSLOT_EGL_NO_SURFACE &&
+	    offscreen_dpy != UNSLOT_EGL_NO_DISPLAY) {
+		if (!context)
+			return p_eglMakeCurrent(offscreen_dpy, UNSLOT_EGL_NO_SURFACE,
+					UNSLOT_EGL_NO_SURFACE, UNSLOT_EGL_NO_CONTEXT) ? 0 : -1;
+		return p_eglMakeCurrent(offscreen_dpy, offscreen_surf, offscreen_surf,
+				(EGLContext)context) ? 0 : -1;
+	}
+	return real(window, context);
+}
+
+void SDL_GL_DeleteContext(SDL_GLContext context) {
+	static void (*real)(SDL_GLContext);
+	if (!real)
+		real = dlsym(RTLD_NEXT, "SDL_GL_DeleteContext");
+	if (offscreen_surf != UNSLOT_EGL_NO_SURFACE && offscreen_dpy != UNSLOT_EGL_NO_DISPLAY) {
+		p_eglMakeCurrent(offscreen_dpy, UNSLOT_EGL_NO_SURFACE, UNSLOT_EGL_NO_SURFACE,
+				UNSLOT_EGL_NO_CONTEXT);
+		p_eglDestroySurface(offscreen_dpy, offscreen_surf);
+		offscreen_surf = UNSLOT_EGL_NO_SURFACE;
+	}
+	real(context);
+}
 
 /* The audio device PPSSPP is handed when slot pulls its sound, which SDL never opened. */
 #define BRIDGE_AUDIO_DEV 0x7fff0000u

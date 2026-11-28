@@ -92,7 +92,11 @@ impl Video {
             true,
         );
         let rate = crate::audio::OUTPUT_HZ.to_string();
-        let sound = video.spawn(root, &["-vn", "-ac", "2", "-ar", &rate, "-f", "s16le"], false);
+        let sound = video.spawn(
+            root,
+            &["-vn", "-ac", "2", "-ar", &rate, "-f", "s16le"],
+            false,
+        );
         match pictures {
             Some((out, err)) => {
                 let s = video.shared.clone();
@@ -130,7 +134,12 @@ impl Video {
         info: bool,
     ) -> Option<(std::process::ChildStdout, Option<std::process::ChildStderr>)> {
         let mut child = Command::new(ffmpeg(root))
-            .args(["-nostdin", "-loglevel", if info { "info" } else { "error" }, "-ss"])
+            .args([
+                "-nostdin",
+                "-loglevel",
+                if info { "info" } else { "error" },
+                "-ss",
+            ])
             .arg(format!("{:.2}", self.from))
             .arg("-i")
             .arg(&self.path)

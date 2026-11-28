@@ -26,10 +26,6 @@ use slot_gfx::SharedGame;
 
 const PRESENT: Duration = Duration::from_nanos(16_666_667);
 
-/// How far a core's rate may sit from the panel's 60 Hz and still run one frame a present,
-/// leaving the audio resampler to soak up the difference.
-const NEAR_PANEL_HZ: f64 = 2.0;
-
 /// Fast-forward speeds are in quarters of a frame a present, so 6 runs at 1.5x.
 pub const FAST_QUARTERS: u32 = 24;
 
@@ -149,6 +145,9 @@ impl Cmd {
 
 struct Shared {
     input: AtomicU16,
+    /// Buttons pressed since the last frame ran, so a quick tap between two frames (e.g. on a
+    /// 30 FPS core) is still seen for at least one frame instead of vanishing before it is polled.
+    input_latched: AtomicU16,
     sticks: AtomicU64,
     /// The core's disc count in the high half and the disc in the drive in the low.
     disks: AtomicU64,
@@ -265,6 +264,7 @@ impl EmuHandle {
         let frames = Frames::new((GBA_W * GBA_H * 4) as usize);
         let shared = Arc::new(Shared {
             input: AtomicU16::new(0),
+            input_latched: AtomicU16::new(0),
             sticks: AtomicU64::new(0),
             disks: AtomicU64::new(0),
             speed: AtomicU8::new(Speed::Paused as u8),
@@ -442,6 +442,12 @@ impl EmuHandle {
 
     pub fn set_input(&self, mask: ButtonMask) {
         let before = self.shared.input.swap(mask.0, Ordering::Relaxed);
+        let rising = mask.0 & !before;
+        if rising != 0 {
+            self.shared
+                .input_latched
+                .fetch_or(rising, Ordering::Relaxed);
+        }
         crate::latency::applied(before, mask.0);
     }
 
@@ -715,6 +721,9 @@ impl Worker {
             rom.display(),
             crate::boot_time::ms()
         );
+        let preloaded_resume = resume
+            .as_ref()
+            .is_some_and(|r| core.preload_resume(&self.for_core(r.clone())));
         if let Err(e) = core.load(&rom) {
             eprintln!("slot: {e}");
             self.shared
@@ -733,7 +742,15 @@ impl Worker {
                 self.shared.sav_refused.store(true, Ordering::Release);
             }
         }
-        if let Some(resume) = resume {
+        if preloaded_resume {
+            if let Some(resume) = &resume {
+                eprintln!(
+                    "slot: emu: resume state preloaded ({} bytes) at {:.1} ms",
+                    resume.len(),
+                    crate::boot_time::ms()
+                );
+            }
+        } else if let Some(resume) = resume {
             eprintln!(
                 "slot: emu: resume state, {} bytes, at {:.1} ms",
                 resume.len(),
@@ -887,7 +904,6 @@ impl Worker {
                 gated = gate;
             }
             let lock = self.shared.driven.load(Ordering::Relaxed)
-                && period == PRESENT
                 && speed == Speed::Normal
                 && !rewinding
                 && transport.is_none();
@@ -906,9 +922,7 @@ impl Worker {
                 } else {
                     0
                 };
-            let input = ButtonMask(self.shared.input.load(Ordering::Relaxed));
-            ft::instant(ev::EMU_INPUT, i64::from(input.0));
-            crate::latency::emu_frame(input.0);
+            let live_input = self.shared.input.load(Ordering::Relaxed);
             core.set_sticks(0, unpack_sticks(self.shared.sticks.load(Ordering::Relaxed)));
             let mut span = 1u32;
             let ceiling = match speed {
@@ -925,6 +939,17 @@ impl Worker {
             if speed != Speed::Fast {
                 owed = 0;
             }
+            if speed == Speed::Paused || rewinding {
+                self.shared.input_latched.store(0, Ordering::Relaxed);
+            }
+            let latched = if !rewinding && ceiling > 0 {
+                self.shared.input_latched.swap(0, Ordering::Relaxed)
+            } else {
+                0
+            };
+            let first_input = ButtonMask(live_input | latched);
+            ft::instant(ev::EMU_INPUT, i64::from(first_input.0));
+            crate::latency::emu_frame(first_input.0);
             if rewinding {
                 let _s = ft::span(ev::EMU_REWIND, 0);
                 if let Some(state) = rewind.pop() {
@@ -956,9 +981,14 @@ impl Worker {
                 loop {
                     ran += 1;
                     let last = ran >= ceiling || cost.last(began.elapsed(), budget);
+                    let raw_input = if ran == 1 {
+                        first_input
+                    } else {
+                        ButtonMask(live_input)
+                    };
                     let input = match self.shared.turbo.load(Ordering::Relaxed) {
-                        true => input.turbo(turbo_frame),
-                        false => input,
+                        true => raw_input.turbo(turbo_frame),
+                        false => raw_input,
                     };
                     turbo_frame = turbo_frame.wrapping_add(1);
                     core.set_frame_skip(!last);
@@ -1210,7 +1240,7 @@ impl Worker {
             }
             self.frame_done(served);
             if lock {
-                let patience = if stalled { PRESENT } else { STALL };
+                let patience = if stalled { period } else { STALL };
                 let until = Instant::now() + patience;
                 loop {
                     ft::begin(ev::EMU_TICK_WAIT, served as i64);
@@ -1556,10 +1586,11 @@ fn shape_of(core: &dyn RetroCore) -> Shape {
     }
 }
 
-/// How long one emulated frame lasts. A core near the panel's rate runs at exactly the panel's
-/// rate so it can lock to its ticks; the rest, 50 Hz PAL or the 75 Hz WonderSwan, keep their own.
+/// How long one emulated frame lasts: always the core's exact content frame rate so cores never
+/// overclock to the panel's refresh rate or pitch-shift their audio, falling back to 60 Hz only
+/// when the core reports no rate.
 fn frame_period(fps: f64) -> Duration {
-    if fps <= 0.0 || (fps - 60.0).abs() <= NEAR_PANEL_HZ {
+    if fps <= 0.0 || !fps.is_finite() {
         return PRESENT;
     }
     Duration::from_secs_f64(1.0 / fps)
@@ -1802,12 +1833,13 @@ mod tests {
     }
 
     #[test]
-    fn a_core_near_sixty_hertz_runs_at_the_panels_rate() {
-        for fps in [59.7275, 60.0988, 59.922, 59.94, 60.25] {
-            assert_eq!(
-                frame_period(fps),
-                PRESENT,
-                "{fps} fps did not lock to the panel"
+    fn every_core_runs_at_its_exact_content_frame_rate() {
+        for fps in [59.7275, 60.0988, 59.922, 59.94, 60.25, 50.0, 75.47] {
+            let period = frame_period(fps);
+            assert!(
+                (period.as_secs_f64() - 1.0 / fps).abs() < 1e-9,
+                "{fps} fps ran at {:?} instead of exact content rate",
+                period
             );
         }
         assert_eq!(
@@ -1818,29 +1850,20 @@ mod tests {
     }
 
     #[test]
-    fn a_pal_or_75_hz_core_keeps_its_own_clock() {
-        assert_eq!(frame_period(50.0), Duration::from_millis(20));
-        let wonderswan = frame_period(75.47);
-        assert!((wonderswan.as_secs_f64() - 1.0 / 75.47).abs() < 1e-9);
-    }
-
-    #[test]
-    fn audio_is_stretched_only_for_a_core_run_at_the_panels_rate() {
-        let gba = AvInfo {
-            fps: 59.7275,
-            sample_rate: 32_768.0,
-        };
-        let stretched = core_hz(gba, frame_period(gba.fps));
-        assert!(
-            (stretched - 32_768.0 * (1.0 / 59.7275) / PRESENT.as_secs_f64()).abs() < 1e-6,
-            "a 59.73 fps core run at 60 must have its audio read that much faster"
-        );
-
-        let pal = AvInfo {
-            fps: 50.0,
-            sample_rate: 44_100.0,
-        };
-        assert!((core_hz(pal, frame_period(pal.fps)) - 44_100.0).abs() < 1e-6);
+    fn audio_is_never_stretched_away_from_exact_content_rate() {
+        for (fps, sample_rate) in [
+            (59.7275, 32_768.0),
+            (60.0988, 44_100.0),
+            (59.1856, 44_100.0),
+            (50.0, 44_100.0),
+            (75.47, 44_100.0),
+        ] {
+            let av = AvInfo { fps, sample_rate };
+            assert!(
+                (core_hz(av, frame_period(av.fps)) - sample_rate).abs() < 1e-3,
+                "audio rate was shifted for {fps} fps / {sample_rate} Hz"
+            );
+        }
     }
 
     #[test]
@@ -2070,5 +2093,71 @@ mod tests {
         assert_eq!(link.take_inbound().as_deref(), Some(&b"one"[..]));
         assert_eq!(link.take_inbound().as_deref(), Some(&b"two"[..]));
         assert_eq!(link.take_inbound(), None);
+    }
+
+    #[test]
+    fn brief_button_tap_between_frames_is_latched_for_one_frame() {
+        struct RecordCore {
+            seen: Arc<Mutex<Vec<ButtonMask>>>,
+        }
+        impl RetroCore for RecordCore {
+            fn load(&mut self, _rom: &Path) -> Result<(), CoreError> {
+                Ok(())
+            }
+            fn run_frame(&mut self, input: ButtonMask) {
+                self.seen.lock().unwrap().push(input);
+            }
+            fn video_xrgb8888(&self) -> &[u8] {
+                &[0; (GBA_W * GBA_H * 4) as usize]
+            }
+            fn take_audio(&mut self) -> Vec<i16> {
+                Vec::new()
+            }
+            fn serialize(&mut self) -> Result<Vec<u8>, CoreError> {
+                Ok(Vec::new())
+            }
+            fn unserialize(&mut self, _data: &[u8]) -> Result<(), CoreError> {
+                Ok(())
+            }
+            fn save_ram(&self) -> Option<Vec<u8>> {
+                None
+            }
+            fn load_save_ram(&mut self, _data: &[u8]) -> Result<(), CoreError> {
+                Ok(())
+            }
+            fn av_info(&self) -> AvInfo {
+                AvInfo {
+                    fps: 30.0,
+                    sample_rate: 44_100.0,
+                }
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let emu = EmuHandle::spawn(
+            Box::new(RecordCore { seen: seen.clone() }),
+            PathBuf::from("test.p8"),
+            Arc::new(Ring::new(1024)),
+            None,
+            None,
+        );
+        let until = Instant::now() + Duration::from_secs(2);
+        while emu.state() == CoreState::Loading && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        emu.set_driven(true);
+        emu.set_speed(Speed::Normal);
+        while !emu.locked() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        // Tap A (press and release) before the next frame runs.
+        emu.set_input(ButtonMask(ButtonMask::A));
+        emu.set_input(ButtonMask(0));
+        emu.tick(PRESENT);
+        assert!(emu.wait_frame(Duration::from_secs(1)));
+        emu.tick(PRESENT);
+        assert!(emu.wait_frame(Duration::from_secs(1)));
+        drop(emu);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.as_slice(), &[ButtonMask(ButtonMask::A), ButtonMask(0)]);
     }
 }

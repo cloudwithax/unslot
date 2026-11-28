@@ -745,6 +745,8 @@ pub struct App {
     /// off during it, for its tracker to hear.
     hardcore_game: HardcoreGame,
     woke_on_press: bool,
+    /// Ignore stray power key taps right after waking from hardware S3 suspend.
+    suppress_power_until: Millis,
     autosave_at: Millis,
     pending_save: Option<std::thread::JoinHandle<()>>,
     card_writes: Arc<crate::card_log::CardWrites>,
@@ -1052,6 +1054,7 @@ impl App {
             art_asleep: false,
             hardcore_game: HardcoreGame::Off,
             woke_on_press: false,
+            suppress_power_until: 0,
             autosave_at: AUTOSAVE_MS,
             pending_save: None,
             card_writes,
@@ -1179,8 +1182,19 @@ impl App {
         if let Some((at, i)) = app.remembered_seat() {
             app.shelf_at = at;
             app.shelves[at].1.select(i);
-        } else if !app.shelves[RECENTS_AT].1.carts.is_empty() {
+        } else if app.shelf_visible(RECENTS_AT) {
             app.shelf_at = RECENTS_AT;
+        } else if app.shelves[app.shelf_at]
+            .0
+            .platform()
+            .is_some_and(|p| app.state.is_shelf_hidden(p))
+        {
+            if let Some(at) = (0..app.shelves.len())
+                .find(|&at| app.shelf_visible(at) && app.shelves[at].0 != Rack::Of(Platform::Apps))
+                .or_else(|| (0..app.shelves.len()).find(|&at| app.shelf_visible(at)))
+            {
+                app.shelf_at = at;
+            }
         }
         if app.state.clock_set {
             app.start();
@@ -1416,17 +1430,30 @@ impl App {
         SLOT_NAME_ALPHA * ease(level)
     }
 
+    fn shelf_visible(&self, at: usize) -> bool {
+        let Some((rack, shelf)) = self.shelves.get(at) else {
+            return false;
+        };
+        !shelf.carts.is_empty()
+            && rack
+                .platform()
+                .is_none_or(|p| !self.state.is_shelf_hidden(p))
+    }
+
     fn next_shelf(&self, by: i32) -> Option<usize> {
         let n = self.shelves.len() as i32;
         (1..n)
             .map(|step| (self.shelf_at as i32 + by * step).rem_euclid(n) as usize)
-            .find(|at| !self.shelves[*at].1.carts.is_empty())
+            .find(|at| self.shelf_visible(*at))
     }
 
     fn remembered_seat(&self) -> Option<(usize, usize)> {
         let key = self.state.shelf.as_deref()?;
         let cart = self.state.shelf_cart.as_ref()?;
         let at = self.shelves.iter().position(|(r, _)| r.key() == key)?;
+        if !self.shelf_visible(at) {
+            return None;
+        }
         let i = self.shelves[at]
             .1
             .carts
@@ -1712,6 +1739,11 @@ impl App {
                 WallpaperTint::Medium => QuickValue::Medium,
                 WallpaperTint::High => QuickValue::High,
             }),
+            QuickRow::ScreenOf(p) => Some(if self.state.is_shelf_hidden(p) {
+                QuickValue::Hide
+            } else {
+                QuickValue::Show
+            }),
             QuickRow::DateTime
             | QuickRow::Theme
             | QuickRow::About
@@ -1726,7 +1758,6 @@ impl App {
             | QuickRow::PlayScreen
             | QuickRow::PlayGameplay
             | QuickRow::Palette
-            | QuickRow::ScreenOf(_)
             | QuickRow::BezelOf(_)
             | QuickRow::Network
             | QuickRow::Online
@@ -2290,7 +2321,9 @@ impl App {
         // A platform with nothing past None to pick has no Bezel row. One whose page is hidden
         // is not asked, which keeps the folders from being listed for every system.
         for platform in Platform::ALL {
-            if hidden.contains(&QuickRow::ScreenOf(platform)) {
+            if matches!(platform, Platform::Ports | Platform::Apps)
+                || hidden.contains(&QuickRow::ScreenOf(platform))
+            {
                 continue;
             }
             if !self.shader_has_params(platform) {
@@ -2485,6 +2518,9 @@ impl App {
     }
 
     pub fn shelf_platform_name(&self) -> Option<&'static str> {
+        if !self.shelf_visible(self.shelf_at) {
+            return None;
+        }
         self.next_shelf(1)?;
         Some(self.shelves[self.shelf_at].0.name())
     }
@@ -3750,6 +3786,9 @@ impl App {
     }
 
     pub fn selected_stem(&self) -> Option<&str> {
+        if !self.shelf_visible(self.shelf_at) {
+            return None;
+        }
         self.shelf()
             .carts
             .get(self.shelf().index)
@@ -3925,6 +3964,9 @@ impl App {
             Action::LidClose | Action::LidOpen if self.external_display => return,
             Action::LidClose => return self.doze(),
             Action::LidOpen => return self.wake(),
+            Action::PowerPress | Action::PowerTap if self.now() < self.suppress_power_until => {
+                return;
+            }
             Action::PowerPress => {
                 if self.link_active() {
                     self.end_link();
@@ -4948,11 +4990,11 @@ impl App {
     }
 
     fn start_play_session(&mut self, stem: &str) {
-        let Some(cart) = self
-            .seated_cart()
-            .filter(|c| c.stem == stem)
-            .or_else(|| self.all_carts.iter().find(|c| c.stem == stem && c.platform == self.platform))
-        else {
+        let Some(cart) = self.seated_cart().filter(|c| c.stem == stem).or_else(|| {
+            self.all_carts
+                .iter()
+                .find(|c| c.stem == stem && c.platform == self.platform)
+        }) else {
             return;
         };
         if matches!(cart.platform, Platform::Apps) {
@@ -5193,12 +5235,18 @@ impl App {
                 return;
             }
             RetroshelfPage::Main { cursor } => match (cursor, action) {
-                (_, Action::GbaDown(Btn::Up)) => {
-                    (RetroshelfPage::Main { cursor: (cursor + 2) % 3 }, None)
-                }
-                (_, Action::GbaDown(Btn::Down)) => {
-                    (RetroshelfPage::Main { cursor: (cursor + 1) % 3 }, None)
-                }
+                (_, Action::GbaDown(Btn::Up)) => (
+                    RetroshelfPage::Main {
+                        cursor: (cursor + 2) % 3,
+                    },
+                    None,
+                ),
+                (_, Action::GbaDown(Btn::Down)) => (
+                    RetroshelfPage::Main {
+                        cursor: (cursor + 1) % 3,
+                    },
+                    None,
+                ),
                 (0, Action::GbaDown(Btn::A)) if self.retroshelf_conf.linked() => {
                     let note = match self.root.as_deref().map(crate::retroshelf::sign_out) {
                         Some(Ok(())) => "Unlinked from RetroShelf".to_string(),
@@ -5325,7 +5373,10 @@ impl App {
         let v = &self.retroshelf_view;
         let (status, url) = match &v.pairing {
             Some(p) => (
-                format!("Scan to link, or enter {} at retroshelf.org/link", p.user_code),
+                format!(
+                    "Scan to link, or enter {} at retroshelf.org/link",
+                    p.user_code
+                ),
                 p.url.clone(),
             ),
             None => (
@@ -6351,18 +6402,16 @@ impl App {
             Phase::Romm { page, note } => {
                 Some(PageModel::List(self.romm_page(*page, note.as_deref())))
             }
-            Phase::Playtime { cursor, sort } => {
-                Some(PageModel::App(slot_ui::AppPage::Playtime(
-                    self.playtime_page(*cursor, *sort),
-                )))
-            }
+            Phase::Playtime { cursor, sort } => Some(PageModel::App(slot_ui::AppPage::Playtime(
+                self.playtime_page(*cursor, *sort),
+            ))),
             Phase::Retroshelf {
                 page: RetroshelfPage::SignIn,
                 ..
             } => Some(PageModel::Qr(self.retroshelf_sign_in_page())),
-            Phase::Retroshelf { page, note } => {
-                Some(PageModel::List(self.retroshelf_page(*page, note.as_deref())))
-            }
+            Phase::Retroshelf { page, note } => Some(PageModel::List(
+                self.retroshelf_page(*page, note.as_deref()),
+            )),
             Phase::TailscaleLogin => match &self.services_view.tailnet {
                 Tailnet::SignIn(url) => Some(PageModel::Qr(QrPage {
                     title: "Tailscale".into(),
@@ -6491,6 +6540,12 @@ impl App {
             Action::GbaDown(Btn::Left) => return self.change_setting(row, false),
             Action::GbaDown(Btn::Right) => return self.change_setting(row, true),
             Action::GbaDown(Btn::A) => return self.open_quick_row(row),
+            Action::GbaDown(Btn::X) => {
+                if let QuickRow::ScreenOf(platform) = row {
+                    self.toggle_shelf_hidden(platform);
+                }
+                return;
+            }
             Action::GbaDown(Btn::B) | Action::QuickMenu => {
                 self.phase = match row.parent() {
                     Some(row) => Phase::QuickMenu { row },
@@ -6501,6 +6556,32 @@ impl App {
             _ => return,
         };
         self.phase = Phase::QuickMenu { row };
+    }
+
+    fn toggle_shelf_hidden(&mut self, platform: Platform) {
+        let hidden = !self.state.is_shelf_hidden(platform);
+        self.state.set_shelf_hidden(platform, hidden);
+        if hidden && !self.shelf_visible(self.shelf_at) {
+            if let Some(at) = self.next_shelf(1) {
+                self.shelf_at = at;
+                self.shelf_platform = slot_ui::Printed::default();
+                self.slot_letter = None;
+                self.slot_name = SlotName::Waiting;
+            }
+        } else if !hidden && !self.shelf_visible(self.shelf_at) {
+            if let Some(at) = self
+                .shelves
+                .iter()
+                .position(|(r, _)| *r == Rack::Of(platform))
+                .filter(|&at| self.shelf_visible(at))
+            {
+                self.shelf_at = at;
+                self.shelf_platform = slot_ui::Printed::default();
+                self.slot_letter = None;
+                self.slot_name = SlotName::Waiting;
+            }
+        }
+        self.persist();
     }
 
     fn in_game_menu_input(&mut self, row: QuickRow, action: Action) {
@@ -7925,7 +8006,7 @@ impl App {
         }
         self.restock_recents();
         self.restock_favorites();
-        if self.shelf().carts.is_empty() {
+        if !self.shelf_visible(self.shelf_at) {
             if let Some(at) = self.next_shelf(1) {
                 self.shelf_at = at;
             }
@@ -8453,7 +8534,7 @@ impl App {
         }
         let old = self.shelves[at].1.restock(carts);
         self.orphaned.extend(old);
-        let empty = self.shelves[at].1.carts.is_empty();
+        let empty = !self.shelf_visible(at);
         if self.shelf_at == at && empty {
             self.shelf_at = self.next_shelf(1).unwrap_or(0);
         }
@@ -8973,6 +9054,9 @@ impl App {
                         );
                         draw_empty_slot(self.canvas(), self.slot_faces, out);
                     }
+                    _ if !self.shelf_visible(self.shelf_at) => {
+                        draw_empty_slot(self.canvas(), self.slot_faces, out);
+                    }
                     _ => {
                         self.shelf()
                             .draw(self.canvas(), self.shelf_shake(), self.slot_faces, out);
@@ -9415,7 +9499,7 @@ impl App {
         let Some(faces) = &self.quick_menu_faces else {
             return;
         };
-        let [back, .., restart] = match self.light() {
+        let [back, _, _, _, restart, _, _] = match self.light() {
             true => faces.legend_light,
             false => faces.legend,
         };
@@ -9428,7 +9512,7 @@ impl App {
         let Some(faces) = &self.quick_menu_faces else {
             return;
         };
-        let [back, change, open, resume, _] = match self.light() {
+        let [back, change, open, resume, _, hide, show] = match self.light() {
             true => faces.legend_light,
             false => faces.legend,
         };
@@ -9436,8 +9520,33 @@ impl App {
             true => resume,
             false => back,
         };
-        let right = if row.opens() { open } else { change };
         self.draw_side_legend(left, false, y, out);
+        if let QuickRow::ScreenOf(platform) = row {
+            let toggle = match self.state.is_shelf_hidden(platform) {
+                true => show,
+                false => hide,
+            };
+            if row.opens() {
+                // Keep both actions on the right wing so the cartridge bay in the middle stays clear.
+                let open_seen = open.1.saturating_sub(HINT_EDGE) as f32;
+                let toggle_seen = toggle.1.saturating_sub(HINT_EDGE) as f32;
+                let open_x = (self.canvas().w - LINK_LEGEND_EDGE - open_seen).round();
+                let toggle_x = (open_x - toggle_seen - 4.0).round();
+                out.push(Draw::Tex {
+                    x: toggle_x,
+                    y,
+                    w: toggle.1 as f32,
+                    h: MOUTH_H,
+                    tex: toggle.0,
+                    alpha: 1.0,
+                });
+                self.draw_side_legend(open, true, y, out);
+            } else {
+                self.draw_side_legend(toggle, true, y, out);
+            }
+            return;
+        }
+        let right = if row.opens() { open } else { change };
         self.draw_side_legend(right, true, y, out);
     }
 
@@ -9827,7 +9936,7 @@ impl App {
     }
 
     pub fn browsed_rom(&self) -> Option<&std::path::Path> {
-        if !self.on_shelf() {
+        if !self.on_shelf() || !self.shelf_visible(self.shelf_at) {
             return None;
         }
         let shelf = self.shelf();
@@ -9835,7 +9944,7 @@ impl App {
     }
 
     fn insert(&mut self, clean: bool) {
-        if !self.on_shelf() {
+        if !self.on_shelf() || !self.shelf_visible(self.shelf_at) {
             return;
         }
         let at = self.shelf().index;
@@ -10043,6 +10152,57 @@ impl App {
         self.begin_power_off();
     }
 
+    /// Whether the device can enter hardware S3 suspend right now (not scraping art or linking).
+    pub fn can_deep_sleep(&self) -> bool {
+        matches!(self.phase, Phase::Doze { .. })
+            && !self.shutting_down()
+            && !self.link_active()
+            && !self.finding_art_asleep()
+    }
+
+    /// How long to stay in S3 before an RTC wakealarm triggers auto power-off, or `None` for Never.
+    pub fn suspend_timeout(&self) -> Option<std::time::Duration> {
+        if self.state.power_off_after == 0 {
+            None
+        } else {
+            Some(std::time::Duration::from_secs(
+                u64::from(self.state.power_off_after) * 60,
+            ))
+        }
+    }
+
+    /// Enters hardware S3 Suspend-to-RAM through the platform, returning `(reason, elapsed_secs)`.
+    pub fn suspend_to_ram(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+    ) -> (slot_power::WakeReason, u64) {
+        match &mut self.power {
+            Some(power) => power.suspend(timeout),
+            None => (slot_power::WakeReason::Unsupported, 0),
+        }
+    }
+
+    /// Wakes cleanly after S3 returned from a power-button press, suppressing any buffered wake
+    /// press/tap for a short grace window so it cannot immediately send the device back to sleep.
+    pub fn wake_from_suspend(&mut self) {
+        self.suppress_power_until = self.now().saturating_add(600);
+        self.woke_on_press = false;
+        self.wake();
+    }
+
+    /// Persists resume state, saves, shelf position and playtime after an RTC wakealarm fires in
+    /// S3, keeping the backlight off so the screen never flashes before powering off.
+    pub fn prepare_suspend_poweroff(&mut self) {
+        if let Some(power) = &mut self.power {
+            power.on_close();
+        }
+        self.finish_play_session();
+        self.remember_shelf();
+        self.flush_resume();
+        self.settle_saves();
+        self.set_led(LedState::Off);
+    }
+
     fn power_press(&mut self) {
         if std::mem::take(&mut self.woke_on_press) {
             return;
@@ -10235,9 +10395,12 @@ impl App {
         self.play_held = None;
     }
 
-    /// Looks for `query` on every system's shelf and shows what it found.
+    /// Looks for `query` on every visible system's shelf and shows what it found.
     fn search_for(&mut self, query: &str) {
-        let carts: Vec<&Cart> = self.carts().collect();
+        let carts: Vec<&Cart> = self
+            .carts()
+            .filter(|c| !self.state.is_shelf_hidden(c.platform))
+            .collect();
         let names: Vec<String> = carts.iter().map(|c| slot_ui::label_text(c)).collect();
         let found = crate::search::matches(names.iter().map(String::as_str), query)
             .into_iter()

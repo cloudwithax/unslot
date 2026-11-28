@@ -78,6 +78,10 @@ impl Power {
     pub fn set_clock(&mut self, secs: i64) {
         self.platform.set_clock(secs);
     }
+
+    pub fn suspend(&mut self, timeout: Option<Duration>) -> (crate::WakeReason, u64) {
+        self.platform.suspend(timeout)
+    }
 }
 
 impl LidPolicy for Power {

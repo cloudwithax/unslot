@@ -608,7 +608,10 @@ impl Shelf {
                     alpha: alpha * dim,
                 },
                 None => {
-                    let c = label_colour(&label_text(cart));
+                    let c = match cart.platform {
+                        Platform::Apps => crate::media::Media::Nes.colour(),
+                        _ => label_colour(&label_text(cart)),
+                    };
                     Draw::Rect {
                         x,
                         y,

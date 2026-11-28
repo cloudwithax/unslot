@@ -520,6 +520,8 @@ pub struct SlotState {
     /// Each system's Stretch: the Game Boy family's in the Game Boy canvas, the others' whether
     /// the picture keeps its own shape or fills the screen.
     pub stretches: [Stretch; Platform::COUNT],
+    /// Whether each platform's shelf is hidden from the carousel.
+    pub hidden_shelves: [bool; Platform::COUNT],
 }
 
 /// How each frame is blended with the ones before it, as the handhelds' slow LCDs did.
@@ -589,6 +591,14 @@ impl SlotState {
 
     pub fn screen_mut(&mut self, platform: Platform) -> &mut Screen {
         &mut self.screens[platform.index()]
+    }
+
+    pub fn is_shelf_hidden(&self, platform: Platform) -> bool {
+        self.hidden_shelves[platform.index()]
+    }
+
+    pub fn set_shelf_hidden(&mut self, platform: Platform, hidden: bool) {
+        self.hidden_shelves[platform.index()] = hidden;
     }
 
     pub fn played(&mut self, platform: Platform, stem: &str) {
@@ -724,6 +734,7 @@ impl Default for SlotState {
             scale_gb: Scale::default(),
             scale_gbc: Scale::default(),
             stretches: [Stretch::default(); Platform::COUNT],
+            hidden_shelves: [false; Platform::COUNT],
         }
     }
 }
@@ -818,6 +829,9 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         ));
         if let Some(file) = &screen.custom_shader {
             text.push_str(&format!("shader_file_{key}={file}\n"));
+        }
+        if s.hidden_shelves[p.index()] {
+            text.push_str(&format!("hide_shelf_{key}=1\n"));
         }
     }
     text.push_str(&format!("wallpaper_tint={}\n", s.wallpaper_tint.key()));
@@ -928,6 +942,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut scale_gb = None;
     let mut scale_gbc = None;
     let mut stretches: [Option<Stretch>; Platform::COUNT] = [None; Platform::COUNT];
+    let mut hidden_shelves: [Option<bool>; Platform::COUNT] = [None; Platform::COUNT];
     for line in text.lines().filter(|l| !l.is_empty()) {
         let (key, value) = match line.split_once('=') {
             Some(kv) => kv,
@@ -945,6 +960,7 @@ fn parse(text: &str) -> Option<SlotState> {
                     custom_shaders[p.index()] = Some(value.to_string()).filter(|v| !v.is_empty())
                 }
                 "stretch" => stretches[p.index()] = Stretch::parse(value),
+                "hide_shelf" => hidden_shelves[p.index()] = flag(value),
                 _ => bezels[p.index()] = Some(BezelPick::parse(value)),
             }
             continue;
@@ -1097,6 +1113,9 @@ fn parse(text: &str) -> Option<SlotState> {
         scale_gb: scale_gb.unwrap_or(fallback.scale_gb),
         scale_gbc: scale_gbc.unwrap_or(fallback.scale_gbc),
         stretches: std::array::from_fn(|i| stretches[i].unwrap_or(fallback.stretches[i])),
+        hidden_shelves: std::array::from_fn(|i| {
+            hidden_shelves[i].unwrap_or(fallback.hidden_shelves[i])
+        }),
     })
 }
 
@@ -1109,6 +1128,7 @@ fn per_platform(key: &str) -> Option<(&str, Platform)> {
         "bezel",
         "blending",
         "stretch",
+        "hide_shelf",
     ]
     .into_iter()
     .find_map(|setting| {

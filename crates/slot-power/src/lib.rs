@@ -2,6 +2,7 @@ mod device;
 mod motor;
 mod power;
 mod sim;
+pub mod suspend;
 
 pub use device::{
     has_bit, kernel_lines, motor_change, read_only, read_only_in, record_first_frame, rumble_node,
@@ -10,6 +11,7 @@ pub use device::{
 pub use motor::Motor;
 pub use power::Power;
 pub use sim::SimPlatform;
+pub use suspend::{suspend_to_ram, WakeReason};
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -67,6 +69,11 @@ pub trait Platform: Send {
 
     fn kernel_lines(&self) -> Vec<String> {
         Vec::new()
+    }
+
+    /// Enters hardware Suspend-to-RAM (S3), returning `(reason, elapsed_rtc_secs)`.
+    fn suspend(&mut self, _timeout: Option<Duration>) -> (WakeReason, u64) {
+        (WakeReason::Unsupported, 0)
     }
 }
 

@@ -299,7 +299,9 @@ fn read_meta(
                 continue;
             }
             match tag.std_key {
-                Some(StandardTagKey::TrackTitle) if title.is_none() => title = Some(val.to_string()),
+                Some(StandardTagKey::TrackTitle) if title.is_none() => {
+                    title = Some(val.to_string())
+                }
                 Some(StandardTagKey::Artist) if artist.is_none() => artist = Some(val.to_string()),
                 Some(StandardTagKey::AlbumArtist) if album_artist.is_none() => {
                     album_artist = Some(val.to_string())

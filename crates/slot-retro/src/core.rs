@@ -183,6 +183,12 @@ pub trait RetroCore: Send {
         ))
     }
     fn unserialize(&mut self, data: &[u8]) -> Result<(), CoreError>;
+    /// Optional hook called before `load()`: a standalone emulator that accepts a savestate on its
+    /// command line can stage `data` (e.g. in RAM tmpfs) and boot straight into it, returning
+    /// `true` so `unserialize` does not need to run again after boot.
+    fn preload_resume(&mut self, _data: &[u8]) -> bool {
+        false
+    }
     fn save_ram(&self) -> Option<Vec<u8>>;
     fn load_save_ram(&mut self, data: &[u8]) -> Result<(), CoreError>;
     fn av_info(&self) -> AvInfo;

@@ -46,6 +46,24 @@ fn footer_legends_keep_the_hint_on_the_inner_side() {
         hint_is_beside(&menu[4], false),
         "Restart sits to the left of X"
     );
+    assert!(
+        hint_is_beside(&menu[5], false),
+        "Hide sits to the left of X"
+    );
+    assert!(
+        hint_is_beside(&menu[6], false),
+        "Show sits to the left of X"
+    );
+    // Hide/Show paired beside Open must clear the centre cartridge bay (x = 208..432 on 640px).
+    let open_w = menu[2].w.saturating_sub(HINT_EDGE);
+    for toggle in [&menu[5], &menu[6]] {
+        let toggle_w = toggle.w.saturating_sub(HINT_EDGE);
+        let left_edge = OUT_W as i32 - open_w as i32 - toggle_w as i32 - 4;
+        assert!(
+            left_edge >= 432,
+            "toggle ({toggle_w}px) + open ({open_w}px) intrude into centre bay: left_edge={left_edge}"
+        );
+    }
     let link = link_button_legends([0xff, 0xff, 0xff]);
     assert_eq!(link.len(), 7);
     assert!(link.iter().all(|f| f.h == MOUTH_H as u32));
